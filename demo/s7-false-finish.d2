@@ -1,0 +1,83 @@
+caption: {
+  shape: text
+  near: top-center
+  style.font-size: 26
+  label: "S7 · The False Finish"
+}
+
+dashboard: {
+  label: "Dashboard · unfinished"
+  metrics_card: {
+    label: "metrics card · unfinished"
+    fetch_metrics: {
+      label: "fetch metrics\ndone"
+      style.fill: "#d1fae5"
+      style.stroke: "#059669"
+    }
+    improve_visual: {
+      label: "improve visual · unfinished"
+      colors: {
+        label: "colors\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      design_tokens: {
+        label: "design tokens\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      loading_state: {
+        label: "loading state\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      font_task: {
+        label: "font\nunstarted"
+        style.fill: "#f3f4f6"
+        style.stroke: "#9ca3af"
+      }
+    }
+  }
+  table: {
+    label: "Table · unstarted"
+    style.fill: "#f3f4f6"
+    style.stroke: "#9ca3af"
+  }
+  filters: {
+    label: "Filters · unstarted"
+    style.fill: "#f3f4f6"
+    style.stroke: "#9ca3af"
+  }
+}
+
+steps: {
+  1: {
+    caption.label: "EVENT · START font"
+    dashboard.metrics_card.improve_visual.font_task.label: "font\nin_progress"
+    dashboard.metrics_card.improve_visual.font_task.style.fill: "#fef3c7"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke: "#c81e1e"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-width: 5
+  }
+  2: {
+    caption.label: "Design system already covers it — this task is unnecessary.\nEVENT · CANCEL font. Recorded, not forgotten."
+    dashboard.metrics_card.improve_visual.font_task.label: "font\ncancelled"
+    dashboard.metrics_card.improve_visual.font_task.style.fill: "#f3f4f6"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke: "#9ca3af"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-width: 2
+    dashboard.metrics_card.improve_visual.font_task.style.italic: true
+  }
+  3: {
+    caption.label: "EVENT · START font -> no transition.\nX Cancelled is terminal."
+    dashboard.metrics_card.improve_visual.font_task.style.fill: "#fee2e2"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke: "#c81e1e"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-dash: 6
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-width: 5
+  }
+  4: {
+    caption.label: "Cancelled counts toward drain: done-or-cancelled."
+    dashboard.metrics_card.improve_visual.font_task.style.fill: "#f3f4f6"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke: "#9ca3af"
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-dash: null
+    dashboard.metrics_card.improve_visual.font_task.style.stroke-width: 2
+  }
+}

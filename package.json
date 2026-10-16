@@ -1,0 +1,1 @@
+{"dependencies":{"xstate":"^5.33.2"},"description":"Deterministic task-tree tracking MVP — executable spec (XState charts), scenario sources, demo","name":"dashboard-imdp-tracking","scripts":{"verify":"node charts/verify-node-lifecycle.mjs && node charts/verify-claim-lifecycle.mjs"},"type":"module","version":"1.0.0"}

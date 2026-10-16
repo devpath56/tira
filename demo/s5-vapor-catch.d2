@@ -1,0 +1,103 @@
+caption: {
+  shape: text
+  near: top-center
+  style.font-size: 26
+  label: "S5 · The Vapor Catch"
+}
+
+claim_7: {
+  label: "claim #7: pagination\ndeclared"
+  style.fill: "#f3f4f6"
+  style.stroke: "#9ca3af"
+}
+
+dashboard: {
+  label: "Dashboard · unfinished"
+  metrics_card: {
+    label: "metrics card · unfinished"
+    fetch_metrics: {
+      label: "fetch metrics\ndone"
+      style.fill: "#d1fae5"
+      style.stroke: "#059669"
+    }
+    improve_visual: {
+      label: "improve visual · drained"
+      style.stroke: "#059669"
+      style.stroke-width: 3
+      colors: {
+        label: "colors\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      design_tokens: {
+        label: "design tokens\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      loading_state: {
+        label: "loading state\ndone"
+        style.fill: "#d1fae5"
+        style.stroke: "#059669"
+      }
+      font_task: {
+        label: "font\ncancelled"
+        style.fill: "#f3f4f6"
+        style.stroke: "#9ca3af"
+        style.italic: true
+      }
+    }
+  }
+  table: {
+    label: "Table\nunstarted"
+    style.fill: "#f3f4f6"
+    style.stroke: "#c81e1e"
+    style.stroke-width: 5
+  }
+  filters: {
+    label: "Filters · unstarted"
+    style.fill: "#f3f4f6"
+    style.stroke: "#9ca3af"
+  }
+}
+
+steps: {
+  1: {
+    caption.label: "11pm: \"Table needs server-side pagination.\"\nEVENT · DECLARE_VAPOR claim #7 (declarer: you, 23:04)"
+  }
+  2: {
+    caption.label: "The sweep drafts the file record.\nNo driving needed — the pipeline moves itself."
+    claim_7.label: "claim #7: pagination\nfile_pending · awaiting your approval"
+    claim_7.style.fill: "#fef3c7"
+    claim_7.style.stroke: "#d97706"
+  }
+  3: {
+    caption.label: "You approve the draft. One tap.\nEVENT · APPROVE_FILE claim #7 → filed"
+    claim_7.label: "claim #7: pagination\nfiled"
+    claim_7.style.fill: "#dbeafe"
+    claim_7.style.stroke: "#2563eb"
+  }
+  4: {
+    caption.label: "The sweep proposes: parent = table, kind = task.\nAwaiting your approval."
+    claim_7.label: "claim #7: pagination\nnode_pending · proposed parent: table"
+    claim_7.style.fill: "#fef3c7"
+    claim_7.style.stroke: "#d97706"
+  }
+  5: {
+    caption.label: "You approve the placement.\nEVENT · APPROVE_NODE → node pagination (unstarted) under table"
+    claim_7.label: "claim #7: pagination\nmaterialized"
+    claim_7.style.fill: "#d1fae5"
+    claim_7.style.stroke: "#059669"
+    dashboard.table.pagination: {
+      label: "pagination\nunstarted"
+      style.fill: "#f3f4f6"
+      style.stroke: "#9ca3af"
+    }
+  }
+  6: {
+    caption.label: "Replay derives the cursor: pagination.\nYou approved twice. The system drove."
+    dashboard.table.pagination.style.stroke: "#c81e1e"
+    dashboard.table.pagination.style.stroke-width: 5
+    dashboard.table.style.stroke: "#9ca3af"
+    dashboard.table.style.stroke-width: 1
+  }
+}
