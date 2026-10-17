@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 30 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 36 known bugs and fails unless the suite catches every one.
 CI runs both, and also re-extracts `charts/*.json` and fails on any difference (no hand edits).
 No runtime dependencies: `xstate` is a dev dependency, used only by the chart verifiers.
 
@@ -79,10 +79,32 @@ No runtime dependencies: `xstate` is a dev dependency, used only by the chart ve
 | `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite implementation: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision` |
 | `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (parallel regions), cross-region invariant, versioned identity, guards that see fold state + actor |
 | `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates, rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path |
+| `src/cli/`, `scripts/tira.ts` | `tira` CLI for manual testing (below) |
 | `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
 
 Not in Track A: tree/DAG semantics (drain, cursor, frontier — C1), factory tables (B1),
 emission + dual-run (B2–B3).
+
+### Manual testing: the `tira` CLI
+
+A file-backed rig until the lean UI lands. Writes go through the guarded write path;
+reads are folds — the CLI never sets state. `node scripts/tira.ts --help` for everything.
+
+```
+node scripts/tira.ts types                                            # entity types, states, events
+node scripts/tira.ts create node colors --actor isha
+node scripts/tira.ts send node colors START
+node scripts/tira.ts send node colors COMPLETE                        # REJECTED guard-failed, exit 2
+node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
+node scripts/tira.ts log                                              # raw log, rejections included
+node scripts/tira.ts state                                            # entities, rejections, anomalies
+node scripts/tira.ts replay 3                                         # state as of event 3
+```
+
+Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` is git-ignored). Tree: `--stream`
+(default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values are strings;
+use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a `duplicate`.
+`--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 1 usage/error.
 
 **Provisional choices, pending the PM** (each is flagged at its source):
 event type names (`node.created`, `node.START`, `command.rejected`); entities are created

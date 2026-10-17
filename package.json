@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "mutants": "node --disable-warning=ExperimentalWarning scripts/mutants.ts",
+    "tira": "node --disable-warning=ExperimentalWarning scripts/tira.ts",
     "check": "npm run verify && npm run typecheck && npm test"
   },
   "devDependencies": {

@@ -69,6 +69,10 @@ export class Registry {
     return this.defs.get(type);
   }
 
+  types(): EntityTypeDef[] {
+    return [...this.defs.values()];
+  }
+
   resolve(type: string, event: string): Resolved | undefined {
     const def = this.defs.get(type);
     const hit = this.byEvent.get(type)?.get(event);

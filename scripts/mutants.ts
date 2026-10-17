@@ -59,19 +59,26 @@ const MUTANTS: Mutant[] = [
   { name: "fold derived not nested by stream", file: "src/fold/fold.ts", find: "(derived[stream] ??= {})[ent.key] = Object.fromEntries(", replace: '(derived["s"] ??= {})[ent.key] = Object.fromEntries(' },
   { name: "write path drops expectedRevision on empty stream", file: "src/write/write-path.ts", find: "const expectedRevision = last ? last.streamRevision : -1;", replace: "const expectedRevision = last ? last.streamRevision : undefined;" },
   { name: "write path never retries a lost race", file: "src/write/write-path.ts", find: "if (err instanceof WrongExpectedRevisionError && attempt < this.maxAttempts) {", replace: "if (false) {" },
+  // CLI
+  { name: "cli: rejected command exits 0", file: "src/cli/cli.ts", find: 'return r.status === "rejected" ? 2 : 0;', replace: "return 0;" },
+  { name: "cli: replay ignores N", file: "src/cli/cli.ts", find: 'return await state(store, registry, stream, seqArg(args[0], "replay N"), values, io);', replace: "return await state(store, registry, stream, undefined, values, io);" },
+  { name: "cli: key=value values parsed as JSON", file: "src/cli/cli.ts", find: "payload[p.slice(0, eq)] = p.slice(eq + 1);", replace: "payload[p.slice(0, eq)] = (() => { try { return JSON.parse(p.slice(eq + 1)); } catch { return p.slice(eq + 1); } })();" },
+  { name: "cli: key=value splits on the last =", file: "src/cli/cli.ts", find: 'const eq = p.indexOf("=");', replace: 'const eq = p.lastIndexOf("=");' },
+  { name: "cli: --actor ignored", file: "src/cli/cli.ts", find: "const actor = values.actor ?? io.env.TIRA_ACTOR;", replace: "const actor = io.env.TIRA_ACTOR;" },
+  { name: "cli: TIRA_STREAM ignored", file: "src/cli/cli.ts", find: 'values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main"', replace: 'values.stream ?? "tasktree-main"' },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
 
 function scratchCopy(): string {
   const dir = mkdtempSync(join(tmpdir(), "tira-mutant-"));
-  for (const p of ["src", "test", "charts", "package.json", "tsconfig.json"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
+  for (const p of ["src", "test", "charts", "scripts", "package.json", "tsconfig.json"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   return dir;
 }
 
 function runTests(dir: string): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli"].map((n) => `test/${n}.test.ts`);
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8" });
   return r.status ?? 1;
 }
