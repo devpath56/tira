@@ -47,28 +47,34 @@ invariant sweeps (on-demand)
 
 ## 2. Build phases (sequenced; unblocked parts first)
 
-**Phase 0 — Rulings.** The 6 open questions from the proposal (§7) plus the NODE.state cache question. Phases 1–2 do not wait for them (event schema is settled; append-at-end insertion is the delegated decision, reversible).
+**Phase 0 — Rulings.** The open questions (§7). Phase 1 does not wait for them (event schema is settled; append-at-end insertion is the delegated decision, reversible).
 
-**Phase 1 — Event store + write gates.**
-Append-only SQLite events table (schema in `packing.md` §3); gapless monotonic `seq`
-(gaps are anomaly signals); every event carries eventId, stream, type, node ref,
-payload, actor, timestamp. Write-time gates: COMPLETE requires `evidenceRef`; REOPEN
-requires `reason`; ADD_CHILD under done/cancelled denied; unknown event types rejected;
-out-of-order sequence rejected; duplicate eventIds are idempotent no-ops. Each gate is
-a small falsifiable unit with its own tests. Guards run in the write path *before*
-append — the store never validates domain rules.
+**Phase 1 — Vertical slice: store + fold + factory stream.**
+The first build is end-to-end, not layered: SQLite event store behind the storage
+interface (`packing.md` §3) + fold over the transition tables + write gates
+(COMPLETE requires `evidenceRef`; REOPEN requires `reason`; ADD_CHILD under
+done/cancelled denied; duplicate eventIds are idempotent no-ops — guards run in the
+write path *before* append, the store never validates domain rules), with the
+**factory stream as the first event vocabulary** — `brief.dispatched/claimed/evidence/
+drop-written/verified`, `session.named/ended` (compaction packet §4.3, §5.3, §8.3).
+The dashboard scenarios (S1–S9) serve as the executable test suite, not the product.
+Dual-run begins here: derived state diffed against file state daily; divergence is the
+signal that decides the cutover.
+*Rationale (`packing.md` D9): the factory is customer #1; the substrate thesis is tested
+against the hardest real user from day one, and the cutover decision gets measured
+evidence instead of argument.*
+*Falsifier: if the brief's 3-dimension state (gate × claim × outcome) doesn't fit the
+node lifecycle cleanly, Phase 1 discovers the generalization the core needs — before
+anything else is built on it.*
 
-**Phase 2 — Fold engine.**
-Replay the event store through the transition tables (`charts/` are the verified source) to derive: node set, parent/child links, sibling order, states, drain predicate, DFS cursor. Supports fold-to-N (time travel). The fold is authoritative; any cached copy is labeled cache and loses on disagreement (per the state-model ruling 2026-10-16).
-
-**Phase 3 — Completion contract + suggester.**
+**Phase 2 — Completion contract + suggester.**
 On every COMPLETE: legality check (was the transition valid?), unblock set (dependents actually unblocked, verified), backtrack target, invariant spot-check on the affected path, then the next-action suggestion with mandatory receipts (trigger event, ranking-function version, rejected alternatives, vapor caveat). Deterministic: same log ⇒ same suggestion. Advisory only — nothing auto-executes.
 
-**Phase 4 — Vapor pipeline + invariant sweeps.**
+**Phase 3 — Vapor pipeline + invariant sweeps.**
 Vapor pipeline (claim machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees.
 
-**Phase 5 — Lean UI (edge-testing rig) + scenario test suite.**
-The UI wraps phases 1–4 for manual edge testing: event-log viewer, replay-to-N stepper,
+**Phase 4 — Lean UI (edge-testing rig) + scenario test suite.**
+The UI wraps phases 1–3 for manual edge testing: event-log viewer, replay-to-N stepper,
 derived-state inspector (cursor, drain flags, suggestions with receipts), manual event
 injection through the guarded write path, and denial surfacing (rejected writes shown
 with reasons). Clone Plane's component design patterns, not its code (AGPL-3.0 —
@@ -96,17 +102,17 @@ remains the human-readable form of the same scripts.
 
 | Job | What the user can do | Phase | Tests |
 |---|---|---|---|
-| Track a branching build depth-first | Keep the dashboard tree; always know the cursor | 2 | S3, T2 |
-| Prove a task is done | Complete only with evidence; denials are logged | 1, 3 | S2, T1 |
-| Get interrupted and resume exactly | Block on a discovered dependency; cursor returns by replay | 2, 3 | S1 |
-| Capture discovered work mid-flight | Add child with provenance; traversal order stays deterministic | 1, 2 | S1, T7 |
-| Change my mind honestly | Reopen with reason; bare reopen denied; audit trail intact | 1, 2 | S6 |
-| Kill unnecessary work cleanly | Cancel as terminal verdict; parent drains on done-or-cancelled | 1, 2 | S7 |
-| Keep ideas from dying in chat | Declare when prompted; system drafts file + proposes node; I approve at each gate; machine enforces order; breach escalates | 4 | S5, S9, T5, T9–T12 |
-| Approve, don't drive | File drafts and node placements arrive proposed; my only job is approve/reject | 4 | S5, S9 |
-| Know what a finish unlocked | Per-completion: legality, unblocks, backtrack target | 3 | S1, S3 |
-| Get told what's next, with reasons | Deterministic suggestion + receipts; reproducible | 3 | S8, T6 |
-| Verify the system isn't lying | Replay to any event N; invariant sweeps on demand | 2, 4 | T2, T8 |
+| Track a branching build depth-first | Keep the dashboard tree; always know the cursor | 1 | S3, T2 |
+| Prove a task is done | Complete only with evidence; denials are logged | 1, 2 | S2, T1 |
+| Get interrupted and resume exactly | Block on a discovered dependency; cursor returns by replay | 1, 2 | S1 |
+| Capture discovered work mid-flight | Add child with provenance; traversal order stays deterministic | 1 | S1, T7 |
+| Change my mind honestly | Reopen with reason; bare reopen denied; audit trail intact | 1 | S6 |
+| Kill unnecessary work cleanly | Cancel as terminal verdict; parent drains on done-or-cancelled | 1 | S7 |
+| Keep ideas from dying in chat | Declare when prompted; system drafts file + proposes node; I approve at each gate; machine enforces order; breach escalates | 3 | S5, S9, T5, T9–T12 |
+| Approve, don't drive | File drafts and node placements arrive proposed; my only job is approve/reject | 3 | S5, S9 |
+| Know what a finish unlocked | Per-completion: legality, unblocks, backtrack target | 2 | S1, S3 |
+| Get told what's next, with reasons | Deterministic suggestion + receipts; reproducible | 2 | S8, T6 |
+| Verify the system isn't lying | Replay to any event N; invariant sweeps on demand | 1, 3 | T2, T8 |
 
 **Deferred post-MVP** (each names its un-parking condition):
 
@@ -168,4 +174,4 @@ Each test replays an event script and asserts the folded result. S1–S8 are the
 - Transition tables are the spec; JSON + tiny runner preferred over the XState vehicle.
 - Lean UI is in MVP scope, for manual edge testing.
 
-*Phase 1 is unblocked: the event store decision is made and the interface is specified.*
+*Phase 1 is unblocked and rescoped: vertical slice (store + fold + gates + factory stream) with rationale in `packing.md` D9. The dual-run probe starts here; the cutover decision gets measured evidence.*

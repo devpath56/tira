@@ -37,10 +37,12 @@ Rules the machines enforce:
 
 ## Build order
 
-Phase 1: event store (SQLite, via the storage interface in `packing.md` §3) + write gates
-→ Phase 2: fold engine (imports the transition tables)
-→ Phase 3: completion contract + suggester → Phase 4: vapor pipeline + sweeps
-→ Phase 5: lean UI (edge-testing rig) + test suite.
+Phase 1: vertical slice — event store (SQLite, via the storage interface in `packing.md` §3)
++ fold + write gates + factory stream vocabulary (brief/session/drop events); dual-run
+probe begins here
+→ Phase 2: completion contract + suggester → Phase 3: vapor pipeline + sweeps
+→ Phase 4: lean UI (edge-testing rig) + test suite.
+Rationale for the Phase 1 scope: `packing.md` D9 (factory as customer #1).
 Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance scenarios
 (S1–S8 + S9); `demo/build_deck.py` rebuilds the deck from them.
 
