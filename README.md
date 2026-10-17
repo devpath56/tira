@@ -1,6 +1,7 @@
 > [!IMPORTANT]
 > **Exec Note**
-> - **Phase 1 builds the factory's coordination stream end-to-end — the factory is customer #1.** Event store + storage interface + fold + write gates, with brief/session/drop events as the first vocabulary; the dashboard scenarios serve as the executable test suite, not the product.
+> - **Phase 1 is a vertical slice, not a foundation layer.** It ships the event store, the storage interface, the fold, and the write gates with the factory's brief/session/drop events as the first vocabulary — running against the live factory from day one. It is *not* the dashboard product, *not* storage without logic, and *not* a second source of truth next to the file bridge.
+> - **The factory is customer #1.** The substrate thesis gets tested against the hardest real user immediately — real event types, real edge cases — instead of against demo scenarios.
 > - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it today, KurrentDB can replace it tomorrow — the fold, guards, and UI never touch storage directly.
 > - **Phase 1's falsifier is armed: we will learn exactly where the simple model breaks — and that lesson is the deliverable.** Factory work orders track three things independently (authorized, picked up with proof, finished); the machine models a task on one dial. Where the three won't fit the one, the pinch points show precisely how the core must generalize — discovered now, not after four more phases are built on the wrong shape.
 
