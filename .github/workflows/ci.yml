@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Canonical JSON must equal a fresh extraction from the charts (no hand edits).
+      - run: node charts/extract-tables.mjs && git diff --exit-code charts/*.json
+      - run: npm run check
+      # Every planted bug must be caught by the suite (scripts/mutants.ts).
+      - run: npm run mutants

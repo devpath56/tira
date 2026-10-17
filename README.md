@@ -66,6 +66,31 @@ Rationale for the Phase 1 scope: `packing.md` D9 (factory as customer #1).
 Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance scenarios
 (S1–S8 + S9); `demo/build_deck.py` rebuilds the deck from them.
 
+## Code — Phase 1, Track A (generic core)
+
+TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
+built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
+`npm run mutants` plants 30 known bugs and fails unless the suite catches every one.
+CI runs both, and also re-extracts `charts/*.json` and fails on any difference (no hand edits).
+No runtime dependencies: `xstate` is a dev dependency, used only by the chart verifiers.
+
+| Path | What it is |
+|---|---|
+| `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite implementation: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision` |
+| `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (parallel regions), cross-region invariant, versioned identity, guards that see fold state + actor |
+| `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates, rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path |
+| `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
+
+Not in Track A: tree/DAG semantics (drain, cursor, frontier — C1), factory tables (B1),
+emission + dual-run (B2–B3).
+
+**Provisional choices, pending the PM** (each is flagged at its source):
+event type names (`node.created`, `node.START`, `command.rejected`); entities are created
+by an explicit `create` command at their tables' initial states; an `eventId` names one
+command (same id + same content = duplicate, same id + different content = error);
+malformed commands throw rather than being logged; `eventId` is globally unique, so
+re-using one in another stream throws; `subscribe()` is at-least-once with an `onError` hook.
+
 ## Docs & showcase
 
 Public documentation is authored as Markdown in this repo and published via
