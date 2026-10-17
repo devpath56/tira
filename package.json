@@ -1,1 +1,22 @@
-{"dependencies": {"xstate": "^5.33.2"}, "description": "Deterministic task-tree tracking MVP \u2014 executable spec (XState charts), scenario sources, demo", "name": "tira", "scripts": {"verify": "node charts/verify-node-lifecycle.mjs && node charts/verify-idea-lifecycle.mjs && node charts/verify-tables.mjs"}, "type": "module", "version": "1.0.0"}
+{
+  "name": "tira",
+  "version": "1.0.0",
+  "description": "Deterministic task-tree tracking MVP — executable spec (XState charts), scenario sources, demo",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "verify": "node charts/verify-node-lifecycle.mjs && node charts/verify-idea-lifecycle.mjs && node charts/verify-tables.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "mutants": "node --disable-warning=ExperimentalWarning scripts/mutants.ts",
+    "tira": "node --disable-warning=ExperimentalWarning scripts/tira.ts",
+    "check": "npm run verify && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "typescript": "^5.9.3",
+    "xstate": "^5.33.2"
+  }
+}
