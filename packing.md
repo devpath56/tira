@@ -1,4 +1,4 @@
-# Packing — Dashboard-IMDP tracking MVP
+# Packing — tira
 
 How the MVP is packed: which layers are built, which are bought, which are cloned —
 decided against the JTBDs with no incumbency bias (assumes nothing already spec'd).

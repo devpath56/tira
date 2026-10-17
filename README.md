@@ -15,7 +15,7 @@
 > - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it today, KurrentDB can replace it tomorrow — the fold, guards, and UI never touch storage directly.
 > - **Phase 1's falsifier is armed: we will learn exactly where the simple model breaks — and that lesson is the deliverable.** Factory work orders track three things independently (authorized, picked up with proof, finished); the machine models a task on one dial. Where the three won't fit the one, the pinch points show precisely how the core must generalize — discovered now, not after four more phases are built on the wrong shape.
 
-# Dashboard-IMDP — deterministic task-tree tracking MVP
+# tira — deterministic task-tree tracking
 
 A single-worker system that tracks hierarchical work depth-first: every mutation is an
 append-only event, and all state (tree, cursor, drain) is derived by replaying the log.
