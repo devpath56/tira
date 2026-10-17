@@ -41,6 +41,9 @@ invariant sweeps (on-demand)
   stepper, derived-state inspector, event injection, denial surfacing). The UI reads
   derived state only and writes through the guarded write path. No server in MVP.
 - **Packing (build/buy/clone per layer, OSS evaluation):** `packing.md`.
+- **Docs/showcase:** Mintlify Starter (free tier) — docs authored as Markdown in this repo,
+  git-synced to Mintlify; API reference via Scalar from the OpenAPI spec once the API lands.
+  Rationale recorded in `packing.md` D8.
 
 ## 2. Build phases (sequenced; unblocked parts first)
 

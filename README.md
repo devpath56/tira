@@ -44,6 +44,16 @@ Phase 1: event store (SQLite, via the storage interface in `packing.md` §3) + w
 Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance scenarios
 (S1–S8 + S9); `demo/build_deck.py` rebuilds the deck from them.
 
+## Docs & showcase
+
+Public documentation is authored as Markdown in this repo and published via
+**Mintlify Starter (free)** — custom domain, git sync, API playground, and search
+included. Rationale: the free tier's gates (no AI assistant, no preview deployments,
+no analytics, 5 editor seats) don't constrain a two-person public showcase, and
+docs stay MDX-in-git, so Docusaurus is a clean exit if we ever outgrow it.
+API reference renders via Scalar from the OpenAPI spec once the API lands.
+Internal knowledge (runbooks, decision logs) lives in BookStack, not here.
+
 ## Decisions
 
 **Resolved** (see `packing.md` §5 for rationale):

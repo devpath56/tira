@@ -158,3 +158,4 @@ never state directly.
 | D5 | SQLite now, KurrentDB later, interface between | KurrentDB is the right category but serves storage, not logic; MVP scale doesn't justify the server. The narrow interface makes the upgrade one module. |
 | D6 | UI in MVP | Manual edge testing needs replay stepper + derived-state inspector + event injection; scripted verifiers alone leave Isha testing blind. |
 | D7 | Chat approvals (Muse/Claude) | Human surface for JTBD 8; mechanism (gates) stays in the write path. |
+| D8 | Docs/showcase → Mintlify Starter (free) | Free-tier gates (no AI assistant, no preview deploys, no analytics, 5 seats) don't constrain a two-person public showcase; MDX-in-git keeps Docusaurus as a clean exit. Scalar renders the API reference from the OpenAPI spec; BookStack holds internal knowledge (runbooks, decision logs) outside the repo. |
