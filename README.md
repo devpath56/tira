@@ -1,3 +1,9 @@
+> [!IMPORTANT]
+> **Exec Note**
+> - **Phase 1 builds the factory's coordination stream end-to-end — the factory is customer #1.** Event store + storage interface + fold + write gates, with brief/session/drop events as the first vocabulary; the dashboard scenarios serve as the executable test suite, not the product.
+> - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it today, KurrentDB can replace it tomorrow — the fold, guards, and UI never touch storage directly.
+> - **Phase 1's falsifier is armed: if the brief's 3-dimension state (gate × claim × outcome) doesn't fit the node lifecycle cleanly, that misfit is the deliverable** — it reveals the generalization the core needs before anything else is built on it.
+
 # Dashboard-IMDP — deterministic task-tree tracking MVP
 
 A single-worker system that tracks hierarchical work depth-first: every mutation is an
