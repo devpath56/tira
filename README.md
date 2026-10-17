@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 42 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 43 known bugs and fails unless the suite catches every one.
 CI runs both, and also re-extracts `charts/*.json` and fails on any difference (no hand edits).
 No runtime dependencies: `xstate` is a dev dependency, used only by the chart verifiers.
 

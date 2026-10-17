@@ -45,7 +45,16 @@ export interface FoldResult {
   anomalies: Anomaly[];
 }
 
-const byKey = (a: EntityState, b: EntityState) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+// Code-unit order, deliberately NOT localeCompare: canonical output must not depend
+// on the machine's locale or ICU version, or refolds stop being byte-identical
+// across machines (build-plan.md T2, manual test M0).
+export function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+const byKey = (a: EntityState, b: EntityState) => compareCodeUnits(a.key, b.key);
 
 export function makeView(entities: ReadonlyMap<string, EntityState>): StateView {
   return {
@@ -131,7 +140,7 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
 
   const entities: EntityState[] = [];
   const derived: FoldResult["derived"] = {};
-  for (const stream of [...streams.keys()].sort()) {
+  for (const stream of [...streams.keys()].sort(compareCodeUnits)) {
     const view = views.get(stream) as StateView;
     for (const ent of view.all()) {
       entities.push(ent);
@@ -153,7 +162,7 @@ export function canonicalJson(value: unknown): string {
     if (v && typeof v === "object") {
       return Object.fromEntries(
         Object.keys(v as object)
-          .sort()
+          .sort(compareCodeUnits)
           .map((k) => [k, norm((v as Record<string, unknown>)[k])]),
       );
     }

@@ -21,13 +21,13 @@
 //   being logged: they cannot be represented as an intent at all.
 // - Entities come into existence with an explicit `create` command, starting at
 //   each region's initial state (acceptance review M3 / Q-B3: creation is unspecced).
-import { ALL, WrongExpectedRevisionError, type EventStore } from "../store/types.ts";
+import { randomInt } from "node:crypto";
+import { ALL, WrongExpectedRevisionError, type EventStore, type StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { evaluate, type Intent, type RejectCode } from "../fold/evaluate.ts";
 import { REJECTED, toIntent, toNewEvent, toRejectedEvent, type RejectedData } from "../fold/events.ts";
 import { canonicalJson, fold, makeView } from "../fold/fold.ts";
 import type { EntityRef, EntityState } from "../fold/types.ts";
-import type { StoredEvent } from "../store/types.ts";
 
 export type Command = {
   stream: string;
@@ -63,8 +63,10 @@ function queueFor(store: EventStore): Map<string, Promise<unknown>> {
   return q;
 }
 
+// Jittered so racing processes don't retry in lockstep. Not security-sensitive;
+// crypto.randomInt just avoids Math.random being flagged as a weak PRNG.
 const backoff = (attempt: number) =>
-  new Promise((r) => setTimeout(r, Math.random() * Math.min(100, 5 * 2 ** attempt)));
+  new Promise((r) => setTimeout(r, randomInt(0, Math.min(100, 5 * 2 ** attempt) + 1)));
 
 const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
 const nonEmpty = (v: unknown) => typeof v === "string" && v.length > 0;
@@ -144,7 +146,7 @@ export class WritePath {
       const state = fold(events, this.registry);
       const entities = new Map<string, EntityState>(state.entities.map((e) => [e.key, e]));
       const ev = evaluate(this.registry, entities, makeView(entities), intent);
-      const last = events[events.length - 1];
+      const last = events.at(-1);
       const expectedRevision = last ? last.streamRevision : -1;
       const record = ev.ok
         ? toNewEvent(intent, cmd.eventId)

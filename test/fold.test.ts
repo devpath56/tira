@@ -7,7 +7,7 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { Registry, defaultRegistry } from "../src/tables/registry.ts";
 import { loadTable } from "../src/tables/table.ts";
 import { WritePath } from "../src/write/write-path.ts";
-import { canonicalJson, fold } from "../src/fold/fold.ts";
+import { canonicalJson, compareCodeUnits, fold } from "../src/fold/fold.ts";
 
 const STREAM = "tasktree-dash";
 
@@ -40,6 +40,12 @@ test("T2 replay determinism: the same log folds to byte-identical state", async 
   const a = canonicalJson(fold(events, registry));
   const b = canonicalJson(fold([...events].reverse(), defaultRegistry())); // input order must not matter
   assert.equal(a, b);
+});
+
+test("canonicalJson orders keys by code unit, not by locale (byte-identical across machines)", () => {
+  // localeCompare would put "a" before "B"; code-unit order puts "B" (0x42) first.
+  assert.equal(canonicalJson({ a: 1, B: 2, "é": 3, Z: { y: 1, X: 2 } }), '{"B":2,"Z":{"X":2,"y":1},"a":1,"é":3}');
+  assert.deepEqual(["b", "B", "a", "_"].sort(compareCodeUnits), ["B", "_", "a", "b"]);
 });
 
 test("T8 replay-to-N: historical state at several N", async () => {
