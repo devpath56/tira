@@ -33,9 +33,10 @@ Nothing is stored as "current" — the fold is authoritative.
 
 ## The spec (executable)
 
-The pair tables are the spec; the XState machines below are their verified executable
-form (packing.md D3: JSON tables + a tiny runner are the preferred going-forward form —
-the tables transfer verbatim from these 47/50 checks).
+The pair tables are the spec. The JSON files are the canonical form (packing.md D3);
+the XState machines are the verified executable reference — 176 differential checks
+prove JSON ≡ XState on every state×event×guard-polarity. Build against the JSON;
+no XState knowledge required.
 
 | File | What it is | Verify |
 |---|---|---|

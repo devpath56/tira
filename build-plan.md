@@ -8,12 +8,13 @@
 
 | Artifact | Location | Verified |
 |---|---|---|
-| Node lifecycle state machine (XState) | `tracking-mvp/charts/node-lifecycle.mjs` | Constructed + executed: 35 state×event pairs, all 5 states reachable, guards fire, no vacuous done |
-| Claim pipeline state machine (XState) | `tracking-mvp/charts/claim-lifecycle.mjs` | Constructed + executed: 36 pairs, 50/50 checks — no-skip (no path to materialized bypasses filed), approval gates, bare-reject guard |
+| Canonical transition tables (JSON) | `tracking-mvp/charts/node-lifecycle.json` (35 pairs), `tracking-mvp/charts/claim-lifecycle.json` (36 pairs) | Mechanically extracted from the charts; 176 differential checks prove JSON ≡ XState on every state×event×guard-polarity |
+| Node lifecycle chart (XState, executable reference) | `tracking-mvp/charts/node-lifecycle.mjs` | Constructed + executed: 35 state×event pairs, all 5 states reachable, guards fire, no vacuous done (47 checks) |
+| Claim pipeline chart (XState, executable reference) | `tracking-mvp/charts/claim-lifecycle.mjs` | Constructed + executed: 36 pairs, 50/50 checks — no-skip (no path to materialized bypasses filed), approval gates, bare-reject guard |
 | State matrix + 3 delegated rulings | chat 2026-10-16 (idempotent no-ops; done→cancelled forbidden; add-child-to-done denied) | Rulings recorded in chart comments; reversible |
 | 8 demo scenarios as D2 animations + HTML deck | `tracking-mvp/demo/` | Every board rendered + screenshot-verified against real D2 v0.9.0 |
 
-The chart module is the transition function the fold engine will import directly — **test the machine, ship the machine.** The demo scenarios double as the acceptance test scripts (§5).
+The JSON tables are the transition function the fold engine builds against — language-agnostic, no XState knowledge required. The XState charts remain the verified executable reference (the differential test re-proves equivalence on every run). **Test the tables, ship the tables.** The demo scenarios double as the acceptance test scripts (§5).
 
 ## 1. Architecture (4 components + UI)
 
@@ -22,8 +23,9 @@ event store — SQLite, append-only (interface: packing.md §3)
     │  write-time gates: schema, sequencing, evidence-on-COMPLETE,
     │  reason-on-REOPEN, add-child-to-done deny
     ▼
-fold engine ──imports──▶ transition tables (charts/ are the verified source;
-                           JSON + tiny runner is the preferred form)
+fold engine ──builds against──▶ transition tables (charts/*.json are the canonical
+                           source, mechanically extracted; 176 differential
+                           checks prove JSON ≡ XState on every pair)
     │  derives: tree, states, drain, DFS cursor; time-travel to event N
     ▼
 completion contract + suggester (deterministic; receipts; advisory-only)
@@ -51,7 +53,8 @@ invariant sweeps (on-demand)
 
 **Phase 1 — Vertical slice: store + fold + factory stream.**
 The first build is end-to-end, not layered: SQLite event store behind the storage
-interface (`packing.md` §3) + fold over the transition tables + write gates
+interface (`packing.md` §3) + fold over the transition tables (`charts/*.json`, the
+canonical spec — no XState dependency) + write gates
 (COMPLETE requires `evidenceRef`; REOPEN requires `reason`; ADD_CHILD under
 done/cancelled denied; duplicate eventIds are idempotent no-ops — guards run in the
 write path *before* append, the store never validates domain rules), with the
