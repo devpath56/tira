@@ -50,7 +50,7 @@ test("S6 honest undo: bare REOPEN rejected; reasoned REOPEN -> in_progress; trai
   assert.equal(status(await t.send("REOPEN", { reason: "wrong palette file" })), "appended:transition");
   assert.equal(status(await t.send("COMPLETE", { evidenceRef: "palette-v2.png" })), "appended:transition");
   const types = (await t.store.readStream(STREAM)).map((e) => e.type);
-  assert.deepEqual(types, ["node.created", "node.START", "node.COMPLETE", REJECTED, "node.REOPEN", "node.COMPLETE"]);
+  assert.deepEqual(types, ["node.created", "node.start", "node.complete", REJECTED, "node.reopen", "node.complete"]);
   assert.equal(await t.lifecycle(), "done");
 });
 
@@ -88,7 +88,7 @@ test("T3 idempotent no-ops: duplicate START/COMPLETE/BLOCK/CANCEL are logged, st
   assert.equal(status(await t.send("COMPLETE", { evidenceRef: "e" })), "appended:noop");
   const s = await t.state();
   assert.deepEqual(s.rejections, []);
-  assert.equal((await t.store.readStream(STREAM)).filter((e) => e.type === "node.START").length, 2);
+  assert.equal((await t.store.readStream(STREAM)).filter((e) => e.type === "node.start").length, 2);
   // CANCEL twice on a fresh node
   const u = setup();
   await u.create();
@@ -185,7 +185,7 @@ test("a command mutated after submit() is evaluated as submitted", async () => {
   (cmd as { event: string }).event = "CANCEL";
   cmd.entity.id = "someone-else";
   assert.equal(status(await pending), "appended:transition");
-  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.START"]);
+  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.start"]);
 });
 
 test("concurrent submits with the same eventId: one lands, the rest are duplicates", async () => {
@@ -241,7 +241,7 @@ test("lost expectedRevision race: re-read and re-evaluate against the new state"
   const r = await wp.submit({ stream: STREAM, kind: "event", entity: N, event: "START" });
   // Our START was evaluated as a transition, lost the race, and was re-evaluated as a no-op.
   assert.equal(status(r), "appended:noop");
-  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.START", "node.START"]);
+  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.start", "node.start"]);
 });
 
 test("cross-process race on an EMPTY stream: the loser re-evaluates (create -> already-exists)", async () => {

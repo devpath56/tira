@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 36 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 42 known bugs and fails unless the suite catches every one.
 CI runs both, and also re-extracts `charts/*.json` and fails on any difference (no hand edits).
 No runtime dependencies: `xstate` is a dev dependency, used only by the chart verifiers.
 
@@ -99,19 +99,46 @@ node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
+node scripts/tira.ts dump                                             # full derived state, canonical JSON
+node scripts/tira.ts dump --hash                                      # sha256 of that JSON
 ```
 
 Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` is git-ignored). Tree: `--stream`
 (default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values are strings;
 use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a `duplicate`.
+Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or `add-child`).
 `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 1 usage/error.
 
+### Demo D0 script (build-plan.md "Demo checkpoints", manual test M0)
+
+Run from this folder. Nothing derived is ever stored: every command, including `dump`,
+replays the raw log from scratch. So step 4's "wipe derived state, replay" is shown by
+replaying in a fresh store that holds only a copy of the raw log, and comparing hashes.
+
+```
+export TIRA_DB=d0.db
+node scripts/tira.ts create node a && node scripts/tira.ts create node b && node scripts/tira.ts create node c   # 1
+node scripts/tira.ts send node a START && node scripts/tira.ts send node a COMPLETE evidenceRef=proof.png        # 2: a -> done
+node scripts/tira.ts send node b START && node scripts/tira.ts send node b COMPLETE                              # 3: REJECTED, exit 2
+node scripts/tira.ts log                                                   # 3: command.rejected row in the log
+node scripts/tira.ts state                                                 # 3: ...and b is still in_progress (never applied)
+node scripts/tira.ts dump --hash                                           # 4: hash of the derived state
+cp d0.db d0-fresh.db && node scripts/tira.ts --db d0-fresh.db dump --hash  # 4: same hash from a fresh replay
+node scripts/tira.ts dump --hash                                           # M0 re-run: identical again
+```
+
+M0 passes when both hashes match and the `command.rejected` row is in the log but `b`
+never reached `done`. `rm d0.db d0-fresh.db` to start over.
+
+**Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
+from the table events: `node.created`, `node.start`, `node.add-child`, `command.rejected`.
+
 **Provisional choices, pending the PM** (each is flagged at its source):
-event type names (`node.created`, `node.START`, `command.rejected`); entities are created
-by an explicit `create` command at their tables' initial states; an `eventId` names one
-command (same id + same content = duplicate, same id + different content = error);
-malformed commands throw rather than being logged; `eventId` is globally unique, so
-re-using one in another stream throws; `subscribe()` is at-least-once with an `onError` hook.
+entities are created by an explicit `create` command at their tables' initial states;
+an `eventId` names one command (same id + same content = duplicate, same id + different
+content = error); malformed commands throw rather than being logged; `eventId` is globally
+unique, so re-using one in another stream throws; `subscribe()` is at-least-once with an
+`onError` hook.
 
 ## Docs & showcase
 

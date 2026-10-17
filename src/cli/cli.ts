@@ -2,11 +2,12 @@
 // Every write goes through the guarded WritePath; every read is a fold. The CLI
 // never touches state directly, so what you see here is what the core decides.
 import { parseArgs } from "node:util";
+import { createHash } from "node:crypto";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { WritePath, type Command, type WriteResult } from "../write/write-path.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
-import { REJECTED, type EventData, type RejectedData } from "../fold/events.ts";
+import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
 
 export interface Io {
@@ -24,6 +25,8 @@ Usage:
   tira log                                        the raw event log, in seq order (rejections included)
   tira state [--at N] [--now ISO] [--vantage V]   derived state, plus rejections and anomalies
   tira replay <N>                                 state as of event N (same as: tira state --at N)
+  tira dump [--at N] [--hash]                     full derived state as canonical JSON (same log => same bytes);
+                                                  --hash prints its sha256 instead
 
 Options:
   --db PATH        store file (default: $TIRA_DB, else ./tira.db)
@@ -33,7 +36,10 @@ Options:
   --event-id ID    idempotency key: re-sending the same command returns "duplicate"
   --payload JSON   payload as a JSON object; key=value pairs are merged in (as strings)
   --json           machine-readable output
+  --hash           (dump) print sha256 of the canonical JSON
   -h, --help       this help
+
+Event names: use the table's name (COMPLETE, ADD_CHILD) or the stored form (complete, add-child).
 
 Exit codes: 0 ok · 2 rejected by the rules · 1 usage or other error`;
 
@@ -50,6 +56,7 @@ const OPTIONS = {
   now: { type: "string" },
   vantage: { type: "string" },
   json: { type: "boolean" },
+  hash: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -103,7 +110,9 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
   if (args.length < need) {
     throw new UsageError(kind === "create" ? "usage: tira create <type> <id> [key=value ...]" : "usage: tira send <type> <id> <EVENT> [key=value ...]");
   }
-  const [type, id, event] = args as [string, string, string];
+  const [type, id, rawEvent] = args as [string, string, string];
+  // Accept the stored form too: "add-child" -> ADD_CHILD (the table's name).
+  const event = rawEvent !== undefined && /^[a-z][a-z0-9-]*$/.test(rawEvent) ? tableEventName(rawEvent) : rawEvent;
   const payload = payloadFrom(values, args.slice(need));
   const actor = values.actor ?? io.env.TIRA_ACTOR;
   const entity = { type, id, ...(values.version !== undefined ? { version: Number(values.version) } : {}) };
@@ -204,15 +213,31 @@ function printState(r: FoldResult, stream: string, upTo: number | undefined, io:
   }
 }
 
+const foldOptions = (upTo: number | undefined, values: Values): FoldOptions => ({
+  ...(upTo !== undefined ? { upToSeq: upTo } : {}),
+  ...(values.now !== undefined ? { now: values.now } : {}),
+  ...(values.vantage !== undefined ? { vantage: values.vantage } : {}),
+});
+
 async function state(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
-  const opts: FoldOptions = {
-    ...(upTo !== undefined ? { upToSeq: upTo } : {}),
-    ...(values.now !== undefined ? { now: values.now } : {}),
-    ...(values.vantage !== undefined ? { vantage: values.vantage } : {}),
-  };
-  const r = fold(await store.readStream(stream), registry, opts);
+  const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   if (values.json) io.out(canonicalJson(r));
   else printState(r, stream, upTo, io);
+  return 0;
+}
+
+// The replay oracle for demo D0 / manual tests M0–M1: every dump is a full replay of
+// the raw log in this process (nothing derived is stored), so equal hashes across
+// runs, copies of the store file, or machines mean the replay is deterministic.
+async function dump(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+  const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
+  const json = canonicalJson(r);
+  if (values.hash) {
+    const sha = createHash("sha256").update(json).digest("hex");
+    io.out(values.json ? JSON.stringify({ sha256: sha, stream, lastSeq: r.lastSeq }) : `sha256:${sha}  stream ${stream} · seq ${r.lastSeq}`);
+  } else {
+    io.out(json);
+  }
   return 0;
 }
 
@@ -258,7 +283,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -278,6 +303,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return await log(store, stream, values, io);
       case "state":
         return await state(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
+      case "dump":
+        return await dump(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       default: {
         // replay <N>
         if (args[0] === undefined) throw new UsageError("usage: tira replay <N>");

@@ -62,13 +62,19 @@ test("T8 replay-to-N: historical state at several N", async () => {
 test("anomaly: an event appended around the write path is flagged, not applied", async () => {
   const { store, registry } = await scriptedLog();
   // Direct append bypasses the guards: COMPLETE with no evidence on loading_state.
-  await store.append(STREAM, [{ type: "node.COMPLETE", data: { entity: { id: "loading_state" }, payload: {} } }]);
+  await store.append(STREAM, [{ type: "node.complete", data: { entity: { id: "loading_state" }, payload: {} } }]);
   await store.append(STREAM, [{ type: "garbage", data: {} }]);
+  // Not lowercase-kebab: not a name this core ever writes (D1), so not applied either.
+  await store.append(STREAM, [{ type: "node.START", data: { entity: { id: "font" }, payload: {} } }]);
   const r = fold(await store.readAll(), registry);
   assert.equal(lifecycleOf(r, "loading_state"), "in_progress");
   assert.deepEqual(
     r.anomalies.map((a) => a.problem),
-    ["guard-failed: node-lifecycle: in_progress + COMPLETE needs hasEvidenceRef", "unrecognised event shape"],
+    [
+      "guard-failed: node-lifecycle: in_progress + COMPLETE needs hasEvidenceRef",
+      "unrecognised event shape",
+      "unrecognised event shape",
+    ],
   );
 });
 
@@ -144,6 +150,32 @@ test("a malformed command.rejected record is an anomaly, not a crash; writes con
   const wp = new WritePath(store, registry);
   const next = await wp.submit({ stream: STREAM, kind: "event", entity: { type: "node", id: "loading_state" }, event: "BLOCK" });
   assert.equal(next.status, "appended");
+});
+
+test("stored event names are lowercase-kebab, mechanically from the table events (D1)", async () => {
+  const { store } = await scriptedLog();
+  const store2 = new SqliteEventStore();
+  const wp = new WritePath(store2, defaultRegistry());
+  const n = { type: "node", id: "p" };
+  await wp.submit({ stream: STREAM, kind: "create", entity: n });
+  await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "START" });
+  await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "ADD_CHILD" });
+  await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "UNBLOCK" }); // rejected
+  assert.deepEqual((await store2.readAll()).map((e) => e.type), ["node.created", "node.start", "node.add-child", "command.rejected"]);
+  for (const e of await store.readAll()) assert.match(e.type, /^[a-z]+\.[a-z]+(-[a-z]+)*$/, e.type);
+});
+
+test("table event names must be UPPER_SNAKE, and CREATED is reserved", () => {
+  const node = loadTable(new URL("../charts/node-lifecycle.json", import.meta.url));
+  const renamed = (from: string, to: string) => {
+    const t = JSON.parse(JSON.stringify(node)) as typeof node;
+    t.events = t.events.map((e) => (e === from ? to : e));
+    t.pairs = t.pairs.map((p) => (p.event === from ? { ...p, event: to } : p));
+    return t;
+  };
+  assert.throws(() => new Registry().register({ type: "x", regions: { l: renamed("START", "start") } }), /must be UPPER_SNAKE/);
+  assert.throws(() => new Registry().register({ type: "x", regions: { l: renamed("START", "ADD-CHILD") } }), /must be UPPER_SNAKE/);
+  assert.throws(() => new Registry().register({ type: "x", regions: { l: renamed("START", "CREATED") } }), /reserved/);
 });
 
 test("createdSeq and lastSeq track the entity's first and latest applied events", async () => {

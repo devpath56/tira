@@ -5,6 +5,7 @@
 // by registering tables, not by changing the runner.
 import { DEFAULT_GUARDS, loadTable, type GuardFn, type Table } from "./table.ts";
 import type { EntityState, StateView } from "../fold/types.ts";
+import { TABLE_EVENT_NAME } from "../fold/events.ts";
 
 // Derived predicates see the entity (incl. lastRecordedAt / lastActor), the rest of
 // its stream, and the caller's clock and vantage. Nothing else — so they stay pure.
@@ -50,6 +51,9 @@ export class Registry {
     for (const region of regionNames) {
       const table = def.regions[region] as Table;
       for (const ev of table.events) {
+        // Stored names are derived mechanically from these (fold/events.ts); keep it a bijection.
+        if (!TABLE_EVENT_NAME.test(ev)) throw new Error(`table ${table.id}: event ${ev} must be UPPER_SNAKE`);
+        if (ev === "CREATED") throw new Error(`table ${table.id}: event name CREATED is reserved`);
         const other = events.get(ev);
         if (other) {
           throw new Error(`entity type ${def.type}: event ${ev} in regions ${other.region} and ${region}`);

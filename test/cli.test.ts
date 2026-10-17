@@ -164,6 +164,52 @@ test("usage errors exit 1: unknown command, missing args, bad flags, bad version
   }
 });
 
+test("dump: canonical JSON of the fold; --hash is stable across runs and copies, and moves with the log", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "node", "a");
+    await s.tira("send", "node", "a", "START");
+    await s.tira("send", "node", "a", "COMPLETE"); // rejected
+    const json = (await s.tira("dump")).out;
+    assert.equal(json, (await s.tira("state", "--json")).out); // dump is the canonical fold
+    const parsed = JSON.parse(json);
+    assert.equal(parsed.lastSeq, 3);
+    assert.equal(parsed.rejections.length, 1);
+    const h1 = (await s.tira("dump", "--hash")).out;
+    assert.match(h1, /^sha256:[0-9a-f]{64}  stream tasktree-main · seq 3$/);
+    assert.equal((await s.tira("dump", "--hash")).out, h1); // re-run: identical (M0)
+    const { copyFileSync } = await import("node:fs");
+    const copy = join(s.dir, "copy.db");
+    copyFileSync(s.db, copy); // a fresh store holding only the raw log
+    const out: string[] = [];
+    await run(["--db", copy, "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {} });
+    assert.equal(out[0], h1);
+    // replay-to-N reproduces the hash the log had at N
+    await s.tira("send", "node", "a", "COMPLETE", "evidenceRef=e");
+    const h2 = (await s.tira("dump", "--hash")).out;
+    assert.notEqual(h2.slice(0, 71), h1.slice(0, 71));
+    assert.equal((await s.tira("dump", "--hash", "--at", "3")).out.slice(0, 71), h1.slice(0, 71));
+    const j = JSON.parse((await s.tira("dump", "--hash", "--json")).out);
+    assert.match(j.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(j.lastSeq, 4);
+  } finally {
+    s.done();
+  }
+});
+
+test("send accepts the stored event form too: start, add-child", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "node", "a");
+    assert.match((await s.tira("send", "node", "a", "start")).out, /transition\s+lifecycle=in_progress/);
+    assert.match((await s.tira("send", "node", "a", "add-child")).out, /noop/);
+    const types = JSON.parse((await s.tira("log", "--json")).out).map((e: { type: string }) => e.type);
+    assert.deepEqual(types, ["node.created", "node.start", "node.add-child"]);
+  } finally {
+    s.done();
+  }
+});
+
 test("types lists entity types with their states and events", async () => {
   const out: string[] = [];
   assert.equal(await run(["types"], { out: (l) => out.push(l), err: () => {}, env: {} }), 0);
