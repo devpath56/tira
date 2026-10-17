@@ -15,14 +15,15 @@
 
 The chart module is the transition function the fold engine will import directly — **test the machine, ship the machine.** The demo scenarios double as the acceptance test scripts (§5).
 
-## 1. Architecture (4 components + CLI)
+## 1. Architecture (4 components + UI)
 
 ```
-events.jsonl (append-only)
+event store — SQLite, append-only (interface: packing.md §3)
     │  write-time gates: schema, sequencing, evidence-on-COMPLETE,
     │  reason-on-REOPEN, add-child-to-done deny
     ▼
-fold engine ──imports──▶ node-lifecycle.mjs (the tested chart)
+fold engine ──imports──▶ transition tables (charts/ are the verified source;
+                           JSON + tiny runner is the preferred form)
     │  derives: tree, states, drain, DFS cursor; time-travel to event N
     ▼
 completion contract + suggester (deterministic; receipts; advisory-only)
@@ -31,20 +32,31 @@ completion contract + suggester (deterministic; receipts; advisory-only)
 invariant sweeps (on-demand)
 ```
 
-- **Language:** Node.js — the chart is already XState/JS; the fold engine reuses it verbatim.
-- **Storage:** flat JSONL in the workspace. No DB, no index in MVP (proposal assumption 4; falsifier: replay >1s).
-- **Interface:** one CLI (`track.mjs`) for the single worker. No server, no UI in MVP.
-- **Log location (needs ruling before Phase 1):** recommendation is the VM workspace, co-located with the chart and the worker that writes it. Mac-repo alternative parked until ruled.
+- **Language:** Node.js.
+- **Storage:** SQLite, append-only events table, behind the narrow storage interface
+  specified in `packing.md` §3 (`append` / `readStream` / `readAll` / `subscribe`).
+  KurrentDB is the named upgrade path — the interface makes the swap one module.
+  No second source of truth in MVP.
+- **Interface:** lean UI in MVP, for manual edge testing (log viewer, replay-to-N
+  stepper, derived-state inspector, event injection, denial surfacing). The UI reads
+  derived state only and writes through the guarded write path. No server in MVP.
+- **Packing (build/buy/clone per layer, OSS evaluation):** `packing.md`.
 
 ## 2. Build phases (sequenced; unblocked parts first)
 
 **Phase 0 — Rulings.** The 6 open questions from the proposal (§7) plus the NODE.state cache question. Phases 1–2 do not wait for them (event schema is settled; append-at-end insertion is the delegated decision, reversible).
 
 **Phase 1 — Event store + write gates.**
-Append-only JSONL; monotonic sequence numbers (gaps are anomaly signals); every event carries actor, timestamp, type, node ref, payload. Write-time gates: COMPLETE requires `evidenceRef`; REOPEN requires `reason`; ADD_CHILD under done/cancelled denied; unknown event types rejected; out-of-order sequence rejected. Each gate is a small falsifiable unit with its own tests.
+Append-only SQLite events table (schema in `packing.md` §3); gapless monotonic `seq`
+(gaps are anomaly signals); every event carries eventId, stream, type, node ref,
+payload, actor, timestamp. Write-time gates: COMPLETE requires `evidenceRef`; REOPEN
+requires `reason`; ADD_CHILD under done/cancelled denied; unknown event types rejected;
+out-of-order sequence rejected; duplicate eventIds are idempotent no-ops. Each gate is
+a small falsifiable unit with its own tests. Guards run in the write path *before*
+append — the store never validates domain rules.
 
 **Phase 2 — Fold engine.**
-Replay `events.jsonl` through `node-lifecycle.mjs` to derive: node set, parent/child links, sibling order, states, drain predicate, DFS cursor. Supports fold-to-N (time travel). The fold is authoritative; any cached copy is labeled cache and loses on disagreement (per the state-model ruling 2026-10-16).
+Replay the event store through the transition tables (`charts/` are the verified source) to derive: node set, parent/child links, sibling order, states, drain predicate, DFS cursor. Supports fold-to-N (time travel). The fold is authoritative; any cached copy is labeled cache and loses on disagreement (per the state-model ruling 2026-10-16).
 
 **Phase 3 — Completion contract + suggester.**
 On every COMPLETE: legality check (was the transition valid?), unblock set (dependents actually unblocked, verified), backtrack target, invariant spot-check on the affected path, then the next-action suggestion with mandatory receipts (trigger event, ranking-function version, rejected alternatives, vapor caveat). Deterministic: same log ⇒ same suggestion. Advisory only — nothing auto-executes.
@@ -52,8 +64,14 @@ On every COMPLETE: legality check (was the transition valid?), unblock set (depe
 **Phase 4 — Vapor pipeline + invariant sweeps.**
 Vapor pipeline (claim machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees.
 
-**Phase 5 — CLI + scenario test suite.**
-`track.mjs` wraps phases 1–4. The test suite executes §5: every demo scenario (S1–S8) replayed as a test, plus T1–T8. A scenario test = event script in, asserted fold out. The D2 deck remains the human-readable form of the same scripts.
+**Phase 5 — Lean UI (edge-testing rig) + scenario test suite.**
+The UI wraps phases 1–4 for manual edge testing: event-log viewer, replay-to-N stepper,
+derived-state inspector (cursor, drain flags, suggestions with receipts), manual event
+injection through the guarded write path, and denial surfacing (rejected writes shown
+with reasons). Clone Plane's component design patterns, not its code (AGPL-3.0 —
+patterns only). The test suite executes §5: every demo scenario (S1–S8) replayed as a
+test, plus T1–T8. A scenario test = event script in, asserted fold out. The D2 deck
+remains the human-readable form of the same scripts.
 
 ## 3. In scope / out of scope
 
@@ -67,7 +85,7 @@ Vapor pipeline (claim machine): DECLARED → FILE_PENDING → FILED → NODE_PEN
 | Vapor | Declare → age/breach → materialize pipeline | Chat-vs-file forensics; auto-declaration from chat |
 | Safety | On-demand invariant sweeps; hollow-node detection | Stall/starvation detection; auto-healing; background monitoring |
 | Workers | Single worker, self-authorized | Multi-worker: double-claim, concurrent merge, conflicting suggestions — scope void if a second writer appears |
-| Interface | CLI | Server, web UI, mobile |
+| Interface | Lean UI for manual edge testing (reads derived state; writes via guarded path) | Server, mobile, multi-user |
 
 ## 4. JTBD — possible in MVP vs deferred
 
@@ -131,15 +149,20 @@ Each test replays an event script and asserts the folded result. S1–S8 are the
 - **Gates:** no DONE without evidenceRef; no REOPEN without reason; no ADD_CHILD under done/cancelled without re-open — each breached in testing on purpose (T1, S2, S6, S4, T7) and each correctly denied.
 - **Falsifiers (proposal):** one full feature tracked end-to-end with clean sweep and zero undeclared vapor on spot-check = PASS. Log abandoned 30 days, or one unreproducible suggestion, or one gateless DONE = FAIL.
 
-## 7. Open rulings required (carried over, still awaiting his word)
+## 7. Open rulings required (carried over, still awaiting word — his or Isha's)
 
 1. Discovered-child insertion: append-at-end (delegated; reversible).
 2. Add-child-to-done: deny + explicit re-open (delegated; reversible).
 3. Blocker model: tree-local refs; full graph parked.
 4. Tamper evidence: sequence now, hash chain later.
-5. **Log location: VM workspace (recommended) vs Mac repo vs synced** — needed before Phase 1.
-6. Tree caps: depth 8, 20 children/parent (recommended).
-7. NODE.state field: declared cache with fold-wins arbitration (state-model ruling 2026-10-16; needs his confirmation).
-8. State-machine idempotency + done→cancelled policy (delegated 2026-10-16; reversible).
+5. Tree caps: depth 8, 20 children/parent (recommended).
+6. NODE.state field: declared cache with fold-wins arbitration (state-model ruling 2026-10-16; needs confirmation).
+7. State-machine idempotency + done→cancelled policy (delegated 2026-10-16; reversible).
 
-*Phase 1 can start on his go-word with ruling 5 alone; everything else is either delegated or parks cleanly.*
+**Resolved since the proposal** (see `packing.md` §5):
+- Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
+- Approval UX → chat (Muse/Claude); claim pipeline stays in our store (single source of truth).
+- Transition tables are the spec; JSON + tiny runner preferred over the XState vehicle.
+- Lean UI is in MVP scope, for manual edge testing.
+
+*Phase 1 is unblocked: the event store decision is made and the interface is specified.*

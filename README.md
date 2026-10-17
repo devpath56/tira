@@ -9,10 +9,16 @@ Nothing is stored as "current" — the fold is authoritative.
 1. **The story** — `demo/demo-deck-v6.html`: 9 scenarios, story-first, then the machine.
    Keyboard: `n` next, `b` back.
 2. **The plan** — `build-plan.md`: phases, in/out scope, JTBDs, test plan, acceptance criteria.
-3. **The spec** — `charts/`: two executable XState machines. These are not diagrams;
+3. **The packing** — `packing.md`: build/buy/clone per layer, the storage interface
+   (SQLite now, KurrentDB as the named upgrade), UI scope, decision log.
+4. **The spec** — `charts/`: the transition tables in executable form. These are not diagrams;
    they are the transition functions the implementation must honor.
 
 ## The spec (executable)
+
+The pair tables are the spec; the XState machines below are their verified executable
+form (packing.md D3: JSON tables + a tiny runner are the preferred going-forward form —
+the tables transfer verbatim from these 47/50 checks).
 
 | File | What it is | Verify |
 |---|---|---|
@@ -31,25 +37,31 @@ Rules the machines enforce:
 
 ## Build order
 
-Phase 1: event store + write gates → Phase 2: fold engine (imports these charts directly)
+Phase 1: event store (SQLite, via the storage interface in `packing.md` §3) + write gates
+→ Phase 2: fold engine (imports the transition tables)
 → Phase 3: completion contract + suggester → Phase 4: vapor pipeline + sweeps
-→ Phase 5: CLI + test suite.
+→ Phase 5: lean UI (edge-testing rig) + test suite.
 Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance scenarios
 (S1–S8 + S9); `demo/build_deck.py` rebuilds the deck from them.
 
-## Decisions you can take
+## Decisions
 
-Devansh resolved: claim-pipeline approvals happen in chat (Muse/Claude).
-Everything below is yours — each carries a recommendation; take it or come back:
+**Resolved** (see `packing.md` §5 for rationale):
+- Claim-pipeline approvals happen in chat (Muse/Claude).
+- Event store: SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade path.
+- Claim pipeline lives in our store (single source of truth).
+- Transition tables are the spec; JSON + tiny runner preferred over a framework vehicle.
+- Lean UI is in MVP scope, for manual edge testing.
 
-1. **Log location** (needed before Phase 1) — recommendation: VM workspace, co-located with the worker.
-2. **Tree caps** — recommendation: depth 8, 20 children per parent.
-3. **NODE.state field** — recommendation: declared cache; on disagreement the fold wins.
-4. **Discovered-child insertion** — recommendation: append-at-end (deterministic).
-5. **Add child under a done branch** — recommendation: deny; explicit re-open with reason.
-6. **Blocker model** — recommendation: tree-local blocked-by refs (no cycle detection in MVP).
-7. **Tamper evidence** — recommendation: sequence numbers now, hash chain later.
-8. **Idempotency** — duplicate START/COMPLETE/BLOCK/CANCEL are logged no-ops (already in the charts).
+**Still yours** — each carries a recommendation; take it or come back:
+
+1. **Tree caps** — recommendation: depth 8, 20 children per parent.
+2. **NODE.state field** — recommendation: declared cache; on disagreement the fold wins.
+3. **Discovered-child insertion** — recommendation: append-at-end (deterministic).
+4. **Add child under a done branch** — recommendation: deny; explicit re-open with reason.
+5. **Blocker model** — recommendation: tree-local blocked-by refs (no cycle detection in MVP).
+6. **Tamper evidence** — recommendation: sequence numbers now, hash chain later.
+7. **Idempotency** — duplicate START/COMPLETE/BLOCK/CANCEL are logged no-ops (already in the charts).
 
 ## Key concepts (30 seconds)
 
