@@ -42,7 +42,9 @@ the tables transfer verbatim from these 47/50 checks).
 | `charts/node-lifecycle.mjs` | Node states: unstarted → in_progress → done, plus blocked, cancelled. Guards: evidence on COMPLETE, reason on REOPEN. | `node charts/verify-node-lifecycle.mjs` (47 checks) |
 | `charts/claim-lifecycle.mjs` | Vapor claim pipeline: declared → file_pending → filed → node_pending → materialized / dropped. Approval gates, no stage skipping. | `node charts/verify-claim-lifecycle.mjs` (50 checks) |
 
-`npm install && npm run verify` runs both.
+| `charts/node-lifecycle.json` / `charts/claim-lifecycle.json` | The canonical tables — 35 and 36 state×event pairs, machine-generated from the `.mjs` charts (`node charts/extract-tables.mjs`). **Never hand-edit**; re-run the extractor after any chart change. | `node charts/verify-tables.mjs` (176 differential checks: JSON ≡ XState on every pair) |
+
+`npm install && npm run verify` runs all three (47 + 50 + 176 checks).
 
 Rules the machines enforce:
 - Events are the source of truth; states are derived by folding the log. On disagreement, the fold wins.
