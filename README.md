@@ -1,3 +1,13 @@
+## Why build this?
+
+- Devansh runs a factory where AI workers do the building — but tracking the work is a second job: who picked up what, what's moving, what went quiet, all reconstructed from chats, files, and lists at every status check.
+- Twice the factory lied to him: a silent session was assumed stood down while alive; work was marked landed having skipped every check.
+- Good ideas surface in conversation and die there — turning them into tracked work is manual effort nobody has.
+- Then Isha builds tira: every piece of work written down once, as it happens, in a record nobody can rewrite — the live picture always computed from that record, never asserted from memory.
+- Nothing can be called done without its proof attached; the machine simply refuses.
+- Interrupted work remembers exactly what it was waiting on — resuming isn't archaeology. Ideas caught in chat become tracked work. Any moment can be rewound to see precisely what the factory believed then.
+- What he couldn't do before: trust the picture. Now the system remembers, and he judges — Isha gave the factory a memory.
+
 > [!IMPORTANT]
 > **Exec Note**
 > - **Phase 1 is a vertical slice, not a foundation layer.** It ships a generic core for work management: the event store, the storage interface, the fold, and the write gates — events in, derived state out, guards enforced on every write. It is *not* a product, *not* storage without logic, and *not* a second source of truth.
