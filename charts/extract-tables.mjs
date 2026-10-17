@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nodeLifecycle } from "./node-lifecycle.mjs";
-import { claimLifecycle } from "./claim-lifecycle.mjs";
+import { ideaLifecycle } from "./idea-lifecycle.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const norm = (fn) => fn.toString().replace(/\s+/g, " ");
@@ -74,7 +74,7 @@ function extract(chart) {
 
 for (const [chart, file] of [
   [nodeLifecycle, "node-lifecycle.json"],
-  [claimLifecycle, "claim-lifecycle.json"],
+  [ideaLifecycle, "idea-lifecycle.json"],
 ]) {
   const table = extract(chart);
   writeFileSync(join(HERE, file), JSON.stringify(table, null, 2) + "\n");

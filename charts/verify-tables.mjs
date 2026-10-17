@@ -6,7 +6,7 @@ import { createMachine, createActor } from "xstate";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nodeLifecycle } from "./node-lifecycle.mjs";
-import { claimLifecycle } from "./claim-lifecycle.mjs";
+import { ideaLifecycle } from "./idea-lifecycle.mjs";
 import { loadTable, run as runJson } from "./transition-runner.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -75,6 +75,6 @@ function diff(name, chart, jsonFile, pathTo) {
 }
 
 diff("node", nodeLifecycle, "node-lifecycle.json", nodePathTo);
-diff("claim", claimLifecycle, "claim-lifecycle.json", claimPathTo);
+diff("idea", ideaLifecycle, "idea-lifecycle.json", claimPathTo);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -83,14 +83,14 @@ STORIES = {
         "Good idea \u2014 and everyone\u2019s about to sleep.",
         "That\u2019s where 90% of ideas live and die \u2014 a good sentence, then nothing. "
         "Three months later it\u2019s a surprise, or it never resurfaces.",
-        "The sentence is declared as a claim; the system drafts the file record and proposes where it belongs. "
+        "The sentence is declared as an idea; the system drafts the file record and proposes where it belongs. "
         "You just approve \u2014 twice. Watch vapor become a node, driven not remembered:",
     ),
     "s9": (
-        "You declared a claim \u2014 CSV export \u2014 and then life happened. Three days, no approval.",
+        "You declared an idea \u2014 CSV export \u2014 and then life happened. Three days, no approval.",
         "The draft sits in a doc nobody opens. The idea dies not with a bang but with a shrug \u2014 "
         "nobody is even told it stalled.",
-        "The claim was in the log, aging. At the SLA the breach predicate fires \u2014 it refuses to die "
+        "The idea was in the log, aging. At the SLA the breach predicate fires \u2014 it refuses to die "
         "quietly. You approve late and the pipeline resumes. Watch:",
     ),
     "s8": (
@@ -123,7 +123,7 @@ CONTENT = {
          "Your plan is scattered across messages; \u201cwhere was I?\u201d is a scroll away."),
         ("The blocker is a first-class event with a named cause \u2014 not a feeling.",
          "\u201cBlocked on something\u201d scrolls away; tomorrow nobody remembers on what."),
-        ("Discovered work takes the direct path \u2014 parent known, found mid-work \u2014 so it skips the claim pipeline; provenance is recorded on the event, and it can't be forgotten.",
+        ("Discovered work takes the direct path \u2014 parent known, found mid-work \u2014 so it skips the idea pipeline; provenance is recorded on the event, and it can't be forgotten.",
          "The dependency stays a half-remembered aside; it never becomes real work."),
         ("Exactly one active node. The cursor moves; the old branch waits explicitly.",
          "Two threads \u201cin progress\u201d in your head; both decay."),
@@ -169,7 +169,7 @@ CONTENT = {
     "s5": [
         ("Ideas are inventory \u2014 the system treats an unfiled idea as a tracked liability.",
          "This is where 90% of ideas live: a good sentence, then nothing."),
-        ("Declaration is one event: who, when, what. The claim exists now \u2014 in the log, not in memory.",
+        ("Declaration is one event: who, when, what. The idea exists now \u2014 in the log, not in memory.",
          "\u201cDidn't we talk about pagination once?\u201d \u2014 yes, and it's gone."),
         ("The sweep drafts the file record on its own. Nobody drives; the pipeline moves.",
          "Someone has to remember to write it up. Nobody does."),
@@ -177,19 +177,19 @@ CONTENT = {
          "The write-up happens never, or twice, differently."),
         ("Placement is proposed \u2014 parent and kind \u2014 by rule, not by recall.",
          "Where did we decide this belonged? Nowhere."),
-        ("Second approval: the claim becomes a node with a place in traversal order.",
+        ("Second approval: the idea becomes a node with a place in traversal order.",
          "It resurfaces months later as a surprise, or never."),
         ("Replay derives the cursor: pagination. You approved twice; the system drove.",
          "The tree is whatever you remember to mention."),
     ],
     "s9": [
-        ("Every claim starts the same way: declared, timestamped, in the log.",
+        ("Every idea starts the same way: declared, timestamped, in the log.",
          "Ideas start as sentences and end as rumors."),
-        ("The claim is 0 days old and already visible \u2014 aging is automatic.",
+        ("The idea is 0 days old and already visible \u2014 aging is automatic.",
          "Day 0 looks exactly like day 30: invisible."),
         ("The draft waits in the pipeline \u2014 in the log, not in anyone's head.",
          "The draft waits in a doc nobody opens."),
-        ("Breach is derived, like drain: the predicate fires, the claim is flagged. Silence is not an option.",
+        ("Breach is derived, like drain: the predicate fires, the idea is flagged. Silence is not an option.",
          "Nobody is told it stalled. It just fades."),
         ("Late approval still works \u2014 the pipeline resumes where it waited.",
          "Three days later the context is gone; starting over costs more than the idea."),
@@ -199,7 +199,7 @@ CONTENT = {
          "Completions end in a void; momentum leaks."),
         ("The suggestion is proactive \u2014 it arrives without being asked.",
          "You have to remember to ask what's next."),
-        ("Receipts: trigger, rule version, rejected alternatives. Reproducible from the log. Claims awaiting approval appear beside node picks.",
+        ("Receipts: trigger, rule version, rejected alternatives. Reproducible from the log. Ideas awaiting approval appear beside node picks.",
          "\u201cYou should probably do X next\u201d \u2014 uncheckable advice from a black box."),
         ("Advisory, never autonomous: the machine suggests, you decide, the log records.",
          "Either nagging automation or no guidance at all."),
@@ -239,7 +239,7 @@ LEGEND = """
 <span class="sw ring" style="border-color:#c81e1e"></span>cursor: derived next
 <span class="sw ring" style="border-color:#059669"></span>drained subtree
 <span class="lsep">|</span>
-<span class="sw" style="background:#f3f4f6;border-color:#9ca3af"></span>claim declared
+<span class="sw" style="background:#f3f4f6;border-color:#9ca3af"></span>idea declared
 <span class="sw" style="background:#fef3c7;border-color:#d97706"></span>pending your approval
 <span class="sw" style="background:#dbeafe;border-color:#2563eb"></span>filed
 <span class="sw" style="background:#d1fae5;border-color:#059669"></span>materialized

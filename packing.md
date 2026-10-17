@@ -25,7 +25,7 @@ decided against the JTBDs with no incumbency bias (assumes nothing already spec'
 |---|---|---|
 | Event log | **SQLite** (interface below; KurrentDB is the named upgrade) | Append-only table, single file, zero ops, queryable. KurrentDB is the right *category* (event-native) but serves storage, not logic — all 11 JTBDs' logic stays custom either way, and single-writer MVP scale doesn't justify the server. |
 | Fold engine | — (build) | Pure function over the transition tables; no OSS knows our domain. |
-| Transition tables | — (build); JSON Schema validates shape | The 35-pair node table and 36-pair claim table are the spec. Executable form is an implementation choice (JSON + tiny runner preferred over a framework). |
+| Transition tables | — (build); JSON Schema validates shape | The 35-pair node table and 36-pair idea table are the spec. Executable form is an implementation choice (JSON + tiny runner preferred over a framework). |
 | Write-time guards | — (build) | Plain conditionals (`COMPLETE` without `evidenceRef` → reject). OPA is factory-consistent but overkill inside the MVP. |
 | Suggester + completion contract | — (build) | Deterministic functions over the fold. Nothing to buy. |
 | Claim pipeline | **Plane approval flows** — best OSS alternative, **rejected** | Shape matches (pending → approve/reject → destination) but splits state across two stores with the bridge as the bug farm. Single store wins. |
@@ -63,7 +63,7 @@ interface EventStore {
 }
 
 interface NewEvent {
-  type: string;       // e.g. "node.started", "claim.declared"
+  type: string;       // e.g. "node.started", "idea.declared"
   data: object;       // payload — validated by the write path BEFORE append
   metadata?: { actor?: string; causationId?: string };
 }
@@ -79,8 +79,8 @@ interface StoredEvent extends NewEvent {
 
 ### Stream layout
 
-One stream per tree: `tasktree-<id>`. Node events (`node.*`) and claim events
-(`claim.*`) share the stream — one ordering, one replay, no cross-stream
+One stream per tree: `tasktree-<id>`. Node events (`node.*`) and idea events
+(`idea.*`) share the stream — one ordering, one replay, no cross-stream
 reconstruction. The `$all` source exists for future multi-tree operation.
 
 ### Rules the interface enforces (both implementations)
@@ -151,7 +151,7 @@ never state directly.
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | Plane serves nothing in MVP scope | Deep-dived all 11 JTBDs against Plane's data model: hierarchy/order representable, but cursor, replay, guards, suggestions, and contracts are structurally impossible. Its best fits (approval-flow shape for the claim pipeline, Cancelled group) don't survive the single-store rule. |
+| D1 | Plane serves nothing in MVP scope | Deep-dived all 11 JTBDs against Plane's data model: hierarchy/order representable, but cursor, replay, guards, suggestions, and contracts are structurally impossible. Its best fits (approval-flow shape for the idea pipeline, Cancelled group) don't survive the single-store rule. |
 | D2 | GitHub-as-mirror dropped | Assumed no custom UI; with the lean UI reading derived state, there's nothing to mirror. GitHub returns to git hosting. |
 | D3 | Transition tables over framework | The pair tables are the spec; XState was one executable vehicle. JSON + tiny runner is leaner, dependency-free, equally verifiable. (Existing 47/50 checks transfer as the tables.) |
 | D4 | Claim pipeline stays in our store | Plane's approval flow is the legitimate buy-alternative; rejected on single-source-of-truth (split-brain bridge is the bug farm). |

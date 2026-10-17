@@ -1,0 +1,213 @@
+{
+  "id": "idea-lifecycle",
+  "initial": "declared",
+  "states": [
+    "declared",
+    "file_pending",
+    "filed",
+    "node_pending",
+    "materialized",
+    "dropped"
+  ],
+  "events": [
+    "DRAFT_FILE",
+    "APPROVE_FILE",
+    "REJECT_FILE",
+    "PROPOSE_NODE",
+    "APPROVE_NODE",
+    "REJECT_NODE"
+  ],
+  "pairs": [
+    {
+      "from": "declared",
+      "event": "DRAFT_FILE",
+      "outcome": "transition",
+      "to": "file_pending"
+    },
+    {
+      "from": "declared",
+      "event": "APPROVE_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "declared",
+      "event": "REJECT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "declared",
+      "event": "PROPOSE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "declared",
+      "event": "APPROVE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "declared",
+      "event": "REJECT_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "file_pending",
+      "event": "DRAFT_FILE",
+      "outcome": "noop"
+    },
+    {
+      "from": "file_pending",
+      "event": "APPROVE_FILE",
+      "outcome": "transition",
+      "to": "filed"
+    },
+    {
+      "from": "file_pending",
+      "event": "REJECT_FILE",
+      "outcome": "transition",
+      "to": "dropped",
+      "guard": "hasReason"
+    },
+    {
+      "from": "file_pending",
+      "event": "PROPOSE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "file_pending",
+      "event": "APPROVE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "file_pending",
+      "event": "REJECT_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "filed",
+      "event": "DRAFT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "filed",
+      "event": "APPROVE_FILE",
+      "outcome": "noop"
+    },
+    {
+      "from": "filed",
+      "event": "REJECT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "filed",
+      "event": "PROPOSE_NODE",
+      "outcome": "transition",
+      "to": "node_pending"
+    },
+    {
+      "from": "filed",
+      "event": "APPROVE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "filed",
+      "event": "REJECT_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "node_pending",
+      "event": "DRAFT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "node_pending",
+      "event": "APPROVE_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "node_pending",
+      "event": "REJECT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "node_pending",
+      "event": "PROPOSE_NODE",
+      "outcome": "noop"
+    },
+    {
+      "from": "node_pending",
+      "event": "APPROVE_NODE",
+      "outcome": "transition",
+      "to": "materialized"
+    },
+    {
+      "from": "node_pending",
+      "event": "REJECT_NODE",
+      "outcome": "transition",
+      "to": "dropped",
+      "guard": "hasReason"
+    },
+    {
+      "from": "materialized",
+      "event": "DRAFT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "materialized",
+      "event": "APPROVE_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "materialized",
+      "event": "REJECT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "materialized",
+      "event": "PROPOSE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "materialized",
+      "event": "APPROVE_NODE",
+      "outcome": "noop"
+    },
+    {
+      "from": "materialized",
+      "event": "REJECT_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped",
+      "event": "DRAFT_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped",
+      "event": "APPROVE_FILE",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped",
+      "event": "REJECT_FILE",
+      "outcome": "noop"
+    },
+    {
+      "from": "dropped",
+      "event": "PROPOSE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped",
+      "event": "APPROVE_NODE",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped",
+      "event": "REJECT_NODE",
+      "outcome": "noop"
+    }
+  ],
+  "guards": {
+    "hasReason": "event.reason is a non-empty string"
+  }
+}

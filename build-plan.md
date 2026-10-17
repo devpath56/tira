@@ -8,9 +8,9 @@
 
 | Artifact | Location | Verified |
 |---|---|---|
-| Canonical transition tables (JSON) | `tracking-mvp/charts/node-lifecycle.json` (35 pairs), `tracking-mvp/charts/claim-lifecycle.json` (36 pairs) | Mechanically extracted from the charts; 176 differential checks prove JSON ≡ XState on every state×event×guard-polarity |
+| Canonical transition tables (JSON) | `tracking-mvp/charts/node-lifecycle.json` (35 pairs), `tracking-mvp/charts/idea-lifecycle.json` (36 pairs) | Mechanically extracted from the charts; 176 differential checks prove JSON ≡ XState on every state×event×guard-polarity |
 | Node lifecycle chart (XState, executable reference) | `tracking-mvp/charts/node-lifecycle.mjs` | Constructed + executed: 35 state×event pairs, all 5 states reachable, guards fire, no vacuous done (47 checks) |
-| Claim pipeline chart (XState, executable reference) | `tracking-mvp/charts/claim-lifecycle.mjs` | Constructed + executed: 36 pairs, 50/50 checks — no-skip (no path to materialized bypasses filed), approval gates, bare-reject guard |
+| Idea pipeline chart (XState, executable reference) | `tracking-mvp/charts/idea-lifecycle.mjs` | Constructed + executed: 36 pairs, 50/50 checks — no-skip (no path to materialized bypasses filed), approval gates, bare-reject guard |
 | State matrix + 3 delegated rulings | chat 2026-10-16 (idempotent no-ops; done→cancelled forbidden; add-child-to-done denied) | Rulings recorded in chart comments; reversible |
 | 8 demo scenarios as D2 animations + HTML deck | `tracking-mvp/demo/` | Every board rendered + screenshot-verified against real D2 v0.9.0 |
 
@@ -74,7 +74,7 @@ anything else is built on it.*
 On every COMPLETE: legality check (was the transition valid?), unblock set (dependents actually unblocked, verified), backtrack target, invariant spot-check on the affected path, then the next-action suggestion with mandatory receipts (trigger event, ranking-function version, rejected alternatives, vapor caveat). Deterministic: same log ⇒ same suggestion. Advisory only — nothing auto-executes.
 
 **Phase 3 — Vapor pipeline + invariant sweeps.**
-Vapor pipeline (claim machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees.
+Vapor pipeline (idea machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees.
 
 **Phase 4 — Lean UI (edge-testing rig) + scenario test suite.**
 The UI wraps phases 1–3 for manual edge testing: event-log viewer, replay-to-N stepper,
@@ -140,10 +140,10 @@ Each test replays an event script and asserts the folded result. S1–S8 are the
 | S2 done-without-proof | COMPLETE (bare) → COMPLETE (+evidence) | bare denied, state stays in_progress; evidenced → done |
 | S7 false finish | START→CANCEL→START | cancelled terminal; START denied; improve_visual drains |
 | S3 backtrack | (post S1+S2+S7 log) | cursor = table; drain predicates true up the chain |
-| S5 vapor catch | DECLARE→(age)→MATERIALIZE | claim listed with age; then node under table, unstarted |
+| S5 vapor catch | DECLARE→(age)→MATERIALIZE | idea listed with age; then node under table, unstarted |
 | S8 what's next | (post S5 log) | suggestion = START pagination + receipts reproduce on re-fold |
 | S6 honest undo | REOPEN (bare) → REOPEN (+reason) → COMPLETE | bare denied; reasoned → in_progress; audit trail shows done→in_progress→done |
-| S9 escalation | DECLARE → DRAFT_FILE → (3 days pass) → APPROVE_FILE (late) | breach predicate fires on unapproved claim; late approval resumes the pipeline; claim survived in the log |
+| S9 escalation | DECLARE → DRAFT_FILE → (3 days pass) → APPROVE_FILE (late) | breach predicate fires on unapproved idea; late approval resumes the pipeline; claim survived in the log |
 | S4 scope creep | ADD_CHILD (denied) → REOPEN (+reason) → ADD_CHILD | denied on done branch; after re-open, child exists with provenance |
 | T1 invalid transitions | COMPLETE from unstarted; UNBLOCK from in_progress; REOPEN from cancelled | all rejected; state unchanged; rejection logged |
 | T2 replay determinism | Full S1–S8 log folded twice | byte-identical derived state; identical suggestion |
@@ -173,7 +173,7 @@ Each test replays an event script and asserts the folded result. S1–S8 are the
 
 **Resolved since the proposal** (see `packing.md` §5):
 - Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
-- Approval UX → chat (Muse/Claude); claim pipeline stays in our store (single source of truth).
+- Approval UX → chat (Muse/Claude); idea pipeline stays in our store (single source of truth).
 - Transition tables are the spec; JSON + tiny runner preferred over the XState vehicle.
 - Lean UI is in MVP scope, for manual edge testing.
 

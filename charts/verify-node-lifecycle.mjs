@@ -1,4 +1,4 @@
-// Verification for node-lifecycle.mjs — mirrors verify-claim-lifecycle.mjs.
+// Verification for node-lifecycle.mjs — mirrors verify-idea-lifecycle.mjs.
 // Run: node verify-node-lifecycle.mjs
 import { createMachine, createActor } from "xstate";
 import { nodeLifecycle } from "./node-lifecycle.mjs";
