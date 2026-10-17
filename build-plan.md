@@ -1,7 +1,7 @@
 # MVP Build Plan — Deterministic Task-Tree Tracking
 
 - **Date:** 2026-10-16
-- **Status:** Track A build authorized (N5 2026-10-17); everything else needs an explicit go-word.
+- **Status:** Track A built + merged to main (PR #1, 2026-10-17); C1 go-word given 2026-10-17; everything else needs an explicit go-word.
 - **Companions:** proposal (`proposal-deterministic-tracking-mvp-20261016.md`), functional requirements (`functional-requirements-deterministic-tracking-mvp-2026-10-16.md`), exec brief (126 trust queries), state chart (`tracking-mvp/charts/node-lifecycle.mjs`), demo (`tracking-mvp/demo/`)
 
 ## 0. What's already built (do not rebuild)
@@ -79,7 +79,7 @@ anything else is built on it.*
 On every COMPLETE: legality check (was the transition valid?), unblock set (dependents actually unblocked, verified), backtrack target, invariant spot-check on the affected path, then the next-action suggestion with mandatory receipts (trigger event, ranking-function version, rejected alternatives, vapor caveat). Deterministic: same log ⇒ same suggestion. Advisory only — nothing auto-executes.
 
 **Phase 3 — Vapor pipeline + invariant sweeps.**
-Vapor pipeline (idea machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees. Stream placement (decided 2026-10-16): `claim.*` namespace on the shared stream; idea/claim chart duplication (audit F5) collapses or is justified before regions compose.
+Vapor pipeline (idea machine): DECLARED → FILE_PENDING → FILED → NODE_PENDING → MATERIALIZED / DROPPED. The sweep proposes (drafts file, proposes parent+kind — deterministic); he approves at each gate (human-in-the-loop); the machine enforces no-skip, no double-approve, reason-on-reject. Breach/escalation is a derived predicate (like drain), not a state. Completion gate carries a `vapor_declared` attestation field. Sweeps (on-demand): orphans, cycles, done-parent⇒children-terminal, bidirectional parent↔child, count reconciliation, depth drift, hollow nodes (missing definition/done-criteria), drained-then-regrown subtrees. Stream placement (decided 2026-10-17): factory stream uses `brief.*` / `session.*` / `drop.*` namespaces (B1 tables as built); tira's vapor pipeline uses `idea.*` per N8. Handoff birth event is `node.born` (proposal F1, R2).
 
 **Phase 4 — Lean UI (edge-testing rig).**
 The UI wraps phases 1–3 for manual edge testing: event-log viewer, replay-to-N stepper,
@@ -159,7 +159,7 @@ Each test replays an event script and asserts the folded result. S1–S9 are the
 | T7 drained resurrection | ADD_CHILD under drained subtree | denied; after REOPEN(with reason) succeeds; subtree un-drains |
 | T8 time travel | Fold to N for several N | historical states match the demo boards frame-for-frame |
 | R1 region scans | chart JSONs + composition config through `region-scan.py` | overlap scan exits 0 (no event in >1 region except declared handoff pairs); guard scan reports 0 cross-region reads |
-| R2 handoff replay | scripted log: `claim.materialized {claim_id: X}` → `node.born {claim_id: X}` | folds to claim=materialized AND node=unstarted with matching X |
+| R2 handoff replay | scripted log: `brief.claimed {claim_id: X}` → `node.born {claim_id: X}` | folds to brief-claim=claimed-active AND node=unstarted with matching X |
 | R3 dangling handoff | log with `claim.materialized`, no `node.born` | dangling-handoff check lists X as pending, not an error |
 
 ## Demo checkpoints (added 2026-10-16) — Isha demos working features; UI starts thin at D1 and grows
@@ -219,6 +219,12 @@ QE notes: (q04) a PASS on M1 licenses D2's lanes — so M1 checks completeness n
 - Her Track-A defaults D2–D5 (attachment group D, not the demo checkpoints) confirmed as built; D1 casing (`node.created` vs `node.START`) open — Isha to pick one case.
 - Group B via the faster alternative: she drafts the 5 factory tables, he confirms/corrects. B1 already decided (single append process, actors in metadata).
 - E2 confirmed per N6: tests live in Phase 1, Phase 4 is UI only.
+**Decided 2026-10-17** (B1 draft review):
+- B1 factory tables signed off: yes to A1–A15 (A8 verdict values + A13 liveness stay open), C1–C6 confirmed.
+- C1 go-word GIVEN (tree, drain, cursor).
+- `node.born` over `node.created`; D1 thin HTML confirmed.
+- Verified independently: `region-scan.py --all` on the 5 tables exits 0 (0 findings); BFS over H1–H6 reaches exactly the 10 joint combos.
+- Review docs (regions proposal, `region-scan.py`, event architecture, functional reqs) pushed under `docs/` on the PR branch; PR #1 merged to main.
 
 **Resolved since the proposal** (see `packing.md` §5):
 - Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
