@@ -204,3 +204,16 @@ test("end to end: the real entry script, exit codes included", () => {
     s.done();
   }
 });
+
+test("end to end: plain `node scripts/tira.ts` (no flags) prints no SQLite warning", () => {
+  const s = sandbox();
+  try {
+    const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+    const r = spawnSync(process.execPath, [script, "--db", s.db, "create", "node", "a"], { encoding: "utf8" });
+    assert.equal(r.status, 0);
+    assert.doesNotMatch(r.stderr, /ExperimentalWarning|SQLite/);
+    assert.equal(r.stderr, "");
+  } finally {
+    s.done();
+  }
+});
