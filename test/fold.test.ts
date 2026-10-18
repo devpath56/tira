@@ -167,7 +167,7 @@ test("stored event names are lowercase-kebab, mechanically from the table events
   await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "START" });
   await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "ADD_CHILD" });
   await wp.submit({ stream: STREAM, kind: "event", entity: n, event: "UNBLOCK" }); // rejected
-  assert.deepEqual((await store2.readAll()).map((e) => e.type), ["node.created", "node.start", "node.add-child", "command.rejected"]);
+  assert.deepEqual((await store2.readAll()).map((e) => e.type), ["node.born", "node.start", "node.add-child", "command.rejected"]);
   for (const e of await store.readAll()) assert.match(e.type, /^[a-z]+\.[a-z]+(-[a-z]+)*$/, e.type);
 });
 

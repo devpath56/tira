@@ -9,8 +9,11 @@ import type { StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { evaluate, type RejectCode } from "./evaluate.ts";
 import { REJECTED, toIntent, type RejectedData } from "./events.ts";
-import type { EntityRef, EntityState, StateView } from "./types.ts";
-import { entityKey } from "./types.ts";
+import type { EntityState, StateView } from "./types.ts";
+import { activeNodes, cursor, isDrained, roots } from "./tree.ts";
+import { compareCodeUnits, makeView } from "./view.ts";
+
+export { compareCodeUnits, makeView } from "./view.ts";
 
 export interface FoldOptions {
   upToSeq?: number;
@@ -28,7 +31,7 @@ export interface Rejection {
 }
 
 // A stored event the fold could not apply. Should never happen when every write
-// goes through the write path; if it does, the log disagrees with the tables.
+// goes through the write path; if it does, the log disagrees with the rules.
 export interface Anomaly {
   seq: number;
   stream: string;
@@ -37,30 +40,20 @@ export interface Anomaly {
   problem: string;
 }
 
+// Per stream, per tree type: the derived shape of the tree.
+export interface TreeSummary {
+  roots: string[]; // in birth order
+  cursor: string | null; // where the work is (tree.ts: leaf-scoped DFS)
+  active: string[]; // in_progress with no in_progress descendant; the gate keeps this <= 1
+}
+
 export interface FoldResult {
   lastSeq: number; // highest seq folded (0 if none)
   entities: EntityState[]; // sorted by stream, then key
   derived: Record<string, Record<string, Record<string, unknown>>>; // stream -> key -> predicate -> value
+  trees: Record<string, Record<string, TreeSummary>>; // stream -> type -> summary
   rejections: Rejection[];
   anomalies: Anomaly[];
-}
-
-// Code-unit order, deliberately NOT localeCompare: canonical output must not depend
-// on the machine's locale or ICU version, or refolds stop being byte-identical
-// across machines (build-plan.md T2, manual test M0).
-export function compareCodeUnits(a: string, b: string): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
-}
-
-const byKey = (a: EntityState, b: EntityState) => compareCodeUnits(a.key, b.key);
-
-export function makeView(entities: ReadonlyMap<string, EntityState>): StateView {
-  return {
-    get: (ref: EntityRef) => entities.get(entityKey(ref)),
-    all: (type?: string) => [...entities.values()].filter((e) => type === undefined || e.type === type).sort(byKey),
-  };
 }
 
 const isRejectedData = (d: unknown): d is RejectedData => {
@@ -91,6 +84,7 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
   const rejections: Rejection[] = [];
   const anomalies: Anomaly[] = [];
   let lastSeq = 0;
+  const creationNameOf = (t: string) => registry.creationName(t);
 
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
   for (const e of ordered) {
@@ -110,7 +104,7 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       });
       continue;
     }
-    const intent = toIntent(e);
+    const intent = toIntent(e, creationNameOf);
     if (!intent) {
       anomaly("unrecognised event shape");
       continue;
@@ -123,35 +117,51 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
     }
     const prev = entities.get(ev.key);
     const createdBy = prev ? prev.createdBy : intent.actor;
+    const tree = prev?.tree ?? ev.tree;
     entities.set(ev.key, {
       stream: e.stream,
       type: intent.entity.type,
       id: intent.entity.id,
-      ...(intent.entity.version !== undefined ? { version: intent.entity.version } : {}),
+      ...(intent.entity.version === undefined ? {} : { version: intent.entity.version }),
       key: ev.key,
       regions: ev.regions,
       createdSeq: prev?.createdSeq ?? e.seq,
       lastSeq: e.seq,
       lastRecordedAt: e.recordedAt,
-      ...(createdBy !== undefined ? { createdBy } : {}),
-      ...(intent.actor !== undefined ? { lastActor: intent.actor } : {}),
+      ...(createdBy === undefined ? {} : { createdBy }),
+      ...(intent.actor === undefined ? {} : { lastActor: intent.actor }),
+      ...(tree === undefined ? {} : { tree }),
     });
+    // A birth appends the child to its parent's list (append-at-end, ruling 1).
+    if (!prev && ev.tree?.parent !== undefined) {
+      const parent = entities.get(ev.tree.parent);
+      if (parent?.tree) entities.set(parent.key, { ...parent, tree: { ...parent.tree, children: [...parent.tree.children, ev.key] } });
+    }
   }
 
   const entities: EntityState[] = [];
   const derived: FoldResult["derived"] = {};
+  const trees: FoldResult["trees"] = {};
   for (const stream of [...streams.keys()].sort(compareCodeUnits)) {
     const view = views.get(stream) as StateView;
     for (const ent of view.all()) {
       entities.push(ent);
-      const fns = registry.get(ent.type)?.derived;
-      if (!fns) continue;
-      (derived[stream] ??= {})[ent.key] = Object.fromEntries(
-        Object.entries(fns).map(([name, fn]) => [name, fn(ent, { now: opts.now, vantage: opts.vantage, view })]),
-      );
+      const def = registry.get(ent.type);
+      const values: Record<string, unknown> = {};
+      if (def?.tree) values.drained = isDrained(def.tree, ent, view);
+      for (const [name, fn] of Object.entries(def?.derived ?? {})) values[name] = fn(ent, { now: opts.now, vantage: opts.vantage, view });
+      if (Object.keys(values).length > 0) (derived[stream] ??= {})[ent.key] = values;
+    }
+    for (const def of registry.types()) {
+      if (!def.tree || view.all(def.type).length === 0) continue;
+      (trees[stream] ??= {})[def.type] = {
+        roots: roots(def.type, view).map((r) => r.key),
+        cursor: cursor(def.tree, def.type, view)?.key ?? null,
+        active: activeNodes(def.tree, def.type, view).map((a) => a.key),
+      };
     }
   }
-  return { lastSeq, entities, derived, rejections, anomalies };
+  return { lastSeq, entities, derived, trees, rejections, anomalies };
 }
 
 // Stable serialization: sorted keys at every level. Two folds of the same log

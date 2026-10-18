@@ -204,7 +204,35 @@ test("send accepts the stored event form too: start, add-child", async () => {
     assert.match((await s.tira("send", "node", "a", "start")).out, /transition\s+lifecycle=in_progress/);
     assert.match((await s.tira("send", "node", "a", "add-child")).out, /noop/);
     const types = JSON.parse((await s.tira("log", "--json")).out).map((e: { type: string }) => e.type);
-    assert.deepEqual(types, ["node.created", "node.start", "node.add-child"]);
+    assert.deepEqual(types, ["node.born", "node.start", "node.add-child"]);
+  } finally {
+    s.done();
+  }
+});
+
+test("C1: --parent builds the tree; tree and render show it; render's hash = dump --hash", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "node", "root");
+    assert.match((await s.tira("create", "node", "a", "--parent", "root")).out, /node:a\s+created/);
+    await s.tira("create", "node", "b", "--parent", "root", "kind=discovered", "discovered_during=a", "--actor", "isha");
+    assert.equal((await s.tira("create", "node", "x", "--parent", "ghost")).code, 2); // unknown-parent
+    assert.equal((await s.tira("send", "node", "a", "START", "--parent", "root")).code, 1); // usage
+    const tree = (await s.tira("tree")).out;
+    assert.match(tree, /cursor node:a · active —/);
+    assert.match(tree, /^├─ a\s+unstarted\s+◆ cursor$/m);
+    assert.match(tree, /^└─ b\s+unstarted\s+found during a$/m);
+    const out = join(s.dir, "page.html");
+    const rendered = await s.tira("render", "--out", out);
+    assert.equal(rendered.code, 0);
+    const hash = (await s.tira("dump", "--hash")).out.slice("sha256:".length, "sha256:".length + 64);
+    assert.match(rendered.out, new RegExp(`3 node\\(s\\) · seq \\d+ · sha256:${hash}$`));
+    const { readFileSync } = await import("node:fs");
+    const html = readFileSync(out, "utf8");
+    assert.match(html, new RegExp(`data-dump-hash="${hash}"`));
+    assert.equal((html.match(/data-key="node:/g) ?? []).length, 3);
+    const types = JSON.parse((await s.tira("log", "--json")).out).map((e: { type: string }) => e.type);
+    assert.deepEqual(types.slice(0, 3), ["node.born", "node.born", "node.born"]);
   } finally {
     s.done();
   }

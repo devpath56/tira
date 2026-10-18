@@ -50,7 +50,7 @@ test("S6 honest undo: bare REOPEN rejected; reasoned REOPEN -> in_progress; trai
   assert.equal(status(await t.send("REOPEN", { reason: "wrong palette file" })), "appended:transition");
   assert.equal(status(await t.send("COMPLETE", { evidenceRef: "palette-v2.png" })), "appended:transition");
   const types = (await t.store.readStream(STREAM)).map((e) => e.type);
-  assert.deepEqual(types, ["node.created", "node.start", "node.complete", REJECTED, "node.reopen", "node.complete"]);
+  assert.deepEqual(types, ["node.born", "node.start", "node.complete", REJECTED, "node.reopen", "node.complete"]);
   assert.equal(await t.lifecycle(), "done");
 });
 
@@ -185,7 +185,7 @@ test("a command mutated after submit() is evaluated as submitted", async () => {
   (cmd as { event: string }).event = "CANCEL";
   cmd.entity.id = "someone-else";
   assert.equal(status(await pending), "appended:transition");
-  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.start"]);
+  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.born", "node.start"]);
 });
 
 test("concurrent submits with the same eventId: one lands, the rest are duplicates", async () => {
@@ -241,7 +241,7 @@ test("lost expectedRevision race: re-read and re-evaluate against the new state"
   const r = await wp.submit({ stream: STREAM, kind: "event", entity: N, event: "START" });
   // Our START was evaluated as a transition, lost the race, and was re-evaluated as a no-op.
   assert.equal(status(r), "appended:noop");
-  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.created", "node.start", "node.start"]);
+  assert.deepEqual((await t.store.readStream(STREAM)).map((e) => e.type), ["node.born", "node.start", "node.start"]);
 });
 
 test("cross-process race on an EMPTY stream: the loser re-evaluates (create -> already-exists)", async () => {
@@ -263,7 +263,7 @@ test("cross-process race on an EMPTY stream: the loser re-evaluates (create -> a
   };
   const r = await new WritePath(racing, registry).submit({ stream: STREAM, kind: "create", entity: N });
   assert.equal(status(r), "rejected:already-exists");
-  assert.deepEqual((await store.readStream(STREAM)).map((e) => e.type), ["node.created", REJECTED]);
+  assert.deepEqual((await store.readStream(STREAM)).map((e) => e.type), ["node.born", REJECTED]);
 });
 
 test("idea pipeline: no-skip enforced through the write path (approve before propose rejected)", async () => {

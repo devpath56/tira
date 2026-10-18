@@ -17,5 +17,10 @@ jobs:
       # Canonical JSON must equal a fresh extraction from the charts (no hand edits).
       - run: node charts/extract-tables.mjs && git diff --exit-code charts/*.json
       - run: npm run check
+      # Regions proposal: overlap + guard scans at pack time, in WARN mode first
+      # (graduation rule: deny only after the bar proves non-nuisance; the operator signs).
+      - name: region-scan (warn mode)
+        continue-on-error: true
+        run: python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json
       # Every planted bug must be caught by the suite (scripts/mutants.ts).
       - run: npm run mutants

@@ -34,7 +34,7 @@ const entity = (state: string): EntityState => ({
   stream: "s", type: "t", id: "x", key: "t:x", regions: { lifecycle: state }, createdSeq: 1, lastSeq: 1,
   lastRecordedAt: "2026-10-16T00:00:00.000Z",
 });
-const emptyView: StateView = { get: () => undefined, all: () => [] };
+const emptyView: StateView = { get: () => undefined, getKey: () => undefined, all: () => [] };
 const full = { evidenceRef: "e", reason: "r" };
 
 function code(t: Table, from: string, ev: string): string {

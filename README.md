@@ -66,50 +66,65 @@ Rationale for the Phase 1 scope: `packing.md` D9 (factory as customer #1).
 Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance scenarios
 (S1–S8 + S9); `demo/build_deck.py` rebuilds the deck from them.
 
-## Code — Phase 1, Track A (generic core)
+## Code — Phase 1: Track A (generic core) + Track C1 (tree)
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 43 known bugs and fails unless the suite catches every one.
-CI runs both, and also re-extracts `charts/*.json` and fails on any difference (no hand edits).
-No runtime dependencies: `xstate` is a dev dependency, used only by the chart verifiers.
+`npm run mutants` plants 62 known bugs and fails unless the suite catches every one.
+CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
+runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
+regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
+dependency, used only by the chart verifiers.
 
 | Path | What it is |
 |---|---|
 | `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite implementation: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision` |
-| `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (parallel regions), cross-region invariant, versioned identity, guards that see fold state + actor |
-| `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates, rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path |
-| `src/cli/`, `scripts/tira.ts` | `tira` CLI for manual testing (below) |
+| `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (regions, coupled only by handoff events — no cross-region invariant), versioned identity, per-type birth name (`node.born`), and a same-lifecycle `tree` config |
+| `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates (incl. `drained`), per-stream tree summary (roots, cursor, active), rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path; `tree.ts` holds the tree rules |
 | `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
+| `src/render/` | D1: the thin read-only HTML page and the text tree, both drawn from one view of the fold |
+| `src/cli/`, `scripts/tira.ts` | `tira` CLI for manual testing (below) |
 
-Not in Track A: tree/DAG semantics (drain, cursor, frontier — C1), factory tables (B1),
-emission + dual-run (B2–B3).
+**Track C1 — the tree (rulings 2026-10-16/17).** Same-lifecycle rules only; the node
+table is unchanged ("same 5-state lifecycle, no special machine").
+
+| Rule | Behaviour |
+|---|---|
+| Birth | `node.born {parent_id?, kind?, discovered_during?}`. Children are appended at the end (ruling 1). `kind` = planned (default) or discovered; discovered must name `discovered_during`. The actor is recorded |
+| Parent's own table | A child is born only if the parent's table accepts `ADD_CHILD` — so done or cancelled parents refuse children until re-opened with a reason (ruling 4) |
+| Caps | Depth ≤ 8 (root = 1), ≤ 20 children per parent (ruling 1) |
+| Drain | A parent drains when every child is done or cancelled. A leaf never drains (it is the work) |
+| COMPLETE gate | A parent can't COMPLETE until every child is done or cancelled (ruling A2: gate, not review) |
+| One active task | "Active" = in_progress with no in_progress descendant (ruling A4). Checked on the would-be tree, so START, UNBLOCK and REOPEN are all covered; descending into a child of the active task is allowed |
+| Cursor | First node in depth-first order (birth order, closed branches not entered) that is unstarted or in progress **and finishable now** — a leaf, or a parent whose children are all closed. See provisional choices |
 
 ### Manual testing: the `tira` CLI
 
-A file-backed rig until the lean UI lands. Writes go through the guarded write path;
-reads are folds — the CLI never sets state. `node scripts/tira.ts --help` for everything.
+A file-backed rig. Writes go through the guarded write path; reads are folds — the CLI
+never sets state. `node scripts/tira.ts --help` for everything.
 
 ```
 node scripts/tira.ts types                                            # entity types, states, events
-node scripts/tira.ts create node colors --actor isha
+node scripts/tira.ts create node dashboard --actor isha
+node scripts/tira.ts create node colors --parent dashboard            # a child (node.born with parent_id)
 node scripts/tira.ts send node colors START
 node scripts/tira.ts send node colors COMPLETE                        # REJECTED guard-failed, exit 2
 node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
+node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained
+node scripts/tira.ts render --out tira.html                           # D1 page; re-run and reload to refresh
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
-node scripts/tira.ts dump                                             # full derived state, canonical JSON
-node scripts/tira.ts dump --hash                                      # sha256 of that JSON
+node scripts/tira.ts dump --hash                                      # sha256 of the canonical derived state
 ```
 
-Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` is git-ignored). Tree: `--stream`
-(default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values are strings;
-use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a `duplicate`.
-Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or `add-child`).
-`--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 1 usage/error.
+Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` and `tira.html` are git-ignored).
+Tree: `--stream` (default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values
+are strings; use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a
+`duplicate`. Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or
+`add-child`). `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 1 usage/error.
 
-### Demo D0 script (build-plan.md "Demo checkpoints", manual test M0)
+### Demo D0 script (manual test M0)
 
 Run from this folder. Nothing derived is ever stored: every command, including `dump`,
 replays the raw log from scratch. So step 4's "wipe derived state, replay" is shown by
@@ -128,17 +143,76 @@ node scripts/tira.ts dump --hash                                           # M0 
 ```
 
 M0 passes when both hashes match and the `command.rejected` row is in the log but `b`
-never reached `done`. `rm d0.db d0-fresh.db` to start over.
+never reached `done`. `rm d0.db d0-fresh.db` to start over. Stores written before C1 hold
+`node.created` births, which now show as anomalies: start them over.
+
+### Demo D1 script (manual test M1): S3 backtrack, visible
+
+```
+export TIRA_DB=d1.db TIRA_STREAM=tasktree-dash TIRA_ACTOR=isha
+t() { node scripts/tira.ts "$@"; }
+t create node dashboard && t create node metrics_card --parent dashboard
+t create node fetch_metrics --parent metrics_card && t create node improve_visual --parent metrics_card
+for n in colors loading_state font; do t create node $n --parent improve_visual; done
+t create node table --parent dashboard && t create node filters --parent dashboard
+t send node fetch_metrics START && t send node fetch_metrics COMPLETE evidenceRef=api.md
+t send node colors START && t send node colors BLOCK                                       # interrupted
+t create node design_tokens --parent improve_visual kind=discovered discovered_during=colors
+t send node design_tokens START && t send node design_tokens COMPLETE evidenceRef=token-spec.md
+t send node colors UNBLOCK && t send node colors COMPLETE evidenceRef=palette.png          # resumed
+t send node loading_state START && t send node loading_state COMPLETE evidenceRef=spinner.mp4
+t send node font START && t send node font CANCEL                                          # improve_visual drains
+t render --out d1.html && t tree                                                           # cursor: improve_visual
+t send node metrics_card START && t send node metrics_card COMPLETE evidenceRef=x          # REJECTED: not drained
+t send node improve_visual START && t send node improve_visual COMPLETE evidenceRef=4-of-4
+t send node metrics_card COMPLETE evidenceRef=2-of-2                                       # drain climbs the chain
+t render --out d1.html && t dump --hash                                                    # cursor: table
+```
+
+M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
+same state, drain flag, cursor (◆) and active task (●); its header hash equals
+`t dump --hash`; and its `data-node-count` equals `data-fold-tree-count`.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
-from the table events: `node.created`, `node.start`, `node.add-child`, `command.rejected`.
+from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
+`idea.created`, `command.rejected`.
+
+**⚠ Deviates from build-plan §5 S3 as written — needs a ruling.** S3 expects, on the
+post-S1+S2+S7 log, *cursor = table* and *drain true up the chain* **without** completing
+any parent (the deck shows metrics_card "drained" while improve_visual is "unfinished").
+That can't coexist with ruling A2 (parents have a lifecycle; COMPLETE only when drained)
+plus "done-parent ⇒ children terminal": a parent that counts as drained while a child is
+still open could then complete above open work. So C1 builds, provisionally:
+- **Drain is direct-children-only and strict:** metrics_card is **not** drained until
+  improve_visual itself is done. At post-S1+S2+S7: cursor = improve_visual, metrics_card
+  drained = false.
+- **The cursor is scoped to finishable work** (C1 table). Read literally, the A3 wording
+  ("first task in DFS order that isn't done, cancelled or blocked") always picks the root.
+- **S3 therefore climbs by completing each drained parent** (the cursor lands on each in
+  turn), then reaches `table`. `test/tree.test.ts` S3 and the D1 script do exactly this.
+- The alternative, if that's what was meant: drain is recursive (a child counts if it is
+  closed or itself drained), the cursor is the first open non-blocked *leaf*, and the
+  COMPLETE gate requires every *descendant* closed. That passes S3 as written.
 
 **Provisional choices, pending the PM** (each is flagged at its source):
-entities are created by an explicit `create` command at their tables' initial states;
-an `eventId` names one command (same id + same content = duplicate, same id + different
-content = error); malformed commands throw rather than being logged; `eventId` is globally
-unique, so re-using one in another stream throws; `subscribe()` is at-least-once with an
-`onError` hook.
+- Several roots in one stream are allowed (D0 uses three); depth counts the root as 1.
+- A blocked parent's children stay workable: the cursor descends into them.
+- T7 is read as "no new child under a **done or cancelled** parent". A drained but still
+  open parent accepts a child (it un-drains); REOPEN isn't possible from unstarted, so
+  denying it would be a dead end.
+- Open, not gated (not yet ruled): CANCEL on a parent with open children, and REOPEN of a
+  child under a done parent. Both can leave a closed parent above open work. That work is
+  then invisible to the cursor (it never enters closed branches), and an in-progress child
+  there still holds the one active slot, so a START elsewhere is rejected. Pinned by tests.
+- Discovered work must carry an actor ("who found it"); `kind` must be planned or
+  discovered when given; `parent_id` is rejected on types without a tree.
+- Replay re-checks births and gates, so changing the caps or gate rules later would turn
+  older history into anomalies. Treat them as part of the log's contract.
+- Entities are created by an explicit `create` command at their tables' initial states;
+  an `eventId` names one command (same id + same content = duplicate, same id + different
+  content = error); malformed commands throw rather than being logged; `eventId` is globally
+  unique, so re-using one in another stream throws; `subscribe()` is at-least-once with an
+  `onError` hook.
 
 ## Docs & showcase
 

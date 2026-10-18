@@ -1,5 +1,5 @@
 // The guarded write path: the only way events reach the store.
-// command -> replay the stream -> evaluate (legality, guards, invariant) ->
+// command -> replay the stream -> evaluate (legality, guards, tree gates) ->
 // append the event, OR append a `command.rejected` record (acceptance review Q4
 // default: denials live in the same stream; the fold collects them, never applies them).
 //
@@ -88,8 +88,10 @@ function checkShape(cmd: Command): void {
 }
 
 // The intent a stored event recorded, for comparing a retried command with its original.
-const recordedIntent = (e: StoredEvent): Intent | undefined =>
-  e.type === REJECTED ? (e.data as unknown as RejectedData | undefined)?.intent : toIntent(e);
+const recordedIntent = (e: StoredEvent, registry: Registry): Intent | undefined =>
+  e.type === REJECTED
+    ? (e.data as unknown as RejectedData | undefined)?.intent
+    : toIntent(e, (t) => registry.creationName(t));
 
 export class WritePath {
   private readonly store: EventStore;
@@ -137,7 +139,7 @@ export class WritePath {
       if (cmd.eventId !== undefined) {
         const prior = events.find((e) => e.eventId === cmd.eventId);
         if (prior) {
-          if (canonicalJson(recordedIntent(prior)) !== canonicalJson(intent)) {
+          if (canonicalJson(recordedIntent(prior, this.registry)) !== canonicalJson(intent)) {
             throw new Error(`eventId ${cmd.eventId} was already used for a different command`);
           }
           return { status: "duplicate", seq: prior.seq, original: prior.type === REJECTED ? "rejected" : "appended" };
@@ -149,7 +151,7 @@ export class WritePath {
       const last = events.at(-1);
       const expectedRevision = last ? last.streamRevision : -1;
       const record = ev.ok
-        ? toNewEvent(intent, cmd.eventId)
+        ? toNewEvent(intent, cmd.eventId, (t) => this.registry.creationName(t))
         : toRejectedEvent(intent, ev.code, ev.detail, cmd.eventId);
       try {
         const { seqs } = await this.store.append(cmd.stream, [record], { expectedRevision });
