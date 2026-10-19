@@ -39,6 +39,64 @@ one (Build); tira fills the other nine and deliberately refuses Build.
    not idealized sandboxes. Tira sits *above* the gym: the gym provides the
    environment; tira provides the verified work record on agent runs inside it.
 
+## Big picture: how tira evolves with each customer
+
+Each customer earns the next layer of the product. The JTBDs unlock in
+order — nobody needs the full ledger on day one, and each stage's proof is
+what sells the next.
+
+**Customer 0 — tira builds tira (now).** Two humans plus coding agents
+coordinating through one event log.
+- JTBDs exercised: **See** (work's true state across two streams),
+  **Direct** (who works on what), **Judge** (weekly checkpoint approvals on
+  the record).
+- What it hardens: the event vocabulary, the render, the emission habit. If
+  the record can't track its own build, "record first" is falsified before
+  any outsider sees it.
+- Proof it produces: the first claimed-silent catch on their own work.
+
+**Customer 1 — the naive factory.** A live design-loop factory as tira's
+first producer: sessions claim briefs, file drops, verify done.
+- JTBDs exercised: **Take** (claim from the frontier with the claim gate),
+  **Know** (brief payload + done criteria as coordinator-queryable state),
+  **Prove** (done-verified with evidence ref; prose-only done denied),
+  **Yield** (blocked-with-reason ask channel).
+- What it hardens: claim gates, done-test gates, claimed-silent detection,
+  verifier≠claimer separation.
+- Proof it produces: the morning the inbox catches the orchestrator in a lie
+  instead of the transcript.
+
+**Customer 2 — the realistic factory.** Agents against production-like
+surfaces: real Jira Cloud sandbox via Rovo MCP, mirrored GitHub/Slack,
+friction injected.
+- JTBDs exercised: **Verify** (proof independent of the agent's word —
+  grader on separate admin token vs oracle state), extended to **Judge** at
+  irreversible actions (merge/deploy behind the gate).
+- What it hardens: gates at irreversible actions, verifier verdicts as
+  first-class events, friction/denial events, replay as the
+  golden-trajectory viewer, the "never simulate what you can borrow"
+  environment doctrine.
+- Proof it produces: a hackathon builder trusting the tira record over run
+  logs to judge whether their agent did the work.
+
+**Customer 3 — first external design partner in production.** A partner's
+live agent operations governed by tira. Lead candidate: Deccan AI (design
+partnership conversation in progress) — tira as the verified work-record
+layer on STARK simulated environments; alternate: Wisdom AI (fit evaluation
+in progress).
+- JTBDs exercised: **Learn** (the log becomes the dataset — what to automate
+  next, trust scoring per actor, policy as data), plus the full orchestrator
+  loop (See→Judge→Direct→Verify) on someone else's agents.
+- What it hardens: multi-party scoping (whose work orders, whose evidence),
+  the commercial surface, and the climb the pitch promises — orchestrator
+  judgment (L1) toward automated governance (L5) on tira's data.
+- Proof it produces: the partner renewing or expanding because the record —
+  not the demo — is what their buyers audit.
+
+**The arc in one line:** customer 0 proves the record is honest, customer 1
+proves it governs, customer 2 proves it survives production friction,
+customer 3 proves someone else will pay for the proof.
+
 ## Interface verdicts
 
 | Thread | Verdict | Shape |
@@ -160,3 +218,7 @@ judge whether their agent actually did the work.
   real Jira Cloud sandbox + HUD SDK + Rovo MCP replaces the Jira clone;
   Week 1/Week 3 re-sequenced; Harbor-style containerized clone parked as
   phase two; eyes-open trade (determinism + parallelism) recorded.
+- 2026-10-18 (big picture): "how tira evolves with each customer" — customer
+  0 (See/Direct/Judge), customer 1 (Take/Know/Prove/Yield), customer 2
+  (Verify + Judge at irreversible actions), customer 3 (Learn + full loop
+  on a partner's agents).
