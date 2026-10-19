@@ -148,7 +148,7 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
   const cmd: Command = kind === "create" ? { ...base, kind: "create" } : { ...base, kind: "event", event };
   const { result: r, handoffs } = await new Dispatcher(store, registry).submit(cmd);
   io.out(values.json ? JSON.stringify(handoffs.length > 0 ? { ...r, handoffs } : r) : describe(r, handoffs));
-  return r.status === "rejected" ? 2 : 0;
+  return r.status === "appended" ? 0 : 2;
 }
 
 function entityLabel(e: StoredEvent): string {
