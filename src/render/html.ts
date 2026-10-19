@@ -47,8 +47,8 @@ a{color:inherit;text-decoration:none}
 .tabs{display:flex;gap:2px;border:1px solid var(--line);border-radius:10px;padding:3px;background:var(--panel-2)}
 .tabs label{cursor:pointer;font-weight:600;font-size:13px;padding:5px 12px;border-radius:7px;color:var(--mut)}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
-#v-tree:checked~main .tabs label[for=v-tree],#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{background:var(--panel);color:var(--fg);box-shadow:0 1px 0 var(--line)}
-#v-tree:focus-visible~main .tabs label[for=v-tree],#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--lime);outline-offset:1px}
+#v-train:checked~main .tabs label[for=v-train],#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{background:var(--panel);color:var(--fg);box-shadow:0 1px 0 var(--line)}
+#v-train:focus-visible~main .tabs label[for=v-train],#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--lime);outline-offset:1px}
 .verify{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--panel-2);white-space:nowrap}
 .hero{display:flex;align-items:flex-end;gap:16px 22px;flex-wrap:wrap;margin:26px 0 8px}
 .big{font-size:clamp(64px,13vw,118px);font-weight:800;letter-spacing:-.06em;line-height:.82;font-variant-numeric:tabular-nums}
@@ -61,7 +61,7 @@ a{color:inherit;text-decoration:none}
 .stats b{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
 .stats .warn,.stats .warn b{color:var(--block)}
 .view{display:none;margin-top:14px;animation:fade .45s var(--ease) both}
-#v-tree:checked~main .view-tree,#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
+#v-train:checked~main .view-train,#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
 .lanes{display:grid;grid-template-columns:minmax(90px,.8fr) repeat(var(--n),minmax(120px,1fr));gap:6px;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px 12px;overflow-x:auto}
 .lanes .lh{font-size:11.5px;font-weight:650;color:var(--dim);padding:0 4px 4px}
 .lanes .who{font-weight:650;overflow-wrap:anywhere;padding:4px}.lanes .who.old{color:var(--dim);text-decoration:line-through}
@@ -76,27 +76,61 @@ a{color:inherit;text-decoration:none}
 .pairs .arrow{color:var(--lime);font-weight:700}.pairs code{font-family:var(--mono);font-size:11.5px;color:var(--fg)}
 .pairs li.waiting{border-style:dashed}
 @keyframes fade{from{opacity:.3;transform:translateY(6px)}}
-.stage{overflow-x:auto;padding:4px 0 8px;scrollbar-width:thin}
-svg.tree{display:block;height:auto;overflow:visible}
-.branch{fill:none;stroke:var(--moss);stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:grow 1.1s cubic-bezier(.3,.7,.2,1) forwards}
-@keyframes grow{to{stroke-dashoffset:0}}
-.tnode{animation:pop .6s cubic-bezier(.3,1.5,.4,1) both;transform-box:fill-box;transform-origin:center}
-@keyframes pop{from{opacity:.3;transform:scale(.4)}}
-a.tlink:focus-visible{outline:none}a.tlink:focus-visible .lbl{fill:var(--lime);text-decoration:underline}
-a.tlink:hover .lbl{fill:var(--fg)}
-.lbl{fill:var(--mut);font-size:13px;font-weight:600}
-.lbl.on{fill:var(--fg)}.lbl.gone{text-decoration:line-through;fill:var(--dim)}
-.petal{fill:var(--petal);stroke:var(--petal-edge);stroke-width:1}.core{fill:var(--pollen)}
-.bud{fill:var(--panel);stroke:var(--moss-2);stroke-width:2}
-.bud.blocked{stroke:var(--block)}.x{stroke:var(--block);stroke-width:2;stroke-linecap:round}
-.grow{fill:var(--lime)}.halo{fill:none;stroke:var(--lime);stroke-width:2;animation:breathe 2.6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-@keyframes breathe{50%{transform:scale(1.4);opacity:.2}}
-.wait{fill:none;stroke:var(--pollen);stroke-width:1.6;stroke-dasharray:3 3}
-.fallen{fill:var(--gone);opacity:.75}
-.tira-leaf{fill:none;stroke:var(--lime);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.next{fill:var(--lime);font-size:11px;font-weight:700}
-.key{display:flex;gap:8px 18px;flex-wrap:wrap;color:var(--mut);font-size:12.5px;margin:6px 2px 0}
-.key span{display:inline-flex;align-items:center;gap:6px}.key svg{width:18px;height:18px;overflow:visible}
+.journey{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 16px 14px;overflow-x:auto;scrollbar-width:thin}
+.line{display:flex;align-items:flex-start;width:100%;min-width:max-content;margin:0;padding:0;list-style:none}
+.leg{display:flex;flex-direction:column;min-width:0;flex:var(--n) 0 auto}
+.leg-name{font-size:11.5px;font-weight:650;color:var(--dim);margin:0 8px 26px;padding-left:8px;border-left:2px solid var(--line);white-space:nowrap;display:flex;align-items:center;gap:6px}
+.leg-name svg{width:13px;height:13px;color:var(--lime)}
+.stops{display:flex;flex:1;margin:0;padding:0;list-style:none}
+.stop{position:relative;flex:1 0 118px;display:flex;flex-direction:column;align-items:center;animation:fade .45s var(--ease) both;animation-delay:calc(min(var(--k),30) * 35ms)}
+.stop::before,.stop::after{content:"";position:absolute;top:21px;height:4px;width:50%;background:var(--line);z-index:0}
+.stop::before{left:0}.stop::after{right:0}
+.stop.first::before,.stop.last::after{display:none}
+.stop.from-closed::before,.stop.closed::after{background:var(--done)}
+.stop-link{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 6px;border-radius:12px;color:inherit}
+.stop-link:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+.sd{width:26px;height:26px;margin-top:10px;border-radius:999px;display:grid;place-items:center;background:var(--panel);border:2.5px solid var(--moss-2);transition:transform .25s var(--ease)}
+.stop-link:hover .sd{transform:scale(1.12)}
+.sd svg{width:14px;height:14px}
+.st-done .sd{background:var(--done);border-color:var(--done);color:var(--panel)}
+.st-cancelled .sd{background:var(--panel-2);border-color:var(--gone);color:var(--gone)}
+.st-blocked .sd{border-color:var(--block);color:var(--block)}
+.st-in_progress .sd{border-color:var(--prog);background:var(--prog-bg);color:var(--prog)}
+.stop.is-active .sd{box-shadow:0 0 0 0 var(--prog-bg);animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 8px var(--prog-bg)}}
+.name{font-size:12.5px;font-weight:600;text-align:center;max-width:110px;overflow-wrap:anywhere;line-height:1.3;color:var(--fg)}
+.st-done .name{color:var(--mut)}.st-cancelled .name{color:var(--dim);text-decoration:line-through}
+.train{position:absolute;top:-22px;left:50%;transform:translateX(-50%);width:34px;height:22px;color:var(--lime);animation:bob 2.2s ease-in-out infinite;z-index:2}
+@keyframes bob{50%{transform:translate(-50%,-3px)}}
+.here{font-size:10.5px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:var(--lime)}
+.routes{display:grid;gap:8px;margin-top:14px}
+.route{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(0,2fr) auto;align-items:center;gap:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-left:calc((var(--d) - 1) * 18px);transition:transform .25s var(--ease),border-color .2s}
+.route:hover{transform:translateY(-1px);border-color:var(--moss-2)}
+.route:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.route .rn{font-weight:650;display:flex;align-items:center;gap:7px;min-width:0;overflow-wrap:anywhere}
+.route .rn svg{width:14px;height:14px;color:var(--lime);flex:none}
+.mini{display:flex;align-items:center;min-width:0}
+.mini i{display:block;width:14px;height:14px;border-radius:999px;border:2px solid var(--moss-2);background:var(--panel);flex:none}
+.mini b{display:block;height:3px;flex:1 1 10px;min-width:6px;max-width:44px;background:var(--line)}
+.mini b.on{background:var(--done)}
+.mini i.m-done{background:var(--done);border-color:var(--done)}.mini i.m-cancelled{background:var(--panel-2);border-color:var(--gone)}
+.mini i.m-in_progress{background:var(--prog-bg);border-color:var(--prog)}.mini i.m-blocked{border-color:var(--block)}
+.route .ct{white-space:nowrap}.route .left{color:var(--dim)}
+.wait-ring{width:13px;height:13px;border-radius:999px;border:1.6px dashed var(--pollen);flex:none}
+@media (max-width:640px){
+.journey{overflow:visible;padding:14px 12px}
+.line,.stops{flex-direction:column;min-width:0}
+.leg-name{margin:6px 0 6px 0}.leg{flex:none}
+.stop{width:auto;flex:none;flex-direction:row;align-items:center;min-height:52px}
+.stop::before,.stop::after{top:auto;left:21px;right:auto;width:4px;height:50%}
+.stop::before{top:0}.stop::after{bottom:0}
+.stop-link{flex-direction:row;gap:12px;padding:0}
+.sd{margin-top:0}
+.name{text-align:left;max-width:none}
+.sd{order:1}.name{order:2}.train{order:3;position:static;transform:none;animation:none;width:30px;height:20px}.here{order:4}
+.route{grid-template-columns:1fr auto;margin-left:calc((var(--d) - 1) * 10px)}
+.route .mini{grid-column:1 / -1;order:3}
+}
 .strip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .br{display:flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:9px 12px;min-width:200px;flex:1 1 200px;transition:transform .25s var(--ease)}
 .br:hover{transform:translateY(-2px)}
@@ -166,91 +200,84 @@ const ICON = {
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
 };
 
-// ---------- glyphs (tree view), drawn at (x, y) ----------
+// ---------- progress train ----------
+// The work (leaf tasks) as stops on one line, in tree order: filled stops are closed,
+// the train sits on the cursor (the next task), hollow stops are what's left. Stops
+// are grouped under their parent's name. Below, one short line per parent: its
+// children as stops, closed / total and what's left.
 
-const blossom = (x: number, y: number, s: number) =>
-  `<g transform="translate(${fx(x)} ${fx(y)}) scale(${s})"><circle class="petal" cx="0" cy="-11" r="8"/><circle class="petal" cx="10.5" cy="-3.4" r="8"/><circle class="petal" cx="6.5" cy="9" r="8"/><circle class="petal" cx="-6.5" cy="9" r="8"/><circle class="petal" cx="-10.5" cy="-3.4" r="8"/><circle class="core" r="5"/></g>`;
+interface Placed { row: TreeRow; i: number; parent?: Placed }
 
-function glyph(r: TreeRow, x: number, y: number): string {
-  const parent = r.children.length > 0;
-  const size = parent ? 1 : 0.68;
-  switch (r.state) {
-    case "done": return blossom(x, y, size);
-    case "cancelled": return `<ellipse class="fallen" cx="${fx(x)}" cy="${fx(y + 3)}" rx="7" ry="4" transform="rotate(25 ${fx(x)} ${fx(y + 3)})"/>`;
-    case "in_progress": // the halo marks the active task only (in progress, nothing in progress below)
-      return `${r.active ? `<circle class="halo" cx="${fx(x)}" cy="${fx(y)}" r="${parent ? 17 : 14}"/>` : ""}<circle class="grow" cx="${fx(x)}" cy="${fx(y)}" r="${parent ? 12 : 10}"/><circle class="core" cx="${fx(x)}" cy="${fx(y)}" r="4"/>`;
-    case "blocked": return `<circle class="bud blocked" cx="${fx(x)}" cy="${fx(y)}" r="${parent ? 12 : 9}"/><path class="x" d="M${fx(x - 3.5)} ${fx(y - 3.5)}l7 7m0-7l-7 7"/>`;
-    default: return `<circle class="bud" cx="${fx(x)}" cy="${fx(y)}" r="${parent ? 12 : 9}"/>`;
-  }
-}
-
-interface Placed { row: TreeRow; x: number; y: number; i: number; parent?: Placed }
-
-// Tidy left-to-right layout: leaves take consecutive rows, a parent sits midway between
-// its first and last child. Preorder index `i` names drawers and staggers the motion.
-function layout(roots: TreeRow[]): { nodes: Placed[]; width: number; height: number } {
-  const COL = 220, ROW = 58, X0 = 34, Y0 = 34;
-  const nodes: Placed[] = [];
-  let slot = 0;
-  let deepest = 1;
-  const place = (r: TreeRow, depth: number, parent?: Placed): Placed => {
-    const p: Placed = { row: r, x: X0 + (depth - 1) * COL, y: 0, i: nodes.length, ...(parent ? { parent } : {}) };
-    nodes.push(p);
-    deepest = Math.max(deepest, depth);
-    if (r.children.length === 0) p.y = Y0 + slot++ * ROW;
-    else {
-      const kids = r.children.map((c) => place(c, depth + 1, p));
-      p.y = ((kids[0] as Placed).y + (kids.at(-1) as Placed).y) / 2;
-    }
-    return p;
+// Preorder: the drawer ids (#t<i>) and the train's stop order.
+function indexNodes(roots: TreeRow[]): Placed[] {
+  const out: Placed[] = [];
+  const walk = (row: TreeRow, parent?: Placed) => {
+    const p: Placed = { row, i: out.length, ...(parent ? { parent } : {}) };
+    out.push(p);
+    row.children.forEach((c) => walk(c, p));
   };
-  roots.forEach((r, n) => {
-    place(r, 1);
-    if (n < roots.length - 1) slot += 0.6; // a little air between trees
-  });
-  return { nodes, width: X0 + (deepest - 1) * COL + 230, height: Y0 + Math.max(slot - 1, 0) * ROW + 70 };
+  roots.forEach((r) => walk(r));
+  return out;
 }
 
-function treeSvg(roots: TreeRow[], trail: Map<string, TrailEntry[]>): string {
-  const { nodes, width, height } = layout(roots);
-  const branches = nodes.filter((n) => n.parent).map((n) => {
-    const p = n.parent as Placed;
-    const mid = (p.x + n.x) / 2;
-    const w = Math.max(3, 10 - 2 * (n.row.depth - 1));
-    return `<path class="branch" pathLength="1" style="stroke-width:${w};animation-delay:${fx((n.row.depth - 2) * 0.22)}s" d="M${fx(p.x)} ${fx(p.y)} C${fx(mid)} ${fx(p.y)} ${fx(mid)} ${fx(n.y)} ${fx(n.x)} ${fx(n.y)}"/>`;
-  }).join("");
-  const glyphs = nodes.map((n) => {
+const STOP_GLYPH: Record<string, string> = {
+  done: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.8 8.4l2.7 2.7 5.7-6"/></svg>`,
+  cancelled: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4.5 11.5l7-7"/></svg>`,
+  blocked: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M8 3.8v5M8 12v.2"/></svg>`,
+  in_progress: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/></svg>`,
+};
+const TRAIN = `<svg class="train" viewBox="0 0 34 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="22" height="11" rx="3.5"/><path d="M25 7h3.5a2.5 2.5 0 0 1 2.5 2.5V15H25"/><path d="M8 4V1.5h5V4"/><circle cx="9" cy="18" r="2.3"/><circle cx="20" cy="18" r="2.3"/><path d="M7 8.5h4M15 8.5h4"/></svg>`;
+
+const nodeAttrs = (r: TreeRow, lines: number) =>
+  `data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines}"`;
+
+function trainHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
+  const stops = nodes.filter((n) => n.row.children.length === 0);
+  // consecutive stops that share a parent ride the same leg
+  const legs: Placed[][] = [];
+  for (const s of stops) {
+    const leg = legs.at(-1);
+    if (leg && leg[0]?.parent === s.parent) leg.push(s);
+    else legs.push([s]);
+  }
+  let k = 0;
+  const stop = (n: Placed) => {
     const r = n.row;
-    const parent = r.children.length > 0;
+    const at = k++;
+    const prev = stops[at - 1];
+    const cls = [
+      "stop", `st-${r.state}`, at === 0 ? "first" : "", at === stops.length - 1 ? "last" : "",
+      CLOSED.has(r.state) ? "closed" : "", prev && CLOSED.has(prev.row.state) ? "from-closed" : "",
+      r.cursor ? "is-next" : "", r.active ? "is-active" : "",
+    ].filter(Boolean).join(" ");
     const lines = trail.get(r.key) ?? [];
-    // Leaves label to the right; parents label below (the root starts at the left edge).
-    const lx = parent ? (r.depth === 1 ? n.x - 12 : n.x) : n.x + 18;
-    const ly = parent ? n.y + 32 : n.y + 4.5;
-    const anchor = parent ? (r.depth === 1 ? "start" : "middle") : "start";
-    const lcls = ["lbl", r.cursor || r.active || r.depth === 1 ? "on" : "", r.state === "cancelled" ? "gone" : ""].filter(Boolean).join(" ");
-    const extras = [
-      r.awaitingClose ? `<circle class="wait" cx="${fx(n.x)}" cy="${fx(n.y)}" r="${parent ? 18 : 15}"><title>tira closes it when you move on</title></circle>` : "",
-      r.closedByTira ? `<path class="tira-leaf" d="M${fx(n.x + 12)} ${fx(n.y - 14)}c0-7 4-11 11-12-.5 7-4 11-11 12z"><title>closed by tira</title></path>` : "",
-      r.cursor ? `<text class="next" x="${fx(lx)}" y="${fx(ly + 16)}" text-anchor="${anchor}">◆ ${r.active ? "now" : "next"}</text>` : "",
-    ].join("");
-    const found = r.discoveredDuring ? ` ✦` : "";
-    const label = `${r.id}, ${r.state.replace("_", " ")}${r.cursor ? ", next" : ""}${r.closedByTira ? ", closed by tira" : ""}`;
-    return `<a class="tlink" href="#t${n.i}" aria-label="${esc(label)}"><g class="tnode" style="animation-delay:${fx(0.15 + (r.depth - 1) * 0.22)}s" data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines.length}">`
-      + `<title>${esc(r.id)}</title>${glyph(r, n.x, n.y)}${extras}<text class="${lcls}" x="${fx(lx)}" y="${fx(ly)}" text-anchor="${anchor}">${esc(short(r.id))}${found}</text></g></a>`;
+    const label = `${r.id}, ${r.state.replace("_", " ")}${r.cursor ? ", next" : ""}${r.active ? ", active" : ""}`;
+    return `<li class="${cls}" style="--k:${at}"><a class="stop-link" href="#t${n.i}" aria-label="${esc(label)}" ${nodeAttrs(r, lines.length)}>`
+      + `${r.cursor ? TRAIN : ""}<span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}${r.discoveredDuring ? " ✦" : ""}</span>${r.cursor ? `<span class="here">${r.active ? "on it" : "next"}</span>` : ""}</a></li>`;
+  };
+  const html = legs.map((leg) => {
+    const p = leg[0]?.parent?.row;
+    const name = p ? `<span class="leg-name">${p.closedByTira ? ICON.leaf : ""}${esc(short(p.id))}</span>` : `<span class="leg-name">top level</span>`;
+    return `<li class="leg" style="--n:${leg.length}">${name}<ol class="stops">${leg.map(stop).join("")}</ol></li>`;
   }).join("");
-  return `<div class="stage"><svg class="tree" width="${width}" height="${fx(height)}" viewBox="0 0 ${width} ${fx(height)}" role="group" aria-label="Task tree">${branches}${glyphs}</svg></div>`;
+  return `<div class="journey"><ol class="line" aria-label="Tasks in order">${html}</ol></div>`;
 }
 
-const KEY = `<div class="key" aria-hidden="true">`
-  + `<span><svg viewBox="-10 -10 20 20"><circle class="bud" r="6"/></svg>to do</span>`
-  + `<span><svg viewBox="-10 -10 20 20"><circle class="grow" r="7"/></svg>in progress</span>`
-  + `<span><svg viewBox="-10 -10 20 20"><circle class="bud blocked" r="6"/></svg>blocked</span>`
-  + `<span><svg viewBox="-10 -10 20 20">${blossom(0, 0, 0.55)}</svg>done</span>`
-  + `<span><svg viewBox="-10 -10 20 20"><ellipse class="fallen" rx="6" ry="3.5" transform="rotate(25)"/></svg>dropped</span>`
-  + `<span><svg viewBox="-10 -10 20 20"><circle class="wait" r="7"/></svg>tira will close</span>`
-  + `<span><svg viewBox="-2 -2 16 16"><path class="tira-leaf" d="M1 13c0-7 4-11 11-12-.5 7-4 11-11 12z"/></svg>closed by tira</span>`
-  + `<span>✦ found along the way</span>`
-  + `</div>`;
+function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
+  const parents = nodes.filter((n) => n.row.children.length > 0);
+  if (parents.length === 0) return "";
+  return `<div class="routes">${parents.map((n) => {
+    const r = n.row;
+    const kids = r.children;
+    const closed = kids.filter((c) => CLOSED.has(c.state)).length;
+    const mini = kids.map((c, j) => `${j > 0 ? `<b class="${CLOSED.has(kids[j - 1]?.state ?? "") ? "on" : ""}"></b>` : ""}<i class="m-${esc(c.state)}" title="${esc(c.id)}: ${esc(c.state.replace("_", " "))}"></i>`).join("");
+    const marks = `${r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.leaf}</span>` : ""}${r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : ""}`;
+    const left = kids.length - closed;
+    return `<a class="route" href="#t${n.i}" style="--d:${r.depth}" aria-label="${esc(`${r.id}: ${closed} of ${kids.length} closed`)}" ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
+      + `<span class="rn">${marks}${esc(short(r.id))}</span><span class="mini" aria-hidden="true">${mini}</span>`
+      + `<span class="ct">${closed}/${kids.length} <span class="left">${left === 0 ? "· all closed" : `· ${left} left`}</span></span></a>`;
+  }).join("")}</div>`;
+}
 
 // ---------- history ----------
 
@@ -378,7 +405,7 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
 
 // ---------- lanes (D2: regions composed, handoffs paired) ----------
 
-const VIEWS: [string, string][] = [["tree", "Tree"], ["board", "Board"], ["lanes", "Lanes"], ["log", "Activity"]];
+const VIEWS: [string, string][] = [["train", "Progress"], ["board", "Board"], ["lanes", "Lanes"], ["log", "Activity"]];
 
 // One tone per state family, so a lane reads at a glance; the state word stays as-is.
 const TONE: Record<string, string> = {
@@ -457,7 +484,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const mine = r.entities.filter((e) => e.stream === stream);
   const multiNow = mine.filter((e) => Object.keys(e.regions).length > 1 && !(e.version !== undefined && mine.some((x) => x.type === e.type && x.id === e.id && x.version === (e.version as number) + 1)));
   const { byKey: trail, all } = trails(events, stream);
-  const { nodes } = layout(v.roots);
+  const nodes = indexNodes(v.roots);
   const pathOf = (n: Placed) => {
     const up: string[] = [];
     for (let p = n.parent; p; p = p.parent) up.unshift(esc(p.row.id));
@@ -466,21 +493,23 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   // The header counts what this stream is about: a tree's closed nodes, or (a stream of
   // multi-region entities, like the factory's briefs) the verified ones still current.
   const lanesOnly = v.roots.length === 0 && multiNow.length > 0;
-  const closed = lanesOnly ? multiNow.filter((e) => e.regions.outcome === "done-verified").length : rows.filter((x) => CLOSED.has(x.state)).length;
-  const total = lanesOnly ? multiNow.length : rows.length;
+  // A tree's header counts its tasks (the train's stops: the leaves), closed of total.
+  const tasks = rows.filter((x) => x.children.length === 0);
+  const closed = lanesOnly ? multiNow.filter((e) => e.regions.outcome === "done-verified").length : tasks.filter((x) => CLOSED.has(x.state)).length;
+  const total = lanesOnly ? multiNow.length : tasks.length;
   const handoffCount = new Set(events.filter((e) => e.stream === stream && e.metadata.actor === "dispatcher" && e.metadata.correlationId).map((e) => e.metadata.correlationId)).size;
   const stats = [
     ...(lanesOnly
       ? [`<li title="handoff pairs the dispatcher completed"><b>${handoffCount}</b> handoffs</li>`, `<li title="handoffs still waiting"><b>${r.handoffs[stream]?.length ?? 0}</b> waiting</li>`]
-      : [`<li title="closed by tira">${ICON.leaf}<b>${rows.filter((x) => x.closedByTira).length}</b> by tira</li>`, `<li title="drained: every child done or cancelled"><b>${rows.filter((x) => x.drained).length}</b> drained</li>`]),
+      : [`<li title="tasks still open"><b>${total - closed}</b> left</li>`, `<li title="parents closed by tira">${ICON.leaf}<b>${rows.filter((x) => x.closedByTira).length}</b> by tira</li>`, `<li title="drained: every child done or cancelled"><b>${rows.filter((x) => x.drained).length}</b> drained</li>`]),
     `<li title="rejected commands">${ICON.ban}<b>${rejections.length}</b> rejected</li>`,
     ...(anomalies.length > 0 ? [`<li class="warn" title="replay anomalies">${ICON.alert}<b>${anomalies.length}</b> anomalies</li>`] : []),
   ];
   // Counted from the fold, independently of the rendered rows: M1 compares the two.
   const foldTreeCount = r.entities.filter((e) => e.stream === stream && e.tree !== undefined).length;
-  const treeView = v.roots.length > 0 ? `${treeSvg(v.roots, trail)}${KEY}` : `<p class="empty">No tree yet.</p>`;
+  const trainView = v.roots.length > 0 ? `${trainHtml(nodes, trail)}${routesHtml(nodes, trail)}` : `<p class="empty">No tree yet.</p>`;
   // Open on the view that has something: the tree, else the lanes, else the activity.
-  const first = v.roots.length > 0 ? "tree" : multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0 ? "lanes" : "log";
+  const first = v.roots.length > 0 ? "train" : multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0 ? "lanes" : "log";
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -489,8 +518,8 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
 <span class="pollen" style="left:64%;top:180px"></span><span class="pollen" style="left:82%;top:420px;animation-delay:-5s"></span><span class="pollen" style="left:40%;top:560px;animation-delay:-9s"></span>
 <nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("")}</div><span class="verify" title="sha256:${esc(dumpHash)} (compare with tira dump --hash)">seq ${v.lastSeq} · ${esc(shortHash)}</span></nav>
-<header class="hero"><div class="big"${lanesOnly ? ` title="verified briefs, of those current"` : ""}>${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
-<section class="view view-tree" aria-label="Tree">${treeView}</section>
+<header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
+<section class="view view-train" aria-label="Progress">${trainView}</section>
 <section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardHtml(nodes, trail) : `<p class="empty">No tree yet.</p>`}</section>
 <section class="view view-lanes" aria-label="Lanes">${lanesHtml(r, stream, events)}</section>
 <section class="view view-log" aria-label="Activity">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
