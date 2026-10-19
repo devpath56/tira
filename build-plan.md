@@ -226,6 +226,13 @@ QE notes: (q04) a PASS on M1 licenses D2's lanes — so M1 checks completeness n
 - Verified independently: `region-scan.py --all` on the 5 tables exits 0 (0 findings); BFS over H1–H6 reaches exactly the 10 joint combos.
 - Review docs (regions proposal, `region-scan.py`, event architecture, functional reqs) pushed under `docs/` on the PR branch; PR #1 merged to main.
 
+**Decided 2026-10-18** (unblock replies on the TIRA task):
+- Drain semantics: drain stays local (a parent is drained when every *direct* child is terminal); tira holds the pen — when work moves on (START / UNBLOCK / REOPEN into in-progress) outside a drained, still-open parent, tira appends that parent's start (if unstarted) + complete as actor `tira`, through the same guarded write path, citing the move; the chain climbs. Cursor = first open leaf in depth-first order; parents awaiting close are skipped. Un-drain window preserved while inside the subtree; reopen stays human-only.
+- Four edge rulings: deny cancel-with-open-children (cancel-subtree is a client-side macro); deny reopen-under-done-parent, transitively, with reason; a blocked parent's children stay workable; no add-child under a done/cancelled parent (a drained-but-open parent accepts one and un-drains).
+- Handoff naming: `idea.materialized {idea_id}` → `node.born`. Plan rows R2, D2, D5, R3 still carry stale `claim.*` naming — his fix, not the builder's.
+- Factory table holes closed structurally: CLAIMED and drop.filed require a named session (a session names itself before claiming/filing); RENAMED guarded to the session itself, the orchestrator, or mac evidence. Re-sign brief-claim, drop, session after re-verification; two new mutants (unnamed CLAIMED denied, foreign rename denied).
+- B1 build calls 1–7 confirmed as built: H2 failure branch (non-claimant drop waits for the orchestrator), `dispatcher` reserved actor, block relay rules, dependency verified on any version's verified drop, F1 (node takes the idea's id), frontier requires outcome open with H6 lifted before H1, region scans per composition.
+
 **Resolved since the proposal** (see `packing.md` §5):
 - Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
 - Approval UX → chat (Muse/Claude); idea pipeline stays in our store (single source of truth).
