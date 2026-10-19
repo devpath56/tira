@@ -308,7 +308,7 @@ export function foldDetailed(
 // with the same options must produce identical strings (build-plan.md T2).
 export function canonicalJson(value: unknown): string {
   const norm = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(norm);
+    if (Array.isArray(v)) return v.map(norm).sort((a, b) => compareCodeUnits(JSON.stringify(a), JSON.stringify(b)));
     if (v && typeof v === "object") {
       return Object.fromEntries(
         Object.keys(v as object)

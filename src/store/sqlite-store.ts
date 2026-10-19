@@ -110,7 +110,7 @@ export class SqliteEventStore implements EventStore {
         const eventId = e.eventId ?? randomUUID();
         const existing =
           e.eventId !== undefined ? (findById.get(eventId) as { seq: number; stream: string } | undefined) : undefined;
-        if (existing && existing.stream !== stream && opts.expectedRevision !== undefined) {
+        if (existing && existing.stream !== stream) {
           throw new DuplicateEventIdError(eventId, existing.stream, stream);
         }
         return { e, eventId, existingSeq: existing?.seq };
