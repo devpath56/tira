@@ -1,5 +1,5 @@
 // Through the whole stack (write path -> SQLite store -> fold replay): actor guards,
-// cross-entity guards, versioned identity and invariants must survive storage and
+// same-lifecycle cross-entity guards and versioned identity must survive storage and
 // replay, not just work in evaluate(). Uses a TOY "ticket" type, not factory tables.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +24,7 @@ function table(id: string, initial: string, states: string[], events: string[], 
   return validateTable({ id, initial, states, events, pairs, guards });
 }
 
-function setup(opts: { invariantAtCreate?: boolean } = {}) {
+function setup() {
   const approval = table("ticket-approval", "pending", ["pending", "approved"], ["APPROVE"], { "pending+APPROVE": "approved|notAuthor" }, { notAuthor: "actor is not the author" });
   const work = table("ticket-work", "open", ["open", "doing", "shipped"], ["PICK", "SHIP"], {
     "open+PICK": "doing|depsShipped", "doing+SHIP": "shipped",
@@ -40,10 +40,6 @@ function setup(opts: { invariantAtCreate?: boolean } = {}) {
     type: "ticket",
     versioned: true,
     regions: { approval, work },
-    invariant: (r) => {
-      if (opts.invariantAtCreate) return "tickets are closed for creation";
-      return r.work !== "open" && r.approval !== "approved" ? "work started before approval" : true;
-    },
   });
   const store = new SqliteEventStore();
   const wp = new WritePath(store, registry);
@@ -99,16 +95,12 @@ test("versioned identity through the stack: versions are stored, replayed and ke
   assert.deepEqual((created?.data as { entity: unknown }).entity, { id: "a", version: 1 });
 });
 
-test("invariant through the stack: a transition that breaks it is rejected and logged", async () => {
+test("regions stay independent through the stack: one region's event never reads another", async () => {
   const t = setup();
   await t.create("a", 1, "dev");
-  // PICK is legal in the work table, but the invariant forbids work before approval
-  assert.equal(status(await t.send("a", 1, "PICK", "s1")), "rejected:invariant");
-  assert.equal((await t.replay()).rejections[0]?.detail, "work started before approval");
-});
-
-test("invariant at create time: an initial state that violates it is rejected", async () => {
-  const t = setup({ invariantAtCreate: true });
-  assert.equal(status(await t.create("a", 1, "dev")), "rejected:invariant");
-  assert.equal((await t.replay()).entities.length, 0);
+  // No cross-region invariant exists any more: PICK lands while approval is pending.
+  assert.equal(status(await t.send("a", 1, "PICK", "s1")), "appended:transition");
+  const r = await t.replay();
+  assert.deepEqual(r.anomalies, []);
+  assert.deepEqual(r.entities[0]?.regions, { approval: "pending", work: "doing" });
 });

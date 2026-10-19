@@ -1,9 +1,22 @@
 // Derived-state shapes shared by the registry, write path and fold.
 
+// The actor name tira writes under when it holds the pen (ruling 2026-10-18). Reserved:
+// the write path refuses it from any caller, so the label always means tira wrote it.
+export const MACHINE_ACTOR = "tira";
+
 export interface EntityRef {
   type: string;
   id: string;
   version?: number; // required for versioned entity types, forbidden otherwise
+}
+
+// Tree position of an entity whose type declares a tree (registry `tree`).
+export interface TreeInfo {
+  parent?: string; // parent key; absent for a root
+  children: string[]; // child keys in birth order (append-at-end, ruling 1)
+  depth: number; // root = 1
+  kind: "planned" | "discovered"; // provenance (functional requirements: "planned or discovered")
+  discoveredDuring?: string; // key of the task it was found during, when discovered
 }
 
 export interface EntityState {
@@ -18,13 +31,17 @@ export interface EntityState {
   lastRecordedAt: string; // store time of the last applied event (for derived predicates)
   createdBy?: string; // actor of the create event (provenance)
   lastActor?: string; // actor of the last applied event
+  tree?: TreeInfo;
 }
 
 // Read-only access to the state of one stream, as of the event being evaluated.
 export interface StateView {
   get(ref: EntityRef): EntityState | undefined;
+  getKey(key: string): EntityState | undefined;
   all(type?: string): EntityState[];
 }
 
-export const entityKey = (ref: EntityRef): string =>
-  `${ref.type}:${ref.id}${ref.version !== undefined ? `@${ref.version}` : ""}`;
+export const entityKey = (ref: EntityRef): string => {
+  const version = ref.version === undefined ? "" : `@${ref.version}`;
+  return `${ref.type}:${ref.id}${version}`;
+};

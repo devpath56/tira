@@ -3,6 +3,9 @@
 // never touches state directly, so what you see here is what the core decides.
 import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { renderHtml } from "../render/html.ts";
+import { streamView, textTree } from "../render/tree-view.ts";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { WritePath, type Command, type WriteResult } from "../write/write-path.ts";
@@ -20,11 +23,13 @@ export const HELP = `tira — manual-testing CLI for the Phase 1 core
 
 Usage:
   tira types                                      entity types, their states and events
-  tira create <type> <id> [key=value ...]         create an entity          e.g. tira create node colors
+  tira create <type> <id> [--parent P] [k=v ...]  create an entity          e.g. tira create node colors --parent improve_visual
   tira send <type> <id> <EVENT> [key=value ...]   send an event             e.g. tira send node colors COMPLETE evidenceRef=palette.png
   tira log                                        the raw event log, in seq order (rejections included)
   tira state [--at N] [--now ISO] [--vantage V]   derived state, plus rejections and anomalies
   tira replay <N>                                 state as of event N (same as: tira state --at N)
+  tira tree [--at N]                              the tree with cursor (◆), active task (●) and drain flags
+  tira render [--out FILE] [--at N]               write the read-only HTML page (D1); reload it after re-rendering
   tira dump [--at N] [--hash]                     full derived state as canonical JSON (same log => same bytes);
                                                   --hash prints its sha256 instead
 
@@ -37,6 +42,8 @@ Options:
   --payload JSON   payload as a JSON object; key=value pairs are merged in (as strings)
   --json           machine-readable output
   --hash           (dump) print sha256 of the canonical JSON
+  --parent ID      (create) the parent node; discovered work: kind=discovered discovered_during=ID
+  --out FILE       (render) output path (default: tira.html)
   -h, --help       this help
 
 Event names: use the table's name (COMPLETE, ADD_CHILD) or the stored form (complete, add-child).
@@ -57,6 +64,8 @@ const OPTIONS = {
   vantage: { type: "string" },
   json: { type: "boolean" },
   hash: { type: "boolean" },
+  parent: { type: "string" },
+  out: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -99,7 +108,9 @@ function payloadFrom(values: Values, pairs: string[]): Record<string, unknown> {
 function describe(r: WriteResult): string {
   if (r.status === "appended") {
     const regions = Object.entries(r.regions).map(([k, v]) => `${k}=${v}`).join(" ");
-    return `appended   seq ${r.seq}  ${r.key}  ${r.outcome}  ${regions}`;
+    const line = `appended   seq ${r.seq}  ${r.key}  ${r.outcome}  ${regions}`;
+    const closes = (r.closedByTira ?? []).map((c) => `\n  + tira closed ${c.key} (seq ${c.seqs.join(", ")}): you moved on`);
+    return line + closes.join("");
   }
   if (r.status === "duplicate") return `duplicate  seq ${r.seq}  (original was ${r.original}; nothing new stored)`;
   return `REJECTED   seq ${r.seq}  ${r.code}  ${r.detail}`;
@@ -114,6 +125,10 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
   // Accept the stored form too: "add-child" -> ADD_CHILD (the table's name).
   const event = rawEvent !== undefined && /^[a-z][a-z0-9-]*$/.test(rawEvent) ? tableEventName(rawEvent) : rawEvent;
   const payload = payloadFrom(values, args.slice(need));
+  if (values.parent !== undefined) {
+    if (kind !== "create") throw new UsageError("--parent only applies to create");
+    payload.parent_id = values.parent;
+  }
   const actor = values.actor ?? io.env.TIRA_ACTOR;
   const entity = { type, id, ...(values.version !== undefined ? { version: Number(values.version) } : {}) };
   const base = {
@@ -233,11 +248,32 @@ async function dump(store: SqliteEventStore, registry: Registry, stream: string,
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   const json = canonicalJson(r);
   if (values.hash) {
-    const sha = createHash("sha256").update(json).digest("hex");
+    const sha = sha256(json);
     io.out(values.json ? JSON.stringify({ sha256: sha, stream, lastSeq: r.lastSeq }) : `sha256:${sha}  stream ${stream} · seq ${r.lastSeq}`);
   } else {
     io.out(json);
   }
+  return 0;
+}
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+async function tree(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+  const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
+  const v = streamView(r, stream);
+  if (values.json) io.out(JSON.stringify(v.roots));
+  else for (const l of textTree(v)) io.out(l);
+  return 0;
+}
+
+// D1: a static page from the same fold `dump` hashes, stamped with that hash (M1 oracle).
+async function render(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+  const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
+  const hash = sha256(canonicalJson(r));
+  const out = values.out ?? "tira.html";
+  writeFileSync(out, renderHtml(r, stream, hash, await store.readStream(stream)));
+  const nodes = streamView(r, stream).nodeCount;
+  io.out(values.json ? JSON.stringify({ out, nodes, sha256: hash, lastSeq: r.lastSeq }) : `wrote ${out}  ${nodes} node(s) · seq ${r.lastSeq} · sha256:${hash}`);
   return 0;
 }
 
@@ -283,7 +319,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -305,6 +341,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return await state(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       case "dump":
         return await dump(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
+      case "tree":
+        return await tree(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
+      case "render":
+        return await render(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       default: {
         // replay <N>
         if (args[0] === undefined) throw new UsageError("usage: tira replay <N>");

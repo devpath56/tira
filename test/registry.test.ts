@@ -1,5 +1,6 @@
-// A3 — registry: several entity types, parallel regions with a cross-region
-// invariant, versioned identity, and guards that read fold state and the actor.
+// A3 — registry: several entity types, parallel regions (coupled only by handoff
+// events — no cross-region invariant hook), versioned identity, and guards that read
+// fold state and the actor.
 // The 2-region "ticket" type here is a TOY that exercises the mechanism; it is not
 // the factory's brief table (that waits on Q-B1–Q-B10).
 import { test } from "node:test";
@@ -40,8 +41,6 @@ function toyRegistry(): Registry {
     type: "ticket",
     versioned: true,
     regions: { approval, work },
-    // cross-region invariant: no work before approval
-    invariant: (r) => (r.work !== "open" && r.approval !== "approved" ? "work started before approval" : true),
   });
 }
 
@@ -80,11 +79,31 @@ test("an event moves only its own region; the others are untouched", () => {
   assert.deepEqual(r.ok && r.regions, { approval: "approved", work: "open" });
 });
 
-test("cross-region invariant rejects an otherwise legal transition", () => {
-  // Bypass the guard order: an approved-less ticket picking work violates the invariant.
-  const reg = toyRegistry();
-  const r = run(reg, [ent("a", { approval: "pending", work: "open" })], ev("a", "PICK"));
-  assert.deepEqual(r, { ok: false, code: "invariant", detail: "work started before approval" });
+test("no cross-region coupling: a region's event is judged by its own table only", () => {
+  // PICK before APPROVE is accepted: regions don't read each other (signed-off regions
+  // spec). A rule like "no work before approval" belongs in a handoff policy instead.
+  const r = run(toyRegistry(), [ent("a", { approval: "pending", work: "open" })], ev("a", "PICK"));
+  assert.ok(r.ok && r.regions.work === "doing" && r.regions.approval === "pending");
+});
+
+test("createdAs: a type's birth name is UPPER_SNAKE and can't collide with its table events", () => {
+  assert.throws(() => new Registry({ depsShipped: () => true }).register({ type: "t", createdAs: "born", regions: { work } }), /createdAs born must be UPPER_SNAKE/);
+  assert.throws(() => new Registry({ depsShipped: () => true }).register({ type: "t", createdAs: "PICK", regions: { work } }), /event name PICK is reserved/);
+  const r = defaultRegistry();
+  assert.equal(r.creationName("node"), "BORN");
+  assert.equal(r.creationName("idea"), "CREATED");
+  assert.equal(r.creationName("nope"), "CREATED");
+});
+
+test("tree config is checked against its region's table", () => {
+  const reg = () => new Registry({ depsShipped: () => true });
+  const base = { region: "work", terminal: ["shipped"], actionable: ["open", "doing"], active: "doing", childEvent: "PICK", maxDepth: 8, maxChildren: 20 };
+  assert.throws(() => reg().register({ type: "t", regions: { work }, tree: { ...base, region: "nope" } }), /region nope/);
+  assert.throws(() => reg().register({ type: "t", regions: { work }, tree: { ...base, terminal: ["gone"] } }), /state gone/);
+  assert.throws(() => reg().register({ type: "t", regions: { work }, tree: { ...base, childEvent: "FLY" } }), /event FLY/);
+  assert.throws(() => reg().register({ type: "t", versioned: true, regions: { work }, tree: base }), /must not be versioned/);
+  assert.throws(() => reg().register({ type: "t", regions: { work }, tree: { ...base, maxDepth: 0 } }), /caps/);
+  assert.doesNotThrow(() => reg().register({ type: "t", regions: { work }, tree: base }));
 });
 
 test("actor guard: the author cannot approve their own ticket", () => {

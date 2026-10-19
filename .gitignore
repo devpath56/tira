@@ -10,3 +10,6 @@ intent/
 *.db
 *.db-shm
 *.db-wal
+# D1 page written by `tira render`
+/tira.html
+/d1.html

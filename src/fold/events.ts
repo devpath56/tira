@@ -1,7 +1,8 @@
 // How intents become stored events, and back.
 //
 // Stored type = "<entityType>.<name>", always lowercase (D1, decided 2026-10-16):
-//   - create             -> "node.created"
+//   - create             -> the type's birth name: "node.born" (decided 2026-10-17),
+//                           "<type>.created" by default
 //   - table event START  -> "node.start";  ADD_CHILD -> "node.add-child"
 //   - a rejected command -> "command.rejected"
 // The mapping from table events (UPPER_SNAKE in charts/*.json) is mechanical:
@@ -13,7 +14,10 @@ import type { EntityRef } from "./types.ts";
 import type { Intent, RejectCode } from "./evaluate.ts";
 
 export const REJECTED = "command.rejected";
-const CREATED = "created";
+
+// Birth event name per entity type (UPPER_SNAKE), e.g. registry.creationName.
+export type CreationNameOf = (type: string) => string;
+const defaultCreation: CreationNameOf = () => "CREATED";
 
 export const TABLE_EVENT_NAME = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/;
 const STORED_EVENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -34,8 +38,8 @@ export interface RejectedData {
 const refData = (e: EntityRef): EventData["entity"] =>
   e.version !== undefined ? { id: e.id, version: e.version } : { id: e.id };
 
-export function toNewEvent(intent: Intent, eventId?: string): NewEvent {
-  const name = intent.kind === "create" ? CREATED : storedName(intent.event);
+export function toNewEvent(intent: Intent, eventId?: string, creationNameOf: CreationNameOf = defaultCreation): NewEvent {
+  const name = storedName(intent.kind === "create" ? creationNameOf(intent.entity.type) : intent.event);
   const data: EventData = { entity: refData(intent.entity), payload: intent.payload };
   return {
     ...(eventId ? { eventId } : {}),
@@ -57,7 +61,7 @@ export function toRejectedEvent(intent: Intent, code: RejectCode, detail: string
 
 // Inverse of toNewEvent. Returns undefined for event types this core doesn't own,
 // including any stored name that isn't lowercase-kebab (e.g. a legacy "node.START").
-export function toIntent(e: StoredEvent): Intent | undefined {
+export function toIntent(e: StoredEvent, creationNameOf: CreationNameOf = defaultCreation): Intent | undefined {
   if (e.type === REJECTED) return undefined;
   const dot = e.type.indexOf(".");
   if (dot <= 0) return undefined;
@@ -70,7 +74,7 @@ export function toIntent(e: StoredEvent): Intent | undefined {
     data.entity.version !== undefined ? { type, id: data.entity.id, version: data.entity.version } : { type, id: data.entity.id };
   const payload = data.payload ?? {};
   const actor = e.metadata.actor;
-  return name === CREATED
+  return name === storedName(creationNameOf(type))
     ? { kind: "create", entity, payload, actor }
     : { kind: "event", entity, event: tableEventName(name), payload, actor };
 }
