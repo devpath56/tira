@@ -62,6 +62,10 @@ export interface EntityTypeDef {
   // A birth-payload field listing ids of the same type this one waits for (brief:
   // blocked_by). Every birth and revision is checked: no cycles (G7).
   dependsOn?: string;
+  // Identity checks (like versioning, not table rules: guards still read no other entity).
+  // On a table event, or on "birth", the entity named by the actor or a payload field must
+  // exist. Ruling 2026-10-18: a brief is claimed by, and a drop filed by, a named session.
+  mustExist?: { on: string; type: string; from: "actor" | `payload.${string}` }[];
   tree?: TreeConfig;
   // Derived predicates (like drain or liveness): computed by the fold, never stored.
   derived?: Record<string, (entity: EntityState, ctx: DeriveContext) => unknown>;
@@ -93,6 +97,11 @@ export class Registry {
     if (revised !== undefined) {
       if (!def.versioned) throw new Error(`entity type ${def.type}: revisedAs needs a versioned type`);
       if (!TABLE_EVENT_NAME.test(revised) || revised === created) throw new Error(`entity type ${def.type}: bad revisedAs ${revised}`);
+    }
+    for (const m of def.mustExist ?? []) {
+      if (m.on !== "birth" && !Object.values(def.regions).some((t) => t.events.includes(m.on))) {
+        throw new Error(`entity type ${def.type}: mustExist on ${m.on}, which is not one of its events`);
+      }
     }
     if (def.dependsOn !== undefined && !def.keepBirth) throw new Error(`entity type ${def.type}: dependsOn needs keepBirth`);
     if (def.followsVersionsOf !== undefined && (!def.versioned || !this.defs.get(def.followsVersionsOf)?.versioned)) {

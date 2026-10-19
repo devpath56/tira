@@ -25,7 +25,8 @@ export type RejectCode =
   | "superseded"
   | "bad-version"
   | "handoff-refused"
-  | "cycle";
+  | "cycle"
+  | "unknown-ref";
 
 export type Intent =
   | { kind: "create"; entity: EntityRef; payload: Record<string, unknown>; actor: string | undefined }
@@ -101,6 +102,9 @@ export function evaluate(
         return reject("guard-failed", `${def.type} birth needs ${def.createGuard}`);
       }
     }
+    // identity checks after the birth rule (a role filing a drop fails the rule, not this)
+    const missing = missingRef(def, "birth", intent, view);
+    if (missing) return reject("unknown-ref", missing);
     // G7: a dependency graph never loops (a waits for b waits for a would wait forever).
     if (def.dependsOn !== undefined) {
       const loop = dependencyLoop(def.type, def.dependsOn, intent.entity.id, intent.payload[def.dependsOn], view);
@@ -135,6 +139,8 @@ export function evaluate(
   if (res.outcome === "guard-failed") {
     return reject("guard-failed", `${hit.table.id}: ${from} + ${intent.event} needs ${res.guard}`);
   }
+  const missing = missingRef(def, intent.event, intent, view);
+  if (missing) return reject("unknown-ref", missing);
   const regions = { ...current.regions, [hit.region]: res.to };
   if (res.outcome === "transition" && def.tree && hit.region === def.tree.region) {
     const gate = treeGate(def, def.tree, current, intent.event, regions, entities, view, opts.pairedClose === true);
@@ -145,6 +151,18 @@ export function evaluate(
   if (captured === undefined) delete context[hit.region];
   else context[hit.region] = captured;
   return { ok: true, outcome: res.outcome, key, region: hit.region, from, regions, ...(Object.keys(context).length > 0 ? { context } : {}) };
+}
+
+// The identity check that fails for this intent, if any (registry mustExist).
+function missingRef(def: EntityTypeDef, on: string, intent: Intent, view: StateView): string | undefined {
+  for (const m of def.mustExist ?? []) {
+    if (m.on !== on) continue;
+    const id = m.from === "actor" ? intent.actor : intent.payload[m.from.slice("payload.".length)];
+    if (typeof id !== "string" || id.length === 0 || !view.get({ type: m.type, id })) {
+      return `${typeof id === "string" && id.length > 0 ? `${m.type} ${id}` : `the ${m.type}`} doesn't exist: name it first`;
+    }
+  }
+  return undefined;
 }
 
 // The loop a new or revised version's dependencies would close, if any (ids, from the new

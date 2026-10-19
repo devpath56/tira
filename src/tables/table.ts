@@ -73,8 +73,11 @@ export function validateTable(t: Table): Table {
     if (!t.events.includes(p.event)) fail(`unknown event ${p.event}`);
     if (p.outcome === "transition") {
       if (!p.to || !t.states.includes(p.to)) fail(`${key}: bad target ${p.to}`);
-    } else if (p.to !== undefined || p.guard !== undefined) {
-      fail(`${key}: ${p.outcome} pair must not carry to/guard`);
+    } else if (p.to !== undefined) {
+      fail(`${key}: ${p.outcome} pair must not carry a target`);
+    } else if (p.outcome === "denied" && p.guard !== undefined) {
+      // a no-op may be guarded (who may record it, e.g. a session rename); a denied pair may not
+      fail(`${key}: a denied pair must not carry a guard`);
     }
     if (p.guard && !(p.guard in t.guards)) fail(`${key}: guard ${p.guard} not declared`);
     if (p.capture !== undefined) {
@@ -104,12 +107,12 @@ export function step(
   const pair = table.pairs.find((p) => p.from === from && p.event === event);
   if (!pair || pair.outcome === "denied") return { outcome: "denied", from, to: from };
   const capture = pair.capture ? { capture: pair.capture } : {};
-  if (pair.outcome === "noop") return { outcome: "noop", from, to: from, ...capture };
   if (pair.guard) {
     const impl = guards[pair.guard];
     if (!impl) throw new Error(`table ${table.id}: no implementation for guard ${pair.guard}`);
     if (!impl(ctx)) return { outcome: "guard-failed", from, to: from, guard: pair.guard };
   }
+  if (pair.outcome === "noop") return { outcome: "noop", from, to: from, ...capture };
   return { outcome: "transition", from, to: pair.to as string, ...(pair.guard ? { guard: pair.guard } : {}), ...capture };
 }
 

@@ -16,7 +16,8 @@
       "outcome": "noop",
       "capture": {
         "name": "payload.session"
-      }
+      },
+      "guard": "renamedByAllowed"
     },
     {
       "from": "live",
@@ -37,6 +38,7 @@
     }
   ],
   "guards": {
-    "declaredByAllowed": "payload.declared_by is self (actor = this session), mac-evidence (actor = mac) or user (actor = user) — never a timeout"
+    "declaredByAllowed": "payload.declared_by is self (actor = this session), mac-evidence (actor = mac) or user (actor = user) \u2014 never a timeout",
+    "renamedByAllowed": "actor is this session, the orchestrator, or mac (Mac evidence)"
   }
 }

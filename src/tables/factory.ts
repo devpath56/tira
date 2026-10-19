@@ -51,6 +51,8 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
     (payload.declared_by === "self" && actor === entity.id) ||
     (payload.declared_by === "mac-evidence" && actor === MAC) ||
     (payload.declared_by === "user" && actor === USER),
+  // Ruling 2026-10-18: a session is renamed only by itself, the orchestrator, or Mac evidence.
+  renamedByAllowed: ({ actor, entity }) => s(actor) && (actor === entity.id || actor === ORCHESTRATOR || actor === MAC),
   // Incident 2: the filer never verifies its own drop, and nothing verifies without a PASS.
   orchestratorVerifiesPass: ({ actor, payload, entity }) =>
     actor === ORCHESTRATOR && actor !== entity.createdBy && payload.done_test_result === "PASS",
@@ -79,6 +81,7 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
       createGuard: "briefBirth",
       keepBirth: true, // blocked_by and slice_ref, fixed per version (A4)
       dependsOn: "blocked_by", // G7: a second graph, checked for cycles at every birth and revision
+      mustExist: [{ on: "CLAIMED", type: "session", from: "payload.session" }], // ruling 2026-10-18: a named session claims
       derived: {
         // what this brief still waits for (empty once every blocked_by is verified)
         waitingOn: (b, { view }) => unverifiedDeps(view, b),
@@ -88,6 +91,10 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
     { type: "session", createdAs: "NAMED", createGuard: "sessionNamesItself", regions: { lifecycle: chart("session.json") } },
     // A12: one drop per brief version, enforced by identity (drop:<brief>@<version>).
     // A14: a drop for a superseded brief version is refused, so it can't satisfy dependents.
-    { type: "drop", versioned: true, createdAs: "FILED", createGuard: "dropFiledBySession", followsVersionsOf: "brief", regions: { lifecycle: chart("drop.json") } },
+    {
+      type: "drop", versioned: true, createdAs: "FILED", createGuard: "dropFiledBySession", followsVersionsOf: "brief",
+      mustExist: [{ on: "birth", type: "session", from: "actor" }], // ruling 2026-10-18: a named session files
+      regions: { lifecycle: chart("drop.json") },
+    },
   ];
 }

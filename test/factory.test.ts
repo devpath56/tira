@@ -67,6 +67,14 @@ test("the 5 signed-off tables load, validate (captures included) and register wi
   assert.throws(bad({ x: "actor" }), /capture x must be null or payload/);
   assert.throws(bad({ X: "payload.x" }), /bad capture field X/);
   assert.throws(bad({ x: "payload.x" }, "denied"), /a denied pair must not capture/);
+  // a no-op may carry a guard (who may record it); a denied pair may not
+  const guarded = (outcome: "noop" | "denied") => () =>
+    validateTable({ id: "t", initial: "a", states: ["a"], events: ["GO"], guards: { g: "who" }, pairs: [{ from: "a", event: "GO", outcome, guard: "g" }] });
+  assert.doesNotThrow(guarded("noop"));
+  assert.throws(guarded("denied"), /a denied pair must not carry a guard/);
+  // the session table's rename is that guarded no-op
+  const rename = (r.get("session")?.regions.lifecycle as Table).pairs.find((p) => p.from === "live" && p.event === "RENAMED");
+  assert.deepEqual([rename?.outcome, rename?.guard], ["noop", "renamedByAllowed"]);
   assert.ok(loadTable(new URL("../charts/brief-outcome.json", import.meta.url)));
 });
 
@@ -466,13 +474,54 @@ test("a drop for a superseded brief version is refused, so it can't satisfy a de
   assert.equal(await t.joint(brief("b")), "gated × waiting × open");
 });
 
-test("a claim by a session that was never named is listed: nothing can end that session to release the brief", async () => {
+test("only a named session claims a brief or files a drop (ruling 2026-10-18: the hole is closed)", async () => {
   const t = setup();
   await t.make(brief("b"), "orchestrator");
   await t.ev(brief("b"), "DISPATCHED", "orchestrator");
-  await t.ev(brief("b"), "CLAIMED", "ghost", { session: "ghost" });
-  assert.deepEqual((await t.now()).handoffs[S]?.map((p) => [p.rule, p.key]), [["H5", "brief:b@1"]]);
-  assert.match((await t.now()).handoffs[S]?.[0]?.waitingOn ?? "", /ghost: it claimed this brief but was never named/);
+  const ghost = await t.ev(brief("b"), "CLAIMED", "ghost", { session: "ghost" });
+  assert.equal(st(ghost), "rejected:unknown-ref");
+  assert.match(ghost.result.status === "rejected" ? ghost.result.detail : "", /session ghost doesn't exist: name it first/);
+  assert.equal(await t.joint(brief("b")), "gated × unclaimed × open");
+  assert.equal(st(await t.make(dropRef("b"), "ghost")), "rejected:unknown-ref");
+  // once named, the same session can claim and file
+  await t.make({ type: "session", id: "ghost" }, "ghost");
+  assert.equal(st(await t.ev(brief("b"), "CLAIMED", "ghost", { session: "ghost" })), "appended");
+  assert.equal(st(await t.make(dropRef("b"), "ghost")), "appended");
+  assert.deepEqual((await t.now()).handoffs, {});
+  // a log that claims for an unnamed session around the write path is flagged on replay, and not applied
+  const u = setup();
+  await u.make(brief("c"), "orchestrator");
+  await u.ev(brief("c"), "DISPATCHED", "orchestrator");
+  await u.store.append(S, [{ type: "brief.claimed", data: { entity: { id: "c", version: 1 }, payload: { session: "ghost" } }, metadata: { actor: "ghost" } }]);
+  const r = await u.now();
+  assert.match(r.anomalies[0]?.problem ?? "", /unknown-ref: session ghost doesn't exist/);
+  assert.equal(r.entities.find((e) => e.key === "brief:c@1")?.regions.claim, "unclaimed");
+});
+
+test("a session is renamed only by itself, the orchestrator, or Mac evidence (ruling 2026-10-18)", async () => {
+  const t = setup();
+  for (const s of ["s1", "s2"]) await t.make({ type: "session", id: s }, s);
+  const rename = (actor: string, name: string) => t.ev({ type: "session", id: "s1" }, "RENAMED", actor, { session: name });
+  assert.equal(st(await rename("s2", "hijacked")), "rejected:guard-failed");
+  assert.equal(st(await rename("user", "hijacked")), "rejected:guard-failed");
+  assert.deepEqual((await t.at({ type: "session", id: "s1" }))?.context, undefined);
+  for (const [actor, name] of [["s1", "Cleanup crew"], ["orchestrator", "Cleanup crew 2"], ["mac", "Cleanup crew 3"]]) {
+    const r = (await rename(actor as string, name as string)).result;
+    assert.equal(r.status === "appended" ? r.outcome : r.status, "noop", actor); // a logged no-op that records the name
+  }
+  assert.deepEqual((await t.at({ type: "session", id: "s1" }))?.context, { lifecycle: { name: "Cleanup crew 3" } });
+  await clean(t);
+});
+
+test("a drop filed while its session ends mid-handoff: the drop wins (the dispatcher hands off the drop before the release)", async () => {
+  const t = setup();
+  await t.claimed("b", "s1");
+  // the drop lands, then the session ends, both before the dispatcher has caught up
+  await t.d.writePath.submit({ stream: S, kind: "create", entity: dropRef("b"), actor: "s1" });
+  await t.d.writePath.submit({ stream: S, kind: "event", entity: { type: "session", id: "s1" }, event: "ENDED", actor: "s1", payload: { declared_by: "self" } });
+  assert.deepEqual((await t.d.catchUp(S)).map((h) => `${h.rule} ${h.event}`), ["H2 brief.evidence", "H2 brief.drop-written"]);
+  assert.equal(await t.joint(brief("b")), "gated × claimed-active × dropped-unverified"); // not released
+  await clean(t);
 });
 
 test("a retried command (same event id) after a crash catches the pair up", async () => {

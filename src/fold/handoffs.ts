@@ -165,12 +165,6 @@ export function pending(view: StateView, idx: TriggerIndex, registry: Registry, 
     if (dispatched && b.regions.gate === "gated" && b.regions.claim === "waiting" && waiting.length > 0) {
       add("H1", b.key, dispatched.seq, `verified drops for ${waiting.join(", ")}`);
     }
-    // A claim by a session that was never named: nothing can end it, so H5 can never release it.
-    const claimant = b.context?.claim?.claimant;
-    const claimed = idx.get(indexKey(b.key, "brief.claimed"));
-    if (claimed && HELD.has(b.regions.claim as string) && typeof claimant === "string" && !view.get({ type: "session", id: claimant })) {
-      add("H5", b.key, claimed.seq, `a session named ${claimant}: it claimed this brief but was never named, so nothing can end it and release the brief`);
-    }
   }
   for (const d of view.all("drop")) {
     const b = briefOf(view, d);

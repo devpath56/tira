@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 182 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 186 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -286,8 +286,9 @@ between the two halves of a pair just leaves it due: the next command finishes i
 so does a retry of the same command with the same `--event-id`, or `Dispatcher.catchUp`.
 Replay re-checks every dispatcher write against the rules (with its correlation id) and
 flags anything else as an anomaly. `tira state` and the page list handoffs still waiting,
-and why: dependencies, a stray drop for the orchestrator, a claim by a session that was
-never named, a verified drop its brief can't take, or an idea whose node id is taken.
+and why: dependencies, a stray drop for the orchestrator, a verified drop its brief
+can't take, or an idea whose node id is taken. The list is pull-only: whoever writes
+factory events checks it (a requirement on the writer, per the PM's 2026-10-18 reply).
 Waiting is a legitimate state, not an error.
 
 ### Demo D2 script (manual test M2): regions composed, handoffs paired
@@ -322,7 +323,8 @@ M2 passes when:
 - every handoff pair shows the same correlation id on both sides (`data-correlation` on the page, `correlationId` in `t log --json`), including idea `metrics_card` → node `metrics_card` on the `tasktree-ideas` page;
 - anything still waiting is listed with its reason.
 
-**Calls made while building B1** (flagged for the PM):
+**Calls made while building B1.** The PM confirmed calls 1–7 on 2026-10-18, each checked
+against the signed tables, and ruled on the 8th (the two holes, closed below).
 
 - **H2's failure branch.** The draft had the dispatcher append `drop.rejected` for a drop
   its claimant didn't file. The signed-off drop table lets only the orchestrator reject. I
@@ -343,10 +345,18 @@ M2 passes when:
 - **F1 trigger.** The idea table reaches `materialized` through its `APPROVE_NODE` event
   (stored `idea.approve-node`), so that is the trigger. The ruling's
   `idea.materialized {idea_id}` names the state it reaches.
-- **Two holes the signed-off tables leave open** (kept as signed; for the PM):
-  - `CLAIMED` and `drop.filed` don't require a named session. A claim by a session that
-    was never named can never be released, so it is listed as waiting.
-  - `RENAMED` has no guard, so anyone can rename any session.
+- **The two holes, closed (ruling 2026-10-18; tables to be re-signed):**
+  - A brief is claimed, and a drop filed, only by a **named session**. A never-named
+    session could hold a brief forever, because nothing could end it to release the brief.
+    This is an identity check declared on the type (`mustExist`), like drops following
+    their brief's versions, so table guards still read no other entity. A claim for an
+    unnamed session is refused as `unknown-ref`, and replay flags one that bypassed the
+    write path.
+  - `RENAMED` is guarded: only the session itself, the orchestrator, or Mac evidence
+    (`renamedByAllowed`). It stays a logged no-op that records the name, so the rule
+    engine now allows a guard on a no-op (never on a denied pair).
+  - A regression test pins the order: a drop filed while its session ends mid-handoff
+    goes through (H2 runs before H5), and the brief isn't released.
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 
