@@ -1,0 +1,59 @@
+{
+  "id": "S6",
+  "title": "honest undo: a re-open needs a reason; the trail keeps both completions",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "REOPEN",
+      "expect": "rejected:guard-failed"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "numbers were wrong"
+      },
+      "label": "reopened"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "api-v2.md"
+      }
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:fetch_metrics": "done"
+    },
+    "rejections": 1,
+    "trail": {
+      "node:fetch_metrics": [
+        "node.born",
+        "node.start",
+        "node.complete",
+        "command.rejected",
+        "node.reopen",
+        "node.complete"
+      ]
+    }
+  },
+  "replayAt": [
+    {
+      "after": "reopened",
+      "states": {
+        "node:fetch_metrics": "in_progress"
+      }
+    }
+  ]
+}

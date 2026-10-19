@@ -12,6 +12,8 @@ import { REJECTED, toIntent, type EventData, type RejectedData } from "./events.
 import { MACHINE_ACTOR, entityKey, type EntityState, type StateView } from "./types.ts";
 import { activeNodes, awaitingClose, contains, cursor, isDrained, isTerminal, roots } from "./tree.ts";
 import { compareCodeUnits, makeView } from "./view.ts";
+import { blockRefusal, due, indexKey, pending as pendingHandoffs, type PendingHandoff, type TriggerIndex } from "./handoffs.ts";
+import { DISPATCHER, ORCHESTRATOR, frontier } from "../tables/factory.ts";
 
 export { compareCodeUnits, makeView } from "./view.ts";
 
@@ -54,6 +56,8 @@ export interface FoldResult {
   trees: Record<string, Record<string, TreeSummary>>; // stream -> type -> summary
   rejections: Rejection[];
   anomalies: Anomaly[];
+  handoffs: Record<string, PendingHandoff[]>; // stream -> handoffs still waiting (proposal R3), when any
+  frontier: Record<string, string[]>; // stream -> briefs claimable now (G9), for streams with briefs
 }
 
 const isRejectedData = (d: unknown): d is RejectedData => {
@@ -69,7 +73,7 @@ const isRejectedData = (d: unknown): d is RejectedData => {
   );
 };
 
-function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creationNameOf: (t: string) => string): boolean {
+function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creationNameOf: (t: string, v?: number) => string): boolean {
   if (a.metadata?.actor !== MACHINE_ACTOR || b.metadata?.actor !== MACHINE_ACTOR) return false;
   const ia = toIntent(a, creationNameOf);
   const ib = toIntent(b, creationNameOf);
@@ -87,6 +91,16 @@ function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creation
 }
 
 export function fold(events: readonly StoredEvent[], registry: Registry, opts: FoldOptions = {}): FoldResult {
+  return foldDetailed(events, registry, opts).result;
+}
+
+// The fold plus its per-stream trigger index (handoffs.ts), for the dispatcher: it
+// decides what is due from exactly the index the fold checks its writes against.
+export function foldDetailed(
+  events: readonly StoredEvent[],
+  registry: Registry,
+  opts: FoldOptions = {},
+): { result: FoldResult; indexes: ReadonlyMap<string, TriggerIndex> } {
   const streams = new Map<string, Map<string, EntityState>>();
   const views = new Map<string, StateView>();
   const scope = (stream: string) => {
@@ -98,10 +112,17 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
     }
     return { entities: m, view: views.get(stream) as StateView };
   };
+  // The events that start handoffs, per stream (handoffs.ts), as of the event being folded.
+  const indexes = new Map<string, TriggerIndex>();
+  const indexOf = (stream: string) => {
+    let m = indexes.get(stream);
+    if (!m) indexes.set(stream, (m = new Map()));
+    return m;
+  };
   const rejections: Rejection[] = [];
   const anomalies: Anomaly[] = [];
   let lastSeq = 0;
-  const creationNameOf = (t: string) => registry.creationName(t);
+  const creationNameOf = (t: string, v?: number) => registry.creationName(t, v);
 
   // Replay check of tira's own writes (ruling 2026-10-18: "the machine writes, it never
   // infers"): every event tira applied must cite a move, and the very next non-tira event
@@ -175,6 +196,17 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       continue;
     }
     const { entities, view } = scope(e.stream);
+    const idx = indexOf(e.stream);
+    // Replay check of the dispatcher's writes: each must be a receiver the handoff
+    // rules call for at this point (with its correlation id), or a block it relayed
+    // for the orchestrator under the B1 conditions.
+    if (e.metadata?.actor === DISPATCHER) {
+      const k = entityKey(intent.entity);
+      const called = intent.kind === "event" && intent.event === "BLOCKED" && intent.payload.requested_by !== undefined
+        ? intent.payload.requested_by === ORCHESTRATOR && blockRefusal(view, view.getKey(k), ORCHESTRATOR, intent.payload.block_reason) === undefined
+        : due(view, idx).some((r) => entityKey(r.target) === k && r.kind === intent.kind && (intent.kind === "create" || r.event === intent.event) && r.correlationId === e.metadata.correlationId);
+      if (!called) anomaly(`the dispatcher wrote ${e.type} on ${k}, but no handoff rule called for it`);
+    }
     const paired = pairedStarts.get(e.seq);
     let ev = evaluate(registry, entities, view, intent, { pairedClose: paired !== undefined });
     if (ev.ok && paired && !completes(paired, entities, ev)) ev = evaluate(registry, entities, view, intent);
@@ -199,7 +231,10 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       ...(createdBy === undefined ? {} : { createdBy }),
       ...(intent.actor === undefined ? {} : { lastActor: intent.actor }),
       ...(tree === undefined ? {} : { tree }),
+      ...(ev.context === undefined ? {} : { context: ev.context }),
+      ...(prev?.born !== undefined ? { born: prev.born } : !prev && registry.get(intent.entity.type)?.keepBirth ? { born: intent.payload } : {}),
     });
+    idx.set(indexKey(ev.key, e.type), { eventId: e.eventId, seq: e.seq, payload: intent.payload });
     if (ev.outcome !== "noop") movedBy.set(`${e.stream}\u0000${ev.key}`, intent.actor);
     // A birth appends the child to its parent's list (append-at-end, ruling 1).
     if (!prev && ev.tree?.parent !== undefined) {
@@ -256,7 +291,17 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       };
     }
   }
-  return { lastSeq, entities, derived, trees, rejections, anomalies };
+  const handoffs: FoldResult["handoffs"] = {};
+  for (const stream of [...streams.keys()].sort(compareCodeUnits)) {
+    const waiting = pendingHandoffs(views.get(stream) as StateView, indexOf(stream), registry, streams.get(stream) as Map<string, EntityState>);
+    if (waiting.length > 0) handoffs[stream] = waiting;
+  }
+  const claimable: FoldResult["frontier"] = {};
+  for (const stream of [...streams.keys()].sort(compareCodeUnits)) {
+    const view = views.get(stream) as StateView;
+    if (view.all("brief").length > 0) claimable[stream] = frontier(view).map((b) => b.key);
+  }
+  return { result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable }, indexes };
 }
 
 // Stable serialization: sorted keys at every level. Two folds of the same log

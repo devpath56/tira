@@ -1,0 +1,49 @@
+{
+  "id": "S4",
+  "title": "scope creep: no child under a done branch until it is re-opened",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "create",
+      "type": "node",
+      "id": "retry_logic",
+      "parent": "fetch_metrics",
+      "expect": "rejected:denied"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "retries were missed"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "retry_logic",
+      "parent": "fetch_metrics",
+      "payload": {
+        "kind": "discovered",
+        "discovered_during": "fetch_metrics"
+      }
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:fetch_metrics": "in_progress",
+      "node:retry_logic": "unstarted"
+    },
+    "rejections": 1,
+    "provenance": {
+      "node:retry_logic": {
+        "parent": "node:fetch_metrics",
+        "kind": "discovered",
+        "discoveredDuring": "node:fetch_metrics"
+      }
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "id": "brief-claim",
+  "initial": "waiting",
+  "states": [
+    "waiting",
+    "unclaimed",
+    "claimed-silent",
+    "claimed-active"
+  ],
+  "events": [
+    "CLAIMABLE",
+    "CLAIMED",
+    "EVIDENCE",
+    "RELEASED"
+  ],
+  "pairs": [
+    {
+      "from": "waiting",
+      "event": "CLAIMABLE",
+      "outcome": "transition",
+      "to": "unclaimed",
+      "guard": "fromDispatcher"
+    },
+    {
+      "from": "waiting",
+      "event": "CLAIMED",
+      "outcome": "denied"
+    },
+    {
+      "from": "waiting",
+      "event": "EVIDENCE",
+      "outcome": "denied"
+    },
+    {
+      "from": "waiting",
+      "event": "RELEASED",
+      "outcome": "denied"
+    },
+    {
+      "from": "unclaimed",
+      "event": "CLAIMABLE",
+      "outcome": "noop"
+    },
+    {
+      "from": "unclaimed",
+      "event": "CLAIMED",
+      "outcome": "transition",
+      "to": "claimed-silent",
+      "guard": "sessionClaimsForItself",
+      "capture": {
+        "claimant": "payload.session"
+      }
+    },
+    {
+      "from": "unclaimed",
+      "event": "EVIDENCE",
+      "outcome": "denied"
+    },
+    {
+      "from": "unclaimed",
+      "event": "RELEASED",
+      "outcome": "denied"
+    },
+    {
+      "from": "claimed-silent",
+      "event": "CLAIMABLE",
+      "outcome": "denied"
+    },
+    {
+      "from": "claimed-silent",
+      "event": "CLAIMED",
+      "outcome": "denied"
+    },
+    {
+      "from": "claimed-silent",
+      "event": "EVIDENCE",
+      "outcome": "transition",
+      "to": "claimed-active",
+      "guard": "fromClaimantOrDispatcher"
+    },
+    {
+      "from": "claimed-silent",
+      "event": "RELEASED",
+      "outcome": "transition",
+      "to": "unclaimed",
+      "guard": "dispatcherWithReason",
+      "capture": {
+        "claimant": null
+      }
+    },
+    {
+      "from": "claimed-active",
+      "event": "CLAIMABLE",
+      "outcome": "denied"
+    },
+    {
+      "from": "claimed-active",
+      "event": "CLAIMED",
+      "outcome": "denied"
+    },
+    {
+      "from": "claimed-active",
+      "event": "EVIDENCE",
+      "outcome": "noop"
+    },
+    {
+      "from": "claimed-active",
+      "event": "RELEASED",
+      "outcome": "transition",
+      "to": "unclaimed",
+      "guard": "dispatcherWithReason",
+      "capture": {
+        "claimant": null
+      }
+    }
+  ],
+  "guards": {
+    "fromDispatcher": "actor is the dispatcher (handoff receiver)",
+    "sessionClaimsForItself": "payload.session is non-empty and equals the actor",
+    "fromClaimantOrDispatcher": "actor is the captured claimant, or the dispatcher relaying drop evidence",
+    "dispatcherWithReason": "actor is the dispatcher and payload.reason is a non-empty string"
+  }
+}

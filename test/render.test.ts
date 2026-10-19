@@ -76,14 +76,22 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.match(html, new RegExp(`data-dump-hash="${hash}"`));
   assert.match(html, /one active task: node:table is already active/); // the rejection is shown
   // progress counts closed = done + cancelled, overall and per parent
-  assert.match(html, /<div class="big">5<small>\/8<\/small><\/div>/);
+  assert.match(html, /<div class="big" title="tasks closed, of all tasks">3<small>\/5<\/small><\/div>/); // tasks = the train's stops
+  assert.match(html, /<b>2<\/b> left<\/li>/);
+  // the train: closed stops fill the track; the train rides on the cursor
+  const stops = [...html.matchAll(/<li class="(stop [^"]*)"[^>]*><a class="stop-link"[^>]*data-key="([^"]+)"/g)];
+  assert.deepEqual(stops.filter((m) => m[1]?.split(" ").includes("closed")).map((m) => m[2]), ["node:colors", "node:font", "node:tokens"]);
+  assert.match(html, /data-key="node:table"[^>]*><svg class="train"/);
+  // one short line per parent: closed / total and what's left
+  assert.match(html, /aria-label="dashboard: 1 of 3 closed"[^]*?<span class="ct">1\/3 <span class="left">· 2 left<\/span>/);
+  assert.match(html, /aria-label="improve_visual: 3 of 3 closed"[^]*?<span class="ct">3\/3 <span class="left">· all closed<\/span>/);
   assert.match(html, /aria-label="improve_visual">[^]*?3\/3 children closed/);
   assert.match(html, /aria-label="dashboard">[^]*?1\/3 children closed/);
   // the board holds the work (leaves), with the cursor's card marked next; parents sit in the strip above
   assert.equal((html.match(/<a class="card[ "]/g) ?? []).length, 5);
   assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
   // the halo marks the active task only; payloads read as words, not JSON
-  assert.equal((html.match(/<circle class="halo"/g) ?? []).length, 1);
+  assert.equal((html.match(/<li class="stop [^"]*is-active/g) ?? []).length, 1);
   assert.match(html, /<div class="ev-detail">under dashboard<\/div>/);
   assert.doesNotMatch(html, /\{&#34;parent_id&#34;/);
   assert.equal((html.match(/<a class="br" /g) ?? []).length, 3);
@@ -95,12 +103,11 @@ test("proof 4: tira-closed parents carry a quiet mark; every node is one click f
   const html = renderHtml(r, S, "h", events);
   const closed = [...html.matchAll(/data-key="([^"]+)"[^>]*data-closed-by-tira="true"/g)].map((m) => m[1]);
   assert.deepEqual(closed, ["node:metrics_card", "node:improve_visual"]);
-  const tree = html.slice(html.indexOf('<svg class="tree"'), html.indexOf("</svg></div>"));
-  assert.equal((tree.match(/<path class="tira-leaf"/g) ?? []).length, 2); // a leaf on each, in the tree itself
+  assert.equal((html.match(/<span class="tira-mark"/g) ?? []).length, 2); // a leaf on each, on its branch line
   assert.equal((html.match(/<span class="mark tira">closed by tira<\/span>/g) ?? []).length, 2); // and said in words in their drawers
   assert.match(html, /<b>2<\/b> by tira<\/li>/);
   // one click: every tree node links to a drawer that exists and holds its history
-  const links = [...tree.matchAll(/<a class="tlink" href="#(t\d+)"/g)].map((m) => m[1] as string);
+  const links = [...html.matchAll(/<a class="(?:stop-link|route)" href="#(t\d+)"/g)].map((m) => m[1] as string);
   assert.equal(links.length, r.entities.filter((e) => e.tree).length);
   for (const id of links) assert.match(html, new RegExp(`<section class="drawer" id="${id}"[^]*?history \\(\\d+\\)`));
   // every tree node has a history with at least its birth
@@ -127,23 +134,21 @@ test("a finished-but-open parent is tagged: tira closes it when you move on", as
   assert.match(html, /data-key="node:p"[^>]*data-awaiting-close="true"/);
   assert.match(html, /data-key="node:q"[^>]*data-awaiting-close="false"/);
   assert.equal((html.match(/<span class="mark wait">tira closes it when you move on<\/span>/g) ?? []).length, 1);
-  assert.equal((html.match(/<circle class="wait" cx=/g) ?? []).length, 1); // the dashed ring in the tree
+  assert.equal((html.match(/<span class="wait-ring"/g) ?? []).length, 1); // the dashed ring on its branch line
   assert.match(textTree(streamView(r, S)).join("\n"), /^p\s+unstarted\s+drained {2}\(tira closes when you move on\)$/m);
   // the tree marks the cursor (q), not the active task (none here), with ◆ next
-  assert.equal((html.match(/<text class="next"/g) ?? []).length, 1);
-  assert.match(html, /data-key="node:q"[^]*?<text class="next"/);
+  assert.equal((html.match(/<svg class="train"/g) ?? []).length, 1);
+  assert.match(html, /data-key="node:q"[^>]*><svg class="train"[^]*?<span class="here">next<\/span>/);
 });
 
-test("render --at N shows nothing from after N; tira's leaf only marks closes that still stand", async () => {
+test("render --at N shows nothing from after N; tira's mark only shows on closes that still stand", async () => {
   const { events } = await scenario();
   const registry = defaultRegistry();
   // folded to just before table's START: tira hasn't closed anything yet
   const firstTira = events.find((e) => e.metadata.actor === "tira")?.seq as number;
   const early = fold(events, registry, { upToSeq: firstTira - 1 });
   const html = renderHtml(early, S, "h", events);
-  const treeOf = (h: string) => h.slice(h.indexOf('<svg class="tree"'), h.indexOf("</svg></div>"));
-  assert.doesNotMatch(html, /cites seq|ev-who">tira</);
-  assert.doesNotMatch(treeOf(html), /class="tira-leaf"/);
+  assert.doesNotMatch(html, /cites seq|ev-who">tira<|class="tira-mark"/);
   assert.match(html, /data-key="node:improve_visual"[^>]*data-awaiting-close="true"/);
   for (const [, n] of html.matchAll(/class="ev-seq">seq (\d+)</g)) assert.ok(Number(n) < firstTira, `history shows seq ${n}`);
   // tira closes p; then a person re-opens and completes it: the card no longer credits tira
@@ -164,10 +169,10 @@ test("render --at N shows nothing from after N; tira's leaf only marks closes th
   const end = await store.readStream(S);
   const after = renderHtml(fold(end, registry), S, "h", end);
   assert.match(after, /data-key="node:p"[^>]*data-closed-by-tira="false"/);
-  assert.doesNotMatch(treeOf(after), /class="tira-leaf"/);
+  assert.doesNotMatch(after, /class="tira-mark"/);
 });
 
-test("the glow marks only the active task; long names are shortened in the tree, full in the drawer", async () => {
+test("only the active task pulses; long names are shortened on the train, full in the drawer", async () => {
   const store = new SqliteEventStore();
   const registry = defaultRegistry();
   const wp = new WritePath(store, registry);
@@ -181,10 +186,9 @@ test("the glow marks only the active task; long names are shortened in the tree,
   await send("c", "START"); // ...but c, below it, is the active task
   const events = await store.readStream(S);
   const html = renderHtml(fold(events, registry), S, "h", events);
-  const halos = [...html.matchAll(/data-key="(node:[^"]+)"[^>]*>(?:(?!<\/g><\/a>).)*?<circle class="halo"/g)].map((m) => m[1]);
-  assert.deepEqual(halos, ["node:c"]);
-  assert.match(html, />a_really_long_task_na…<\/text>/);
-  assert.match(html, new RegExp(`<title>${long}</title>`));
+  const pulsing = [...html.matchAll(/<li class="(stop [^"]*)"[^>]*><a class="stop-link"[^>]*data-key="([^"]+)"/g)].filter((m) => m[1]?.includes("is-active")).map((m) => m[2]);
+  assert.deepEqual(pulsing, ["node:c"]); // p is in progress too, but c (below it) is the active task
+  assert.match(html, /<span class="name" title="a_really_long_task_name_for_the_tree_view">a_really_long_task_na…<\/span>/);
   assert.match(html, new RegExp(`<h2>${long}</h2>`));
 });
 

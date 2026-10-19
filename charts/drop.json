@@ -1,0 +1,69 @@
+{
+  "id": "drop",
+  "initial": "filed",
+  "states": [
+    "filed",
+    "verified",
+    "rejected"
+  ],
+  "events": [
+    "RELAYED",
+    "VERIFIED",
+    "REJECTED"
+  ],
+  "pairs": [
+    {
+      "from": "filed",
+      "event": "RELAYED",
+      "outcome": "noop"
+    },
+    {
+      "from": "filed",
+      "event": "VERIFIED",
+      "outcome": "transition",
+      "to": "verified",
+      "guard": "orchestratorVerifiesPass"
+    },
+    {
+      "from": "filed",
+      "event": "REJECTED",
+      "outcome": "transition",
+      "to": "rejected",
+      "guard": "orchestratorWithReason"
+    },
+    {
+      "from": "verified",
+      "event": "RELAYED",
+      "outcome": "noop"
+    },
+    {
+      "from": "verified",
+      "event": "VERIFIED",
+      "outcome": "noop"
+    },
+    {
+      "from": "verified",
+      "event": "REJECTED",
+      "outcome": "denied"
+    },
+    {
+      "from": "rejected",
+      "event": "RELAYED",
+      "outcome": "noop"
+    },
+    {
+      "from": "rejected",
+      "event": "VERIFIED",
+      "outcome": "denied"
+    },
+    {
+      "from": "rejected",
+      "event": "REJECTED",
+      "outcome": "noop"
+    }
+  ],
+  "guards": {
+    "orchestratorVerifiesPass": "actor is the orchestrator, is not the drop's filer (createdBy), and payload.done_test_result is PASS",
+    "orchestratorWithReason": "actor is the orchestrator and payload.reason is a non-empty string"
+  }
+}

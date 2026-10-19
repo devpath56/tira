@@ -1,0 +1,71 @@
+{
+  "id": "T7",
+  "title": "drained resurrection: no child under a done parent until it is re-opened; then it un-drains",
+  "after": [
+    "S1",
+    "S2",
+    "S7"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "improve_visual",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "improve_visual",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "4-of-4"
+      },
+      "label": "closed"
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "dark_mode",
+      "parent": "improve_visual",
+      "expect": "rejected:denied"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "improve_visual",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "dark mode belongs here"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "dark_mode",
+      "parent": "improve_visual"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:improve_visual": "in_progress",
+      "node:dark_mode": "unstarted"
+    },
+    "notDrained": [
+      "node:improve_visual"
+    ],
+    "rejections": 3
+  },
+  "replayAt": [
+    {
+      "after": "closed",
+      "drained": [
+        "node:improve_visual"
+      ],
+      "states": {
+        "node:improve_visual": "done"
+      }
+    }
+  ],
+  "note": "rejections count the whole log: 1 here, plus 1 each from S2 and S7"
+}

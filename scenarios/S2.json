@@ -1,0 +1,46 @@
+{
+  "id": "S2",
+  "title": "done without proof",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "loading_state",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "loading_state",
+      "event": "COMPLETE",
+      "expect": "rejected:guard-failed",
+      "label": "bare"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "loading_state",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "spinner.mp4"
+      }
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:loading_state": "done"
+    },
+    "rejections": 1
+  },
+  "replayAt": [
+    {
+      "after": "bare",
+      "states": {
+        "node:loading_state": "in_progress"
+      }
+    }
+  ]
+}

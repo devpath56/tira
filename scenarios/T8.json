@@ -1,0 +1,51 @@
+{
+  "id": "T8",
+  "title": "time travel: replay to N matches each step of the demo",
+  "after": [
+    "S3"
+  ],
+  "steps": [],
+  "replayAt": [
+    {
+      "after": "tokens-started",
+      "active": [
+        "node:design_tokens"
+      ],
+      "states": {
+        "node:colors": "blocked"
+      }
+    },
+    {
+      "after": "s1-done",
+      "states": {
+        "node:colors": "done",
+        "node:loading_state": "unstarted"
+      },
+      "cursor": "node:loading_state"
+    },
+    {
+      "after": "bare",
+      "states": {
+        "node:loading_state": "in_progress"
+      }
+    },
+    {
+      "after": "before-moving-on",
+      "drained": [
+        "node:improve_visual"
+      ],
+      "cursor": "node:table",
+      "closedByTira": []
+    },
+    {
+      "after": "moved-on",
+      "closedByTira": [
+        "node:improve_visual",
+        "node:metrics_card"
+      ],
+      "active": [
+        "node:table"
+      ]
+    }
+  ]
+}

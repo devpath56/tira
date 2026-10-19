@@ -1,0 +1,92 @@
+{
+  "id": "T3",
+  "title": "duplicates are logged no-ops: one state change each",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "START",
+      "expect": "noop"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "BLOCK"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "BLOCK",
+      "expect": "noop"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "UNBLOCK"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "t"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "t"
+      },
+      "expect": "noop"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "filters",
+      "event": "CANCEL"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "filters",
+      "event": "CANCEL",
+      "expect": "noop"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:table": "done",
+      "node:filters": "cancelled"
+    },
+    "rejections": 0,
+    "trail": {
+      "node:table": [
+        "node.born",
+        "node.start",
+        "node.start",
+        "node.block",
+        "node.block",
+        "node.unblock",
+        "node.complete",
+        "node.complete"
+      ]
+    }
+  }
+}

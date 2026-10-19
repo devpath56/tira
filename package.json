@@ -1,7 +1,7 @@
 {
   "name": "tira",
   "version": "1.0.0",
-  "description": "Deterministic task-tree tracking MVP — executable spec (XState charts), scenario sources, demo",
+  "description": "Deterministic task-tree tracking MVP \u2014 executable spec (XState charts), scenario sources, demo",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -12,7 +12,9 @@
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "mutants": "node --disable-warning=ExperimentalWarning scripts/mutants.ts",
     "tira": "node --disable-warning=ExperimentalWarning scripts/tira.ts",
-    "check": "npm run verify && npm run typecheck && npm test"
+    "check": "npm run verify && npm run typecheck && npm test && npm run scan",
+    "scan": "python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json && python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json",
+    "scenarios": "node --disable-warning=ExperimentalWarning --test test/scenarios.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.19.1",

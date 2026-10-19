@@ -1,0 +1,19 @@
+{
+  "id": "T2",
+  "title": "replay determinism over the whole demo log",
+  "after": [
+    "S3",
+    "S5"
+  ],
+  "steps": [],
+  "expect": {
+    "states": {
+      "node:table": "in_progress",
+      "node:pagination": "unstarted"
+    }
+  },
+  "pendingParts": [
+    "an identical suggestion on both folds (the suggester is Phase 2)"
+  ],
+  "note": "the byte-identical refold (twice, from a shuffled copy, and every prefix) runs for every script; this one is the whole demo log"
+}

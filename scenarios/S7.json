@@ -1,0 +1,38 @@
+{
+  "id": "S7",
+  "title": "false finish: cancel is terminal",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "font",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "font",
+      "event": "CANCEL"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "font",
+      "event": "START",
+      "expect": "rejected:denied"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:font": "cancelled"
+    },
+    "rejections": 1,
+    "notDrained": [
+      "node:improve_visual"
+    ]
+  },
+  "note": "the plan's 'improve_visual drains' needs S1 and S2 on the same log: S3 asserts it (snapshot before-moving-on)"
+}

@@ -1,0 +1,85 @@
+{
+  "id": "S1",
+  "title": "interruption: block, discover, resume",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "colors",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "colors",
+      "event": "BLOCK",
+      "payload": {
+        "blocker": "design-tokens"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "design_tokens",
+      "parent": "improve_visual",
+      "payload": {
+        "kind": "discovered",
+        "discovered_during": "colors"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "design_tokens",
+      "event": "START",
+      "label": "tokens-started"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "design_tokens",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "token-spec.md"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "colors",
+      "event": "UNBLOCK"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "colors",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "palette.png"
+      },
+      "label": "s1-done"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:colors": "done",
+      "node:design_tokens": "done"
+    },
+    "cursor": "node:loading_state"
+  },
+  "replayAt": [
+    {
+      "after": "tokens-started",
+      "states": {
+        "node:colors": "blocked"
+      },
+      "active": [
+        "node:design_tokens"
+      ],
+      "cursor": "node:loading_state"
+    }
+  ]
+}

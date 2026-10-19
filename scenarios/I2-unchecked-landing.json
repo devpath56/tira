@@ -1,0 +1,105 @@
+{
+  "id": "I2-unchecked-landing",
+  "title": "README incident 2: landed is not verified; no verify without a PASS, never by the filer",
+  "steps": [
+    {
+      "do": "create",
+      "type": "session",
+      "id": "s1",
+      "actor": "s1"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "actor": "orchestrator"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "CLAIMED",
+      "actor": "s1",
+      "payload": {
+        "session": "s1"
+      }
+    },
+    {
+      "do": "create",
+      "type": "drop",
+      "id": "b",
+      "version": 1,
+      "actor": "s1",
+      "handoffs": [
+        "H2 brief.evidence",
+        "H2 brief.drop-written"
+      ],
+      "label": "landed"
+    },
+    {
+      "do": "send",
+      "type": "drop",
+      "id": "b",
+      "version": 1,
+      "event": "VERIFIED",
+      "actor": "s1",
+      "payload": {
+        "done_test_result": "PASS"
+      },
+      "expect": "rejected:guard-failed"
+    },
+    {
+      "do": "send",
+      "type": "drop",
+      "id": "b",
+      "version": 1,
+      "event": "VERIFIED",
+      "actor": "orchestrator",
+      "payload": {},
+      "expect": "rejected:guard-failed"
+    },
+    {
+      "do": "send",
+      "type": "drop",
+      "id": "b",
+      "version": 1,
+      "event": "VERIFIED",
+      "actor": "orchestrator",
+      "payload": {
+        "done_test_result": "PASS"
+      },
+      "handoffs": [
+        "H3 brief.verified-done"
+      ]
+    }
+  ],
+  "expect": {
+    "states": {
+      "brief:b@1": {
+        "outcome": "done-verified"
+      },
+      "drop:b@1": "verified"
+    },
+    "rejections": 2
+  },
+  "replayAt": [
+    {
+      "after": "landed",
+      "states": {
+        "brief:b@1": {
+          "outcome": "dropped-unverified"
+        }
+      }
+    }
+  ]
+}

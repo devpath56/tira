@@ -1,0 +1,53 @@
+{
+  "id": "R3",
+  "title": "dangling handoff: listed as pending, not an error",
+  "steps": [
+    {
+      "do": "create",
+      "type": "idea",
+      "id": "x"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "DRAFT_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "APPROVE_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "PROPOSE_NODE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "APPROVE_NODE",
+      "payload": {
+        "parent_id": "nowhere"
+      },
+      "handoffs": []
+    }
+  ],
+  "expect": {
+    "states": {
+      "idea:x": "materialized"
+    },
+    "absent": [
+      "node:x"
+    ],
+    "pending": [
+      [
+        "F1",
+        "node:x"
+      ]
+    ]
+  }
+}

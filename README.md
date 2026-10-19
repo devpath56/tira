@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 116 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 186 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -174,19 +174,20 @@ t render --out d1.html && t tree && t dump --hash                     # both par
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
-same state, drain flag, cursor (◆ next) and active task (the glowing node). The ✓ chip at
+same state, drain flag, cursor (the train) and active task (the pulsing stop). The chip at
 the top right shows the hash; hover it, or open **Activity**, for the full value, which
 must equal `t dump --hash`. The page's `data-node-count` must equal
 `data-fold-tree-count`. Parents tira closed carry a leaf. Click any task to open its
 drawer and history; tira's entries say why and which move they cite. Closing the branch
 took no clicks beyond moving on to `table`.
 
-The page has three views:
+The page has four views:
 
 | View | Shows |
 |---|---|
-| **Tree** (default) | Branches grow from the root; tasks are buds (to do), glowing (in progress), blossoms (done) or fallen petals (dropped). A dashed ring means tira closes it when you move on; a leaf means tira closed it |
+| **Progress** (default for a tree) | A progress train. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the train sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a leaf means tira closed it. The header counts tasks closed of all tasks, and how many are left |
 | **Board** | Jira-style status columns of the work (the leaf tasks), with a strip of parents and their "children closed" meters above |
+| **Lanes** (default for the factory) | Each brief's regions side by side, handoff pairs, what's waiting (D2, below) |
 | **Activity** | The whole log, newest first, including rejected commands, anomalies, other entities and the full hash |
 
 Words live in the drawers, not on the canvas. The page follows the system's light or dark
@@ -219,6 +220,177 @@ under a done or cancelled parent, while a drained-but-open parent accepts one an
   content = error); malformed commands throw rather than being logged; `eventId` is globally
   unique, so re-using one in another stream throws; `subscribe()` is at-least-once with an
   `onError` hook.
+
+## Code — Track B1: the factory tables (signed off 2026-10-17) + D2 lanes
+
+Five tables in `charts/`, hand-authored as signed off (A1–A15; A8 and A13 still open):
+
+| Entity | Identity | Regions (initial first) | Born as |
+|---|---|---|---|
+| brief | `brief_id@version` | **gate** ungated · gated · denied — **claim** waiting · unclaimed · claimed-silent · claimed-active — **outcome** open · dropped-unverified · done-verified · blocked | `brief.created` (v1), `brief.revised` (v2+) |
+| session | stable id | lifecycle: live · ended | `session.named` |
+| drop | `brief_id@version` (one per version) | lifecycle: filed · verified · rejected | `drop.filed` |
+
+Every guard reads only the payload, the actor, its own entity and its **own** region's
+captured data: **0 cross-region guards**. A test also checks the guards' source never
+touches the view or names another region's state. `npm run scan` runs the region scan on
+each composition (node + idea; the factory's five), and `npm run check` includes it. The
+brief composition is declared in `charts/compositions.json`: its grain, its correlation
+convention, and Devansh's 10 allowed configurations. The tests read the 10 from there,
+reach every one, and check random commands never leave them.
+
+| Core change | What it does |
+|---|---|
+| C1 birth names | Per type and version: `brief.created` / `brief.revised`, `session.named`, `drop.filed` (`node.born` already) |
+| C2 birth guards | The orchestrator creates briefs (`blocked_by`: distinct ids, never itself); a session names itself; drops are filed by sessions, not roles |
+| C3 captured data | A table pair can `capture` payload fields into its own region (claimant, block_reason, a session's name); guards read only their own region's |
+| C4 handoffs | `src/fold/handoffs.ts` + `src/write/dispatcher.ts`, below |
+| C5 versions | v2+ needs the version before it and supersedes it; a superseded version takes no more events, and no drop is filed or verified on it (drops follow their brief's versions) |
+| C6 history-aware predicates | **Not built**: it serves liveness, and the SLA and vantages (A13) are still open |
+
+**Dependencies and the frontier.** `blocked_by` is a second graph (b0 mapping G7). Every
+brief birth and revision is checked against it, and one that would close a loop is
+rejected (`cycle`), with the loop spelled out: `blocked_by would loop: a → c → b → a`.
+Forward references are fine until they close a loop, and a revision replaces its old
+version's edges. The **frontier** (G9) is what sessions can claim now: current briefs
+that are gated, unclaimed and open, with every `blocked_by` verified, in birth order.
+
+"Open" is one condition more than the factory vocabulary's rule (gated, unclaimed, every
+dependency verified), so blocked work is never offered. It is flagged for the PM. The
+dispatcher lifts a dependency block (H6) before it makes the brief claimable (H1), so the
+two rules agree on every log the write path produces.
+
+- `tira state` prints it as "claimable now".
+- The fold reports it per stream (`frontier`), plus each brief's `waitingOn`.
+- The Lanes view marks frontier briefs **claimable now**, and briefs still waiting on dependencies with what they need.
+
+**Handoffs (the only coupling).** After each command, the dispatcher writes every
+receiver that is due, as the reserved actor `dispatcher`. Each carries `correlationId` =
+the first event of the pair and `causationId` = the event that made it due.
+
+| Rule | When | Writes |
+|---|---|---|
+| H1 | a brief is dispatched and every `blocked_by` brief has a verified drop | `brief.claimable` |
+| H2 | the claimant files the drop for an open brief | `brief.evidence` (if silent), then `brief.drop-written` |
+| H3 | the orchestrator verifies the drop | `brief.verified-done {done_test_result}` |
+| H4 | the orchestrator rejects the drop | `brief.blocked {block_reason: defective}` |
+| H5 | a session ends | `brief.released` for open briefs it held |
+| H6 | a dependency-blocked brief's dependencies are all verified | `brief.unblocked` |
+| F1 | an idea is approved into a node (materialized) | `node.born {idea_id}` (same id) |
+| relay | the orchestrator sends `BLOCKED` on a gated brief | `brief.blocked {block_reason, requested_by}`, or a logged `handoff-refused` |
+
+The rules are pure over the folded state, and each turns false once its receiver lands.
+Each receiver is re-checked as "still due" at the moment it is written, inside the
+stream's write queue, so two commands finishing at once can't write it twice. A crash
+between the two halves of a pair just leaves it due: the next command finishes it, and
+so does a retry of the same command with the same `--event-id`, or `Dispatcher.catchUp`.
+Replay re-checks every dispatcher write against the rules (with its correlation id) and
+flags anything else as an anomaly. `tira state` and the page list handoffs still waiting,
+and why: dependencies, a stray drop for the orchestrator, a verified drop its brief
+can't take, or an idea whose node id is taken. The list is pull-only: whoever writes
+factory events checks it (a requirement on the writer, per the PM's 2026-10-18 reply).
+Waiting is a legitimate state, not an error.
+
+### Demo D2 script (manual test M2): regions composed, handoffs paired
+
+```bash
+export TIRA_DB=d2.db TIRA_STREAM=factory-main
+t() { node scripts/tira.ts "$@"; }
+t create session s1 --actor s1 && t create session s2 --actor s2
+t create brief api --version 1 --actor orchestrator slice_ref=slice/api
+t create brief ui --version 1 --actor orchestrator --payload '{"blocked_by":["api"]}'
+t send brief api DISPATCHED --version 1 --actor orchestrator      # + dispatcher brief.claimable (H1)
+t send brief ui DISPATCHED --version 1 --actor orchestrator       # waits: api isn't verified yet
+t send brief api CLAIMED --version 1 --actor s1 session=s1        # claimed-silent
+t send session s1 ENDED --actor vm declared_by=mac-evidence       # REJECTED: a VM can't end a session
+t create drop api --version 1 --actor s1                          # + evidence, + drop-written (H2)
+t send drop api VERIFIED --version 1 --actor s1 done_test_result=PASS            # REJECTED: the filer
+t send drop api VERIFIED --version 1 --actor orchestrator done_test_result=PASS  # + verified-done (H3), + ui claimable (H1)
+t state && t render --out d2.html && t dump --hash
+# the idea -> node handoff (F1), in a tree stream: the same id on both sides
+export TIRA_STREAM=tasktree-ideas
+t create node dashboard --actor isha
+t create idea metrics_card --actor isha
+for e in DRAFT_FILE APPROVE_FILE PROPOSE_NODE; do t send idea metrics_card $e --actor isha; done
+t send idea metrics_card APPROVE_NODE --actor devansh parent_id=dashboard   # + dispatcher node.born on node:metrics_card (F1)
+t tree && t render --out d2-ideas.html
+```
+
+M2 passes when:
+
+- `npm run scan` exits 0 (both compositions);
+- the page opens on **Lanes**, with each brief's gate, claim and outcome matching `t state`;
+- every handoff pair shows the same correlation id on both sides (`data-correlation` on the page, `correlationId` in `t log --json`), including idea `metrics_card` → node `metrics_card` on the `tasktree-ideas` page;
+- anything still waiting is listed with its reason.
+
+**Calls made while building B1.** The PM confirmed calls 1–7 on 2026-10-18, each checked
+against the signed tables, and ruled on the 8th (the two holes, closed below).
+
+- **H2's failure branch.** The draft had the dispatcher append `drop.rejected` for a drop
+  its claimant didn't file. The signed-off drop table lets only the orchestrator reject. I
+  kept the table: such a drop waits in the pending list for the orchestrator.
+- **`dispatcher` is a reserved actor**, like `tira`. Orchestrator, mac and user stay plain
+  actor ids (A15).
+- **Block requests.** The dispatcher relays the orchestrator's `BLOCKED`:
+  - `defective` comes only from H4;
+  - `verdict` and `retries-exhausted` need a claim;
+  - `dependency` needs an unverified `blocked_by`.
+
+  Refusals are logged under the orchestrator as `handoff-refused`.
+- **A dependency counts as verified** when any version of it has a verified drop. A
+  superseded version can't take a drop at all (drops follow their brief's versions), so
+  only a drop on a version that was current at the time counts.
+- **F1 naming.** F1 births the node with the idea's id. A parent can come from the
+  approval's `parent_id`; if that parent doesn't exist yet, the birth waits.
+- **F1 trigger.** The idea table reaches `materialized` through its `APPROVE_NODE` event
+  (stored `idea.approve-node`), so that is the trigger. The ruling's
+  `idea.materialized {idea_id}` names the state it reaches.
+- **The two holes, closed (ruling 2026-10-18; tables to be re-signed):**
+  - A brief is claimed, and a drop filed, only by a **named session**. A never-named
+    session could hold a brief forever, because nothing could end it to release the brief.
+    This is an identity check declared on the type (`mustExist`), like drops following
+    their brief's versions, so table guards still read no other entity. A claim for an
+    unnamed session is refused as `unknown-ref`, and replay flags one that bypassed the
+    write path.
+  - `RENAMED` is guarded: only the session itself, the orchestrator, or Mac evidence
+    (`renamedByAllowed`). It stays a logged no-op that records the name, so the rule
+    engine now allows a guard on a no-op (never on a denied pair).
+  - A regression test pins the order: a drop filed while its session ends mid-handoff
+    goes through (H2 runs before H5), and the brief isn't released.
+
+## Scenario suite (build order C2): the plan's tests as event scripts
+
+`scenarios/*.json` holds one event script per scenario in build-plan §5 (S1–S9, T1–T8,
+R2, R3), plus both factory incidents (I1, I2) and the dependency graph (G7). They share
+a dashboard seed.
+
+A script lists its steps, each with its expected outcome (`appended`, `noop`,
+`rejected:<code>`) and, where it matters, the handoffs it should cause. It then lists
+the folded result, which can include:
+
+- states, the cursor, the active task;
+- drain and tira's closes;
+- the trail of events per task;
+- provenance and handoff pairs;
+- pending handoffs and the frontier;
+- snapshots at labelled steps (replay to N).
+
+`after` chains scripts on one log; for example, S3 runs after S1, S2 and S7.
+
+`npm run scenarios` (and `npm test`, so CI) runs each one through the real dispatcher on
+a fresh store. It also checks that each log folds to the same bytes twice, and from a
+shuffled copy, and that no prefix of it shows an anomaly. Self-tests feed the runner a
+script with a wrong expectation of every kind, and check each one is reported. They also
+check the runner refuses malformed scripts: a duplicate label, a script that runs after
+itself, or a one-word state for a brief with three regions.
+
+Waiting on unbuilt phases (shown as TODO, with the reason):
+
+| Script | Waits on |
+|---|---|
+| S8, T6 | the suggester (Phase 2) and Devansh's ranking rule |
+| S9, T5 | aging and its SLA (Phase 3, A13) |
+| S5's age check | aging; S5's idea → node part runs now |
 
 ## Docs & showcase
 

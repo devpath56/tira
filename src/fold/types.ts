@@ -32,6 +32,8 @@ export interface EntityState {
   createdBy?: string; // actor of the create event (provenance)
   lastActor?: string; // actor of the last applied event
   tree?: TreeInfo;
+  context?: Record<string, Record<string, unknown>>; // region -> captured data (C3)
+  born?: Record<string, unknown>; // the birth payload, kept for types that declare keepBirth (brief: blocked_by)
 }
 
 // Read-only access to the state of one stream, as of the event being evaluated.

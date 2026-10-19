@@ -1,0 +1,55 @@
+{
+  "id": "T1",
+  "title": "invalid transitions are rejected and logged; state unchanged",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "x"
+      },
+      "expect": "rejected:denied"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "UNBLOCK",
+      "expect": "rejected:denied"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "font",
+      "event": "CANCEL"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "font",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "r"
+      },
+      "expect": "rejected:denied"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:table": "in_progress",
+      "node:font": "cancelled"
+    },
+    "rejections": 3
+  }
+}
