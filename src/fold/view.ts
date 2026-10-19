@@ -10,7 +10,7 @@ export function compareCodeUnits(a: string, b: string): number {
   return 0;
 }
 
-const byKey = (a: EntityState, b: EntityState) => compareCodeUnits(a.key, b.key);
+const byKey = (a: EntityState, b: EntityState) => a.key.localeCompare(b.key);
 
 export function makeView(entities: ReadonlyMap<string, EntityState>): StateView {
   return {
