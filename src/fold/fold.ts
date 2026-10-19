@@ -7,7 +7,7 @@
 // entities are namespaced by stream, so the same id in two trees never collides.
 import type { StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
-import { evaluate, type Evaluation, type RejectCode } from "./evaluate.ts";
+import { evaluate, type Evaluation, type Intent, type RejectCode } from "./evaluate.ts";
 import { REJECTED, toIntent, type EventData, type RejectedData } from "./events.ts";
 import { MACHINE_ACTOR, entityKey, type EntityState, type StateView } from "./types.ts";
 import { activeNodes, awaitingClose, contains, cursor, isDrained, isTerminal, roots } from "./tree.ts";
@@ -21,6 +21,10 @@ export interface FoldOptions {
   upToSeq?: number;
   now?: string;
   vantage?: string;
+  // Called with each event the fold applies, after it is judged and before its state is
+  // set (`before` is the stream as it was): how the health sweep reads history in one
+  // pass. Read-only; it changes nothing the fold returns.
+  onApply?: (e: StoredEvent, intent: Intent, ev: Extract<Evaluation, { ok: true }>, before: StateView) => void;
 }
 
 export interface Rejection {
@@ -215,6 +219,7 @@ export function foldDetailed(
       if (!byTira) settle(e, undefined);
       continue;
     }
+    opts.onApply?.(e, intent, ev, view);
     const prev = entities.get(ev.key);
     const createdBy = prev ? prev.createdBy : intent.actor;
     const tree = prev?.tree ?? ev.tree;

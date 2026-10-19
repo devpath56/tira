@@ -266,6 +266,42 @@ const MUTANTS: Mutant[] = [
   { name: "blind 1, fault 6: claimable now sorted by key", file: "src/tables/factory.ts", find: "    .sort((a, b) => a.createdSeq - b.createdSeq);", replace: "    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));" },
   { name: "blind 1, fault 7: any casing of PASS verifies", file: "src/tables/factory.ts", find: "actor === ORCHESTRATOR && actor !== entity.createdBy && payload.done_test_result === \"PASS\",", replace: "actor === ORCHESTRATOR && actor !== entity.createdBy && String(payload.done_test_result).toUpperCase() === \"PASS\"," },
   { name: "blind 1, fault 9: page escaping drops the quote", file: "src/render/html.ts", find: "const esc = (s: string) => s.replace(/[&<>\"']/g,", replace: "const esc = (s: string) => s.replace(/[&<>']/g," },
+  // health sweeps (src/sweep/sweep.ts)
+  { name: "sweep: anomalies not reported", file: "src/sweep/sweep.ts", find: "  for (const a of r.anomalies) add(out, \"rules\",", replace: "  for (const a of []) add(out, \"rules\"," },
+  { name: "sweep: missing parents not reported", file: "src/sweep/sweep.ts", find: "      if (!parent) add(out, \"orphans\",", replace: "      if (false) add(out, \"orphans\"," },
+  { name: "sweep: a parent of another type accepted", file: "src/sweep/sweep.ts", find: "      else if (parent.type !== def.type) add(out, \"orphans\",", replace: "      else if (false) add(out, \"orphans\"," },
+  { name: "sweep: tasks with no tree place accepted", file: "src/sweep/sweep.ts", find: "      if (!e.tree) { add(out, \"orphans\", { key: e.key, detail: \"has no place in the tree\" }); continue; }", replace: "      if (!e.tree) continue;" },
+  { name: "sweep: parent loops not reported", file: "src/sweep/sweep.ts", find: "          add(out, \"loops\", { key: loop[0] as string,", replace: "          if (false) add(out, \"loops\", { key: loop[0] as string," },
+  { name: "sweep: blocked_by loops not reported", file: "src/sweep/sweep.ts", find: "          add(out, \"loops\", { key: `${def.type}:${ordered[0]}`,", replace: "          if (false) add(out, \"loops\", { key: `${def.type}:${ordered[0]}`," },
+  { name: "sweep: superseded versions' blocked_by counted", file: "src/sweep/sweep.ts", find: "const current = all.filter((e) => e.version === undefined || !all.some((n) => n.id === e.id && n.version === (e.version as number) + 1));", replace: "const current = all;" },
+  { name: "sweep: a child listed twice accepted", file: "src/sweep/sweep.ts", find: "        if (listed.has(c)) { add(out, \"links\", { key: p.key, detail: `lists ${c} twice` }); continue; }", replace: "        if (listed.has(c)) continue;" },
+  { name: "sweep: a listed child that doesn't exist accepted", file: "src/sweep/sweep.ts", find: "        if (!child) add(out, \"links\",", replace: "        if (false) add(out, \"links\"," },
+  { name: "sweep: a listed child with another parent accepted", file: "src/sweep/sweep.ts", find: "        else if (parentOf(child) !== p.key) add(out, \"links\",", replace: "        else if (false) add(out, \"links\"," },
+  { name: "sweep: an unlisted child accepted", file: "src/sweep/sweep.ts", find: "      if (parent?.type === def.type && !kidsOf(parent).includes(c.key)) add(out, \"links\",", replace: "      if (false) add(out, \"links\"," },
+  { name: "sweep: unreached tasks not counted", file: "src/sweep/sweep.ts", find: "    if (unreached > 0) add(out, \"counts\",", replace: "    if (false) add(out, \"counts\"," },
+  { name: "sweep: tasks reached twice not counted", file: "src/sweep/sweep.ts", find: "    for (const [k, n] of reached) if (n > 1) add(out, \"counts\",", replace: "    for (const [k, n] of reached) if (n > 2) add(out, \"counts\"," },
+  { name: "sweep: two tasks in progress allowed", file: "src/sweep/sweep.ts", find: "      if (active.length > 1) add(out, \"counts\",", replace: "      if (active.length > 2) add(out, \"counts\"," },
+  { name: "sweep: the children cap ignored", file: "src/sweep/sweep.ts", find: "      if (n > cfg.maxChildren) add(out, \"counts\",", replace: "      if (false) add(out, \"counts\"," },
+  { name: "sweep: recorded depths not compared", file: "src/sweep/sweep.ts", find: "      if (e.tree.depth !== d) add(out, \"depth\",", replace: "      if (false) add(out, \"depth\"," },
+  { name: "sweep: the depth cap ignored", file: "src/sweep/sweep.ts", find: "      if (d > cfg.maxDepth) add(out, \"depth\",", replace: "      if (d > cfg.maxDepth + 1) add(out, \"depth\"," },
+  { name: "sweep: closed parents with open work accepted", file: "src/sweep/sweep.ts", find: "        if (child && !closed(cfg, child)) add(out, \"closed-parents\",", replace: "        if (false) add(out, \"closed-parents\"," },
+  { name: "sweep: blank definitions count as written", file: "src/sweep/sweep.ts", find: "const written = (v: unknown) => typeof v === \"string\" && v.trim().length > 0;", replace: "const written = (v: unknown) => typeof v === \"string\" && v.length > 0;" },
+  { name: "sweep: any value counts as a definition", file: "src/sweep/sweep.ts", find: "const written = (v: unknown) => typeof v === \"string\" && v.trim().length > 0;", replace: "const written = (v: unknown) => v !== undefined && String(v).trim().length > 0;" },
+  { name: "sweep: attention counted as broken", file: "src/sweep/sweep.ts", find: "  const count = (s: Severity) => checks.filter((c) => c.severity === s)", replace: "  const count = (s: Severity) => checks.filter((c) => s === \"broken\" || c.severity === s)" },
+  { name: "sweep: a parent above the working task counts as working", file: "src/sweep/sweep.ts", find: "      const active = nodes.filter((e) => working(e) && !above.has(e.key)).map((e) => e.key);", replace: "      const active = nodes.filter((e) => working(e)).map((e) => e.key);" },
+  { name: "sweep: regrowth never flagged", file: "src/sweep/sweep.ts", find: "    if (intent.kind === \"create\" && p !== undefined && was !== undefined) {", replace: "    if (false) {" },
+  { name: "sweep: closes not remembered", file: "src/sweep/sweep.ts", find: "    if (ev.outcome === \"transition\" && cfg.terminal.includes(state)) closedAt.set(ev.key, { seq: e.seq, state });", replace: "" },
+  { name: "sweep: a no-op close counts as a close", file: "src/sweep/sweep.ts", find: "    if (ev.outcome === \"transition\" && cfg.terminal.includes(state)) closedAt.set", replace: "    if (cfg.terminal.includes(state)) closedAt.set" },
+  { name: "sweep: --at ignored", file: "src/sweep/sweep.ts", find: "{ ...(opts.upToSeq === undefined ? {} : { upToSeq: opts.upToSeq }), onApply: history }", replace: "{ onApply: history }" },
+  { name: "sweep: --at cuts the log instead of the replay", file: "src/sweep/sweep.ts", find: "  const events = log.filter((e) => e.stream === stream).sort((a, b) => a.seq - b.seq);\n  const out: Findings = new Map();\n  const history = regrown(registry, out);\n  const r = fold(events, registry, { ...(opts.upToSeq === undefined ? {} : { upToSeq: opts.upToSeq }), onApply: history });", replace: "  const events = log.filter((e) => e.stream === stream && (opts.upToSeq === undefined || e.seq <= opts.upToSeq)).sort((a, b) => a.seq - b.seq);\n  const out: Findings = new Map();\n  const history = regrown(registry, out);\n  const r = fold(events, registry, { onApply: history });" },
+  { name: "sweep: an idea-born task ignores its idea", file: "src/sweep/sweep.ts", find: "    const idea = typeof own.idea_id === \"string\" ? birthOf(byKey.get(`idea:${own.idea_id}`)) : {};", replace: "    const idea: Record<string, unknown> = {};" },
+  { name: "sweep: loops spelled from where they were entered", file: "src/sweep/sweep.ts", find: "  const start = loop.indexOf([...loop].sort(compareCodeUnits)[0] as string);\n  return [...loop.slice(start), ...loop.slice(0, start)];", replace: "  return loop;" },
+  { name: "sweep: the root walk re-walks shared children", file: "src/sweep/sweep.ts", find: "      if (n > 1) continue;\n", replace: "" },
+  { name: "sweep: another type in a child list reads as a root", file: "src/sweep/sweep.ts", find: "        else if (child.type !== def.type) add(out, \"links\", { key: p.key, detail: `lists ${c}, which isn't a ${def.type}` });\n", replace: "" },
+  { name: "scenarios: a misspelt sweep check passes", file: "src/scenario/run.ts", find: "    if (!CHECKS.some((c) => c.id === id)) {", replace: "    if (false) {" },
+  { name: "fold: onApply never called", file: "src/fold/fold.ts", find: "    opts.onApply?.(e, intent, ev, view);\n    const prev = entities.get(ev.key);", replace: "    const prev = entities.get(ev.key);" },
+  { name: "scenarios: the sweep isn't checked", file: "src/scenario/run.ts", find: "  if (health.broken !== (x.sweep?.broken ?? 0)) {", replace: "  if (false) {" },
+  { name: "cli: tira sweep always exits 0", file: "src/cli/cli.ts", find: "  return r.broken > 0 ? 3 : 0;", replace: "  return 0;" },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
@@ -282,8 +318,9 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan"].map((n) => `test/${n}.test.ts`);
-  const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8" });
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep"].map((n) => `test/${n}.test.ts`);
+  // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
+  const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
   return r.status ?? 1;
 }

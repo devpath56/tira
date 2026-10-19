@@ -14,6 +14,7 @@ import { fxKey, transitionOf } from "../write/fxkey.ts";
 import type { Command, WriteResult } from "../write/write-path.ts";
 import { canonicalJson, compareCodeUnits, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey, type EntityState } from "../fold/types.ts";
+import { CHECKS, sweep, type CheckId, type SweepReport } from "../sweep/sweep.ts";
 
 export interface Step {
   do: "create" | "send" | "check";
@@ -46,6 +47,10 @@ export interface Expect {
   provenance?: Record<string, { parent?: string; kind?: string; discoveredDuring?: string }>;
   paired?: { from: string; to: string }[]; // "<stored type> <key>" on each side, same correlation id
   frontier?: string[]; // factory: briefs claimable now, in order
+  // health sweep (src/sweep/sweep.ts): nothing is ever broken in a log the write path wrote,
+  // so `broken` defaults to 0 and is checked on every script; `found` lists, per check, the
+  // keys of its findings, in order
+  sweep?: { broken?: number; found?: Partial<Record<CheckId, string[]>> };
 }
 
 export interface Scenario {
@@ -96,7 +101,7 @@ function regionsOf(e: EntityState | undefined) {
 }
 
 // Every way the fold can disagree with an expectation, as plain sentences.
-function check(where: string, r: FoldResult, events: readonly StoredEvent[], stream: string, x: Expect): string[] {
+function check(where: string, r: FoldResult, events: readonly StoredEvent[], stream: string, x: Expect, health: SweepReport): string[] {
   const bad: string[] = [];
   const ents = new Map(r.entities.filter((e) => e.stream === stream).map((e) => [e.key, e]));
   const d = r.derived[stream] ?? {};
@@ -124,6 +129,14 @@ function check(where: string, r: FoldResult, events: readonly StoredEvent[], str
   if (anomalies.length !== (x.anomalies ?? 0)) bad.push(`${where}: ${anomalies.length} anomalies (${anomalies.map((a) => a.problem).join("; ")}), expected ${x.anomalies ?? 0}`);
   if (x.pending !== undefined) eq("pending handoffs", (r.handoffs[stream] ?? []).map((p) => [p.rule, p.key]), x.pending);
   if (x.frontier !== undefined) eq("the frontier", r.frontier[stream] ?? [], x.frontier);
+  if (health.broken !== (x.sweep?.broken ?? 0)) {
+    const what = health.checks.filter((c) => c.severity === "broken").flatMap((c) => c.findings.map((f) => `${c.id}: ${f.key ?? `seq ${f.seq}`} ${f.detail}`));
+    bad.push(`${where}: the health sweep found ${health.broken} broken (${what.join("; ")}), expected ${x.sweep?.broken ?? 0}`);
+  }
+  for (const [id, keys] of Object.entries(x.sweep?.found ?? {})) {
+    if (!CHECKS.some((c) => c.id === id)) { bad.push(`${where}: the sweep has no check "${id}" (${CHECKS.map((c) => c.id).join(", ")})`); continue; }
+    eq(`the sweep's ${id} findings`, health.checks.find((c) => c.id === id)?.findings.map((f) => f.key ?? `seq ${f.seq}`) ?? [], keys);
+  }
   for (const [key, want] of Object.entries(x.trail ?? {})) {
     const touched = events.filter((e) => {
       const data = e.data as { entity?: { id: string; version?: number }; intent?: { entity: { type: string; id: string; version?: number } } };
@@ -188,12 +201,12 @@ export async function runScenario(s: Scenario, all: Map<string, Scenario>, regis
   }
   const log = await store.readStream(stream);
   const r = fold(log, registry);
-  if (s.expect) failures.push(...check("end", r, log, stream, s.expect));
+  failures.push(...check("end", r, log, stream, s.expect ?? {}, sweep(log, registry, stream)));
   for (const snap of s.replayAt ?? []) {
     const at = labels.get(snap.after);
     if (at === undefined) { failures.push(`replay: no step labelled ${snap.after}`); continue; }
     const upTo = log.filter((e) => e.seq <= at);
-    failures.push(...check(`replay to ${snap.after} (seq ${at})`, fold(log, registry, { upToSeq: at }), upTo, stream, snap));
+    failures.push(...check(`replay to ${snap.after} (seq ${at})`, fold(log, registry, { upToSeq: at }), upTo, stream, snap, sweep(log, registry, stream, { upToSeq: at })));
   }
   // determinism (T2 for every script): twice, from a shuffled copy, and at every prefix
   const once = canonicalJson(r);

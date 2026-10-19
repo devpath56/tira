@@ -1,0 +1,172 @@
+{
+  "id": "health-sweep",
+  "title": "health sweep: a tree written through the rules is never broken; a hollow task, and done work that was re-opened and grew, are flagged to look at",
+  "note": "build plan phase 3 (invariant sweeps); functional requirements: safety checks and hollow tasks. Every script also checks that its log sweeps with nothing broken",
+  "steps": [
+    {
+      "do": "create",
+      "type": "node",
+      "id": "app",
+      "payload": {
+        "definition": "what it is",
+        "done_criteria": "how we know"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "a",
+      "parent": "app",
+      "payload": {
+        "definition": "what it is",
+        "done_criteria": "how we know"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "b",
+      "parent": "app",
+      "payload": {
+        "definition": "says what it is, but not when it's done"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "a1",
+      "parent": "a",
+      "payload": {
+        "definition": "what it is",
+        "done_criteria": "how we know"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a1",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a1",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "a1.png"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "a2",
+      "parent": "a",
+      "payload": {
+        "definition": "what it is",
+        "done_criteria": "how we know"
+      },
+      "label": "a grows while open"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a2",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a2",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "a2.png"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a",
+      "event": "START"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a",
+      "event": "COMPLETE",
+      "payload": {
+        "evidenceRef": "a.png"
+      },
+      "label": "a done"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "a",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "missed a case"
+      }
+    },
+    {
+      "do": "create",
+      "type": "node",
+      "id": "a3",
+      "parent": "a",
+      "payload": {
+        "definition": "what it is",
+        "done_criteria": "how we know"
+      },
+      "label": "a regrown"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:a": "in_progress",
+      "node:a3": "unstarted"
+    },
+    "notDrained": [
+      "node:a"
+    ],
+    "sweep": {
+      "found": {
+        "hollow": [
+          "node:b"
+        ],
+        "regrown": [
+          "node:a"
+        ],
+        "rules": [],
+        "orphans": [],
+        "loops": [],
+        "links": [],
+        "counts": [],
+        "depth": [],
+        "closed-parents": []
+      }
+    }
+  },
+  "replayAt": [
+    {
+      "after": "a grows while open",
+      "sweep": {
+        "found": {
+          "hollow": [
+            "node:b"
+          ],
+          "regrown": []
+        }
+      }
+    },
+    {
+      "after": "a done",
+      "states": {
+        "node:a": "done"
+      },
+      "sweep": {
+        "found": {
+          "regrown": []
+        }
+      }
+    }
+  ]
+}

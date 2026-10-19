@@ -12,6 +12,7 @@ import { checkCommand, type Command, type WriteResult } from "../write/write-pat
 import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
 import { fxKey, transitionOf } from "../write/fxkey.ts";
 import { isIsoTime } from "../time.ts";
+import { sweep } from "../sweep/sweep.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
@@ -37,6 +38,10 @@ Usage:
                                                   --hash prints its sha256 instead
   tira key <type> <id> [EVENT] [key=value ...]    the fx: event id a factory transition uses (B2): the same
                                                   flags as send; no EVENT means a birth (e.g. drop.filed)
+  tira sweep [--at N] [--json]                    health checks: orphans, loops, parent/child links, counts,
+                                                  depths, closed parents with open work; plus tasks with no
+                                                  definition or done criteria, and finished branches that
+                                                  grew new work. Exits 3 when something is broken
 
 Options:
   --db PATH        store file (default: $TIRA_DB, else ./tira.db)
@@ -57,7 +62,7 @@ Writes go through the dispatcher: after your command lands it writes any handoff
 made due (factory briefs, drops and sessions; idea -> node births) as "dispatcher",
 and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
 
-Exit codes: 0 ok · 2 rejected by the rules · 1 usage or other error`;
+Exit codes: 0 ok · 2 rejected by the rules · 3 the sweep found something broken · 1 usage or other error`;
 
 class UsageError extends Error {}
 
@@ -305,6 +310,29 @@ async function dump(store: SqliteEventStore, registry: Registry, stream: string,
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
+// Health sweeps (src/sweep/sweep.ts). Exit 0 when nothing is broken (things to look at
+// are fine), 3 when something is.
+async function sweepCmd(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+  const r = sweep(await store.readStream(stream), registry, stream, upTo === undefined ? {} : { upToSeq: upTo });
+  if (values.json) {
+    io.out(canonicalJson(r));
+  } else {
+    io.out(`health sweep · stream ${stream} · as of seq ${r.atSeq}`);
+    for (const c of r.checks) {
+      const mark = c.findings.length === 0 ? "ok  " : c.severity === "broken" ? "FAIL" : "look";
+      io.out(`${mark}  ${c.title}${c.findings.length > 0 ? ` (${c.findings.length})` : ""}`);
+      for (const f of c.findings) {
+        const where = [f.key, f.seq === undefined ? undefined : `seq ${f.seq}`].filter((x) => x !== undefined).join(" · ");
+        io.out(`      ${where ? `${where}  ` : ""}${f.detail}`);
+      }
+    }
+    io.out("");
+    const look = r.attention > 0 ? `${r.attention} to look at` : "";
+    io.out(r.broken === 0 ? `nothing broken${look ? `; ${look}` : ""}` : `${r.broken} broken${look ? `; ${look}` : ""}`);
+  }
+  return r.broken > 0 ? 3 : 0;
+}
+
 async function tree(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   const v = streamView(r, stream);
@@ -366,7 +394,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -392,6 +420,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return await dump(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       case "tree":
         return await tree(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
+      case "sweep":
+        return await sweepCmd(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       case "render":
         return await render(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);
       default: {

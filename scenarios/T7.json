@@ -54,7 +54,14 @@
     "notDrained": [
       "node:improve_visual"
     ],
-    "rejections": 3
+    "rejections": 3,
+    "sweep": {
+      "found": {
+        "regrown": [
+          "node:improve_visual"
+        ]
+      }
+    }
   },
   "replayAt": [
     {
