@@ -39,6 +39,25 @@ test("create + send: appended exits 0, rejected exits 2 with the reason", async 
   }
 });
 
+test("moving on prints tira's closes; --actor tira is refused", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "node", "p");
+    await s.tira("create", "node", "c", "--parent", "p");
+    await s.tira("create", "node", "q");
+    await s.tira("send", "node", "c", "CANCEL");
+    const move = await s.tira("send", "node", "q", "START");
+    assert.equal(move.code, 0);
+    assert.match(move.out, /appended\s+seq 7\s+node:q/);
+    assert.match(move.out, /^ {2}\+ tira closed node:p \(seq 5, 6\): you moved on$/m);
+    const claim = await s.tira("send", "node", "q", "BLOCK", "--actor", "tira");
+    assert.equal(claim.code, 2);
+    assert.match(claim.out, /REJECTED\s+seq 8\s+reserved-actor/);
+  } finally {
+    s.done();
+  }
+});
+
 test("state persists across runs (file-backed) and shows entities + rejections", async () => {
   const s = sandbox();
   try {

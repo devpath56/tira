@@ -28,6 +28,9 @@ export interface TreeConfig {
   active: string; // the "working" state (node: in_progress)
   childEvent: string; // table event the parent must accept to take a child (ADD_CHILD)
   completeEvent?: string; // gated: only when every child is terminal (COMPLETE)
+  cancelEvent?: string; // gated the same way: no cancelling a parent with open children (CANCEL)
+  startEvent?: string; // START: tira opens an unstarted parent before closing it
+  machineCloses?: boolean; // tira closes drained parents when work moves on (ruling 2026-10-18)
   oneActive?: boolean; // gate: at most one active node per stream (ruling A4)
   maxDepth: number; // root = 1 (ruling 1: 8)
   maxChildren: number; // per parent (ruling 1: 20)
@@ -101,10 +104,13 @@ export class Registry {
     for (const s of [...t.terminal, ...t.actionable, t.active]) {
       if (!table.states.includes(s)) fail(`state ${s} is not in table ${table.id}`);
     }
-    for (const ev of [t.childEvent, t.completeEvent].filter((e): e is string => e !== undefined)) {
+    for (const ev of [t.childEvent, t.completeEvent, t.cancelEvent, t.startEvent].filter((e): e is string => e !== undefined)) {
       if (!table.events.includes(ev)) fail(`event ${ev} is not in table ${table.id}`);
     }
     if (def.versioned) fail("types must not be versioned (parent links are by id)");
+    if (t.machineCloses && (t.completeEvent === undefined || t.startEvent === undefined)) {
+      fail("machineCloses needs completeEvent and startEvent");
+    }
     if (!(t.maxDepth >= 1 && t.maxChildren >= 1)) fail("caps must be >= 1");
   }
 
@@ -149,6 +155,9 @@ export function defaultRegistry(): Registry {
         active: "in_progress",
         childEvent: "ADD_CHILD",
         completeEvent: "COMPLETE",
+        cancelEvent: "CANCEL",
+        startEvent: "START",
+        machineCloses: true,
         oneActive: true,
         maxDepth: 8,
         maxChildren: 20,

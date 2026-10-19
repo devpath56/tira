@@ -2,9 +2,12 @@
 // drain flags. Static (no JS, no server): re-run `tira render` and reload to refresh.
 // Deterministic: the same fold renders the same bytes. Every node carries data-*
 // attributes and the page carries the `tira dump --hash`, so manual test M1 can check
-// the page against the dump node-for-node.
+// the page against the dump node-for-node. Parents tira closed carry a quiet mark, and
+// every node opens to its own event trail (ruling 2026-10-18: the machine is never invisible).
 import type { FoldResult, Rejection } from "../fold/fold.ts";
-import type { EntityState } from "../fold/types.ts";
+import { MACHINE_ACTOR, type EntityState } from "../fold/types.ts";
+import { REJECTED, type EventData, type RejectedData } from "../fold/events.ts";
+import type { StoredEvent } from "../store/types.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -34,7 +37,10 @@ h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:var(-
 .is-cursor{outline:2px solid var(--cursor);background:var(--card)}
 .is-active{box-shadow:inset 3px 0 0 var(--active)}
 .mark{font-size:12px;font-weight:600}.mark.cursor{color:var(--cursor)}.mark.active{color:var(--active)}
-.mark.drained{color:var(--done)}
+.mark.drained{color:var(--done)}.mark.tira{color:var(--muted);font-weight:500;font-style:italic}
+details.trail{flex-basis:100%;font-size:12px;color:var(--muted);margin:2px 0 0}
+details.trail summary{cursor:pointer;width:max-content}
+details.trail ol{margin:4px 0 2px;padding-left:20px}details.trail li{margin:1px 0;overflow-wrap:anywhere}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600}
@@ -43,17 +49,56 @@ th{color:var(--muted);font-weight:600}
 .empty{color:var(--muted)}
 `;
 
-function nodeHtml(r: TreeRow): string {
+// One line per event that touched a node, oldest first (incl. refused commands).
+function trails(events: readonly StoredEvent[], stream: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (key: string, line: string) => out.set(key, [...(out.get(key) ?? []), line]);
+  // tira's lines cite the move by its seq, so the reader can find it in the other trail
+  const seqOf = new Map(events.filter((e) => e.stream === stream).map((e) => [e.eventId, e.seq]));
+  const cites = (trigger: unknown) => {
+    if (typeof trigger !== "string" || trigger.length === 0) return "cites nothing";
+    const seq = seqOf.get(trigger);
+    return seq === undefined ? `cites ${trigger} (not in this stream)` : `cites seq ${seq}`;
+  };
+  for (const e of events) {
+    if (e.stream !== stream) continue;
+    const who = e.metadata.actor ?? "—";
+    if (e.type === REJECTED) {
+      const d = e.data as unknown as RejectedData;
+      if (!d?.intent?.entity) continue;
+      const what = d.intent.kind === "create" ? "create" : d.intent.event;
+      add(`${d.intent.entity.type}:${d.intent.entity.id}`, `seq ${e.seq} · refused ${what} · ${who} · ${d.reason?.code}: ${d.reason?.detail}`);
+      continue;
+    }
+    const d = e.data as unknown as EventData;
+    if (!d?.entity) continue;
+    const type = e.type.slice(0, e.type.indexOf("."));
+    const p = d.payload ?? {};
+    const detail = who === MACHINE_ACTOR
+      ? `${String(p.reason ?? "")} · ${cites(p.trigger)}`
+      : Object.keys(p).length > 0 ? JSON.stringify(p) : "";
+    add(`${type}:${d.entity.id}`, `seq ${e.seq} · ${e.type} · ${who}${detail ? ` · ${detail}` : ""}`);
+  }
+  return out;
+}
+
+function nodeHtml(r: TreeRow, trail: Map<string, string[]>): string {
   const cls = ["node", r.cursor ? "is-cursor" : "", r.active ? "is-active" : ""].filter(Boolean).join(" ");
   const marks = [
     r.cursor ? `<span class="mark cursor">◆ cursor</span>` : "",
     r.active ? `<span class="mark active">● active</span>` : "",
     r.drained ? `<span class="mark drained">drained</span>` : "",
+    r.closedByTira ? `<span class="mark tira">closed by tira</span>` : "",
+    r.awaitingClose ? `<span class="tag">tira closes it when you move on</span>` : "",
     r.discoveredDuring ? `<span class="tag">found during ${esc(r.discoveredDuring.replace(/^[^:]+:/, ""))}</span>` : "",
   ].filter(Boolean).join("");
-  const kids = r.children.length > 0 ? `<ul>${r.children.map(nodeHtml).join("")}</ul>` : "";
-  return `<li><div class="${cls}" data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}">`
-    + `<span class="id">${esc(r.id)}</span><span class="state s-${esc(r.state)}">${esc(r.state.replace("_", " "))}</span>${marks}</div>${kids}</li>`;
+  const lines = trail.get(r.key) ?? [];
+  const history = lines.length > 0
+    ? `<details class="trail"><summary>history (${lines.length})</summary><ol>${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ol></details>`
+    : "";
+  const kids = r.children.length > 0 ? `<ul>${r.children.map((c) => nodeHtml(c, trail)).join("")}</ul>` : "";
+  return `<li><div class="${cls}" data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines.length}">`
+    + `<span class="id">${esc(r.id)}</span><span class="state s-${esc(r.state)}">${esc(r.state.replace("_", " "))}</span>${marks}${history}</div>${kids}</li>`;
 }
 
 function rejectionsHtml(rows: Rejection[]): string {
@@ -71,7 +116,7 @@ function othersHtml(rows: EntityState[]): string {
     + `</tbody></table></div>`;
 }
 
-export function renderHtml(r: FoldResult, stream: string, dumpHash: string): string {
+export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = []): string {
   const v = streamView(r, stream);
   const rejections = r.rejections.filter((x) => x.stream === stream);
   const anomalies = r.anomalies.filter((a) => a.stream === stream);
@@ -80,10 +125,12 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string): str
     `cursor: ${v.cursor ? v.cursor.replace(/^[^:]+:/, "") : "—"}`,
     `active: ${v.active.map((k) => k.replace(/^[^:]+:/, "")).join(", ") || "—"}`,
     `${flatten(v.roots).filter((x) => x.drained).length} drained`,
+    `${flatten(v.roots).filter((x) => x.closedByTira).length} closed by tira`,
     `${rejections.length} rejected`,
     ...(anomalies.length > 0 ? [`${anomalies.length} anomalies`] : []),
   ];
-  const tree = v.roots.length > 0 ? `<ul class="tree">${v.roots.map(nodeHtml).join("")}</ul>` : `<p class="empty">No tree yet.</p>`;
+  const trail = trails(events, stream);
+  const tree = v.roots.length > 0 ? `<ul class="tree">${v.roots.map((n) => nodeHtml(n, trail)).join("")}</ul>` : `<p class="empty">No tree yet.</p>`;
   // Counted from the fold, independently of the rendered rows: M1 compares the two.
   const foldTreeCount = r.entities.filter((e) => e.stream === stream && e.tree !== undefined).length;
   const anomalyHtml = anomalies.length === 0 ? "" : `<h2>Anomalies</h2><div class="scroll"><table><thead><tr><th>seq</th><th>type</th><th>problem</th></tr></thead><tbody>`
@@ -96,7 +143,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string): str
 <p class="meta">Folded to seq ${v.lastSeq} · read-only render of the replayed log · <code>sha256:${esc(dumpHash)}</code> (matches <code>tira dump --hash</code>)</p>
 <ul class="chips">${chips.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
 <h2>Tree</h2>${tree}
-<div class="legend"><span><span class="mark cursor">◆ cursor</span> next finishable task (DFS)</span><span><span class="mark active">● active</span> in progress, nothing in progress below</span><span><span class="mark drained">drained</span> every child done or cancelled</span></div>
+<div class="legend"><span><span class="mark cursor">◆ cursor</span> next task to work on: first open leaf, depth-first</span><span><span class="mark active">● active</span> in progress, nothing in progress below</span><span><span class="mark drained">drained</span> every child done or cancelled</span><span><span class="mark tira">closed by tira</span> tira wrote the completion when work moved on (see its history)</span></div>
 <h2>Rejected commands</h2>${rejectionsHtml(rejections)}
 ${anomalyHtml}${othersHtml(v.others)}
 </main></body></html>

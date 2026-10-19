@@ -7,10 +7,10 @@
 // entities are namespaced by stream, so the same id in two trees never collides.
 import type { StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
-import { evaluate, type RejectCode } from "./evaluate.ts";
-import { REJECTED, toIntent, type RejectedData } from "./events.ts";
-import type { EntityState, StateView } from "./types.ts";
-import { activeNodes, cursor, isDrained, roots } from "./tree.ts";
+import { evaluate, type Evaluation, type RejectCode } from "./evaluate.ts";
+import { REJECTED, toIntent, type EventData, type RejectedData } from "./events.ts";
+import { MACHINE_ACTOR, entityKey, type EntityState, type StateView } from "./types.ts";
+import { activeNodes, awaitingClose, contains, cursor, isDrained, isTerminal, roots } from "./tree.ts";
 import { compareCodeUnits, makeView } from "./view.ts";
 
 export { compareCodeUnits, makeView } from "./view.ts";
@@ -69,6 +69,23 @@ const isRejectedData = (d: unknown): d is RejectedData => {
   );
 };
 
+function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creationNameOf: (t: string) => string): boolean {
+  if (a.metadata?.actor !== MACHINE_ACTOR || b.metadata?.actor !== MACHINE_ACTOR) return false;
+  const ia = toIntent(a, creationNameOf);
+  const ib = toIntent(b, creationNameOf);
+  if (ia?.kind !== "event" || ib?.kind !== "event") return false;
+  const t = registry.get(ia.entity.type)?.tree;
+  const trigger = ia.payload.trigger;
+  return (
+    !!t?.machineCloses &&
+    ia.event === t.startEvent &&
+    ib.event === t.completeEvent &&
+    entityKey(ia.entity) === entityKey(ib.entity) &&
+    typeof trigger === "string" &&
+    trigger === ib.payload.trigger
+  );
+}
+
 export function fold(events: readonly StoredEvent[], registry: Registry, opts: FoldOptions = {}): FoldResult {
   const streams = new Map<string, Map<string, EntityState>>();
   const views = new Map<string, StateView>();
@@ -86,33 +103,84 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
   let lastSeq = 0;
   const creationNameOf = (t: string) => registry.creationName(t);
 
+  // Replay check of tira's own writes (ruling 2026-10-18: "the machine writes, it never
+  // infers"): every event tira applied must cite a move, and the very next non-tira event
+  // in its stream must be that move — into the active state, outside the parent tira closed.
+  const pending = new Map<string, { seq: number; eventId: string; type: string; trigger: string; key: string }[]>();
+  // Who made each entity's latest real state change (a no-op re-send doesn't count), so
+  // "closed by tira" survives someone clicking complete on an already-done parent.
+  const movedBy = new Map<string, string | undefined>();
+  const settle = (e: StoredEvent, ev: Evaluation | undefined) => {
+    const ps = pending.get(e.stream);
+    if (!ps?.length) return;
+    pending.delete(e.stream);
+    const { view } = scope(e.stream);
+    const moved = ev?.ok ? view.getKey(ev.key) : undefined;
+    const t = moved ? registry.get(moved.type)?.tree : undefined;
+    const intoActive = !!(ev?.ok && t && ev.outcome === "transition" && ev.region === t.region && ev.regions[t.region] === t.active);
+    for (const p of ps) {
+      const parent = view.getKey(p.key);
+      const ok = p.trigger === e.eventId && intoActive && moved !== undefined && parent !== undefined && !contains(parent, moved.key, view);
+      if (!ok) {
+        anomalies.push({
+          seq: p.seq, stream: e.stream, eventId: p.eventId, type: p.type,
+          problem: `tira's write cites move ${p.trigger}, but the next event (seq ${e.seq}) is not a move outside ${p.key}`,
+        });
+      }
+    }
+  };
+
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  // tira's START of an unstarted parent is the first half of one close (EvaluateOptions):
+  // it gets the paired treatment only when the very next event in its stream is tira's
+  // COMPLETE of the same node, citing the same move.
+  const pairedStarts = new Map<number, StoredEvent>(); // START seq -> its COMPLETE
+  const prevInStream = new Map<string, StoredEvent>();
+  for (const e of ordered) {
+    const a = prevInStream.get(e.stream);
+    if (a && isTiraPair(a, e, registry, creationNameOf)) pairedStarts.set(a.seq, e);
+    prevInStream.set(e.stream, e);
+  }
+  // The pair only counts if its COMPLETE also lands on top of the START.
+  const completes = (done: StoredEvent, entities: Map<string, EntityState>, ev: Extract<Evaluation, { ok: true }>) => {
+    const after = new Map(entities);
+    after.set(ev.key, { ...(entities.get(ev.key) as EntityState), regions: ev.regions });
+    const ci = toIntent(done, creationNameOf);
+    return ci !== undefined && evaluate(registry, after, makeView(after), ci).ok;
+  };
   for (const e of ordered) {
     if (opts.upToSeq !== undefined && e.seq > opts.upToSeq) break;
     lastSeq = e.seq;
     const anomaly = (problem: string) =>
       anomalies.push({ seq: e.seq, stream: e.stream, eventId: e.eventId, type: e.type, problem });
+    const byTira = e.metadata?.actor === MACHINE_ACTOR;
 
     if (e.type === REJECTED) {
       if (!isRejectedData(e.data)) {
         anomaly("malformed command.rejected record");
+        if (!byTira) settle(e, undefined);
         continue;
       }
       const d = e.data;
       rejections.push({
         seq: e.seq, stream: e.stream, eventId: e.eventId, code: d.reason.code, detail: d.reason.detail, intent: d.intent,
       });
+      if (!byTira) settle(e, undefined);
       continue;
     }
     const intent = toIntent(e, creationNameOf);
     if (!intent) {
       anomaly("unrecognised event shape");
+      if (!byTira) settle(e, undefined);
       continue;
     }
     const { entities, view } = scope(e.stream);
-    const ev = evaluate(registry, entities, view, intent);
+    const paired = pairedStarts.get(e.seq);
+    let ev = evaluate(registry, entities, view, intent, { pairedClose: paired !== undefined });
+    if (ev.ok && paired && !completes(paired, entities, ev)) ev = evaluate(registry, entities, view, intent);
     if (!ev.ok) {
       anomaly(`${ev.code}: ${ev.detail}`);
+      if (!byTira) settle(e, undefined);
       continue;
     }
     const prev = entities.get(ev.key);
@@ -132,10 +200,33 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       ...(intent.actor === undefined ? {} : { lastActor: intent.actor }),
       ...(tree === undefined ? {} : { tree }),
     });
+    if (ev.outcome !== "noop") movedBy.set(`${e.stream}\u0000${ev.key}`, intent.actor);
     // A birth appends the child to its parent's list (append-at-end, ruling 1).
     if (!prev && ev.tree?.parent !== undefined) {
       const parent = entities.get(ev.tree.parent);
       if (parent?.tree) entities.set(parent.key, { ...parent, tree: { ...parent.tree, children: [...parent.tree.children, ev.key] } });
+    }
+    if (byTira) {
+      // tira only ever opens and closes finished parents
+      const t = registry.get(intent.entity.type)?.tree;
+      const target = entities.get(ev.key);
+      if (!t || !target || !isDrained(t, target, view)) anomaly(`tira wrote to ${ev.key}, which is not a finished parent`);
+      const trigger = (e.data as unknown as EventData)?.payload?.trigger;
+      if (typeof trigger === "string" && trigger.length > 0) {
+        pending.set(e.stream, [...(pending.get(e.stream) ?? []), { seq: e.seq, eventId: e.eventId, type: e.type, trigger, key: ev.key }]);
+      } else {
+        anomaly("tira wrote this without citing a move");
+      }
+    } else {
+      settle(e, ev);
+    }
+  }
+  // tira's writes still waiting for their move: fine only when replay stopped mid-append.
+  for (const [stream, ps] of pending) {
+    const cut = opts.upToSeq !== undefined && ordered.some((x) => x.stream === stream && x.seq > (opts.upToSeq as number));
+    if (cut) continue;
+    for (const p of ps) {
+      anomalies.push({ seq: p.seq, stream, eventId: p.eventId, type: p.type, problem: `tira's write cites move ${p.trigger}, but no move follows it` });
     }
   }
 
@@ -148,7 +239,11 @@ export function fold(events: readonly StoredEvent[], registry: Registry, opts: F
       entities.push(ent);
       const def = registry.get(ent.type);
       const values: Record<string, unknown> = {};
-      if (def?.tree) values.drained = isDrained(def.tree, ent, view);
+      if (def?.tree) {
+        values.drained = isDrained(def.tree, ent, view);
+        values.awaitingClose = awaitingClose(def.tree, ent, view); // tira closes it on your next move elsewhere
+        values.closedByTira = isTerminal(def.tree, ent) && movedBy.get(`${stream}\u0000${ent.key}`) === MACHINE_ACTOR;
+      }
       for (const [name, fn] of Object.entries(def?.derived ?? {})) values[name] = fn(ent, { now: opts.now, vantage: opts.vantage, view });
       if (Object.keys(values).length > 0) (derived[stream] ??= {})[ent.key] = values;
     }

@@ -11,6 +11,8 @@ export interface TreeRow {
   state: string; // the tree region's state
   depth: number;
   drained: boolean;
+  awaitingClose: boolean; // finished, still open: tira closes it when work moves on
+  closedByTira: boolean;
   cursor: boolean;
   active: boolean;
   discoveredDuring?: string;
@@ -44,6 +46,8 @@ export function streamView(r: FoldResult, stream: string, treeRegion = "lifecycl
       state: e.regions[treeRegion] ?? Object.values(e.regions)[0] ?? "",
       depth: e.tree?.depth ?? 1,
       drained: derived[e.key]?.drained === true,
+      awaitingClose: derived[e.key]?.awaitingClose === true,
+      closedByTira: derived[e.key]?.closedByTira === true,
       cursor: cursors.has(e.key),
       active: actives.has(e.key),
       ...(e.tree?.discoveredDuring === undefined ? {} : { discoveredDuring: e.tree.discoveredDuring }),
@@ -73,7 +77,14 @@ export function textTree(v: StreamView): string[] {
       const last = i === rows.length - 1;
       const branch = r.depth === 1 ? "" : `${prefix}${last ? "└─ " : "├─ "}`;
       const label = `${branch}${r.id}`;
-      const marks = [r.cursor ? "◆ cursor" : "", r.active ? "● active" : "", r.drained ? "drained" : "", r.discoveredDuring ? `found during ${r.discoveredDuring.replace(/^[^:]+:/, "")}` : ""].filter(Boolean).join("  ");
+      const marks = [
+        r.cursor ? "◆ cursor" : "",
+        r.active ? "● active" : "",
+        r.drained ? "drained" : "",
+        r.awaitingClose ? "(tira closes when you move on)" : "",
+        r.closedByTira ? "closed by tira" : "",
+        r.discoveredDuring ? `found during ${r.discoveredDuring.replace(/^[^:]+:/, "")}` : "",
+      ].filter(Boolean).join("  ");
       out.push(`${label.padEnd(width)}${r.state.padEnd(12)}${marks}`.trimEnd());
       walk(r.children, r.depth === 1 ? "" : `${prefix}${last ? "   " : "│  "}`);
     });

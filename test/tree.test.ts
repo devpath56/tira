@@ -171,8 +171,11 @@ test("one-active gate: a second START elsewhere is rejected; descending into a c
   assert.deepEqual((await t.tree())?.active, ["node:a1"]);
   await ok(t.send("a1", "COMPLETE", { evidenceRef: "e" }));
   assert.deepEqual((await t.tree())?.active, ["node:a"]); // back up to the parent
-  await ok(t.send("root", "START")); // ascent keeps one active (root has an in_progress descendant)
-  assert.deepEqual((await t.tree())?.active, ["node:a"]);
+  // Starting root is work outside a's (now finished) branch, so tira closes a first.
+  const up = await ok(t.send("root", "START"));
+  assert.deepEqual(up.status === "appended" ? up.closedByTira?.map((c) => c.key) : [], ["node:a"]);
+  assert.deepEqual((await t.tree())?.active, ["node:root"]);
+  assert.equal(await t.state("a"), "done");
 });
 
 test("one-active gate covers UNBLOCK and REOPEN into in_progress, not just START", async () => {
@@ -190,7 +193,7 @@ test("one-active gate covers UNBLOCK and REOPEN into in_progress, not just START
 
 // ---------- cursor (ruling A3, leaf-scoped) ----------
 
-test("cursor: first finishable node in DFS order; skips blocked work and parents it blocks", async () => {
+test("cursor: first open leaf in DFS order; skips blocked work", async () => {
   const t = setup();
   await dashboard(t);
   assert.equal((await t.tree())?.cursor, "node:colors");
@@ -199,18 +202,20 @@ test("cursor: first finishable node in DFS order; skips blocked work and parents
   assert.equal((await t.tree())?.cursor, "node:loading_state"); // blocked is skipped
   await ok(t.send("loading_state", "CANCEL"));
   await ok(t.send("font", "CANCEL"));
-  // improve_visual can't complete while colors is blocked, so the cursor moves on
+  // nothing open is left under improve_visual but blocked colors, so the cursor moves on
   assert.equal((await t.tree())?.cursor, "node:table");
   await ok(t.send("colors", "UNBLOCK"));
   assert.equal((await t.tree())?.cursor, "node:colors");
 });
 
-test("cursor: never enters a closed branch; null when nothing is left", async () => {
+test("cursor: skips parents waiting for tira to close them; null when nothing is left", async () => {
   const t = setup();
   await ok(t.born("p"));
   await ok(t.born("c", "p"));
   await ok(t.born("q"));
-  await ok(t.send("p", "CANCEL")); // c is now orphaned work under a cancelled parent
+  await ok(t.send("c", "CANCEL"));
+  // p is finished (its only child is closed) but still open: tira closes it when work moves
+  // on, so the cursor doesn't park on it waiting for a click
   assert.equal((await t.tree())?.cursor, "node:q");
   await ok(t.send("q", "CANCEL"));
   assert.equal((await t.tree())?.cursor, null);
@@ -251,24 +256,26 @@ test("S7 false finish: cancel is terminal; improve_visual drains on done-or-canc
   assert.equal(await t.drained("improve_visual"), true);
 });
 
-test("S3 backtrack: the cursor climbs by completing each drained parent, then lands on table", async () => {
+test("S3 backtrack: cursor lands on table; moving on there makes tira close the finished chain", async () => {
   const t = setup();
   await dashboard(t);
   await s1(t);
   await s2(t);
   await s7(t);
-  assert.equal((await t.tree())?.cursor, "node:improve_visual"); // drained but open: "complete me"
-  await ok(t.send("metrics_card", "START"));
-  assert.equal(st(await t.send("metrics_card", "COMPLETE", { evidenceRef: "e" })), "rejected:gate"); // improve_visual open
-  await ok(t.send("improve_visual", "START")); // descent under the active parent
-  await ok(t.send("improve_visual", "COMPLETE", { evidenceRef: "all four children closed" }));
-  assert.equal((await t.tree())?.cursor, "node:metrics_card");
-  await ok(t.send("metrics_card", "COMPLETE", { evidenceRef: "both children closed" }));
+  const before = await t.now();
+  assert.equal(before.trees[S]?.node?.cursor, "node:table"); // as build-plan S3 says
+  assert.equal(before.derived[S]?.["node:improve_visual"]?.drained, true);
+  assert.equal(before.derived[S]?.["node:metrics_card"]?.drained, false); // improve_visual not closed yet
+  // Moving on: tira closes improve_visual, which drains metrics_card, which it closes too.
+  const move = await ok(t.send("table", "START"));
+  assert.deepEqual(move.status === "appended" ? move.closedByTira?.map((c) => c.key) : [], ["node:improve_visual", "node:metrics_card"]);
   const r = await t.now();
-  assert.equal(r.trees[S]?.node?.cursor, "node:table");
-  assert.equal(r.derived[S]?.["node:improve_visual"]?.drained, true);
+  assert.equal(await t.state("improve_visual"), "done");
+  assert.equal(await t.state("metrics_card"), "done");
   assert.equal(r.derived[S]?.["node:metrics_card"]?.drained, true); // drain climbed the chain
   assert.equal(r.derived[S]?.["node:dashboard"]?.drained, false);
+  assert.equal(r.trees[S]?.node?.cursor, "node:table");
+  assert.deepEqual(r.trees[S]?.node?.active, ["node:table"]);
   assert.deepEqual(r.anomalies, []);
 });
 
@@ -340,9 +347,9 @@ test("provenance is strict: discovered needs an actor; kind null is rejected; no
   assert.equal(st(idea), "rejected:unknown-parent");
 });
 
-// ---------- behaviour pinned on purpose: not yet ruled (README "Provisional choices") ----------
+// ---------- edge rulings (2026-10-18) ----------
 
-test("pinned: a blocked parent's children stay workable — the cursor descends into them", async () => {
+test("a blocked parent's children stay workable — the cursor descends into them (ruling 2026-10-18)", async () => {
   const t = setup();
   await ok(t.born("p"));
   await ok(t.born("c", "p"));
@@ -351,29 +358,42 @@ test("pinned: a blocked parent's children stay workable — the cursor descends 
   assert.equal((await t.tree())?.cursor, "node:c");
 });
 
-test("pinned: drain and the COMPLETE gate look at direct children only", async () => {
+test("no cancelling a parent with open children: close them first (ruling 2026-10-18)", async () => {
   const t = setup();
   await ok(t.born("p"));
   await ok(t.born("c", "p"));
-  await ok(t.born("g", "c")); // open grandchild under a child that gets cancelled
+  await ok(t.born("g", "c"));
+  const early = await t.send("c", "CANCEL");
+  assert.equal(st(early), "rejected:gate");
+  assert.match(early.status === "rejected" ? early.detail : "", /can't cancel node:c while children are open: node:g \(close them first\)/);
+  await ok(t.send("g", "CANCEL")); // one by one is fine; the log records each
   await ok(t.send("c", "CANCEL"));
   assert.equal(await t.drained("p"), true);
-  await ok(t.send("p", "START"));
-  await ok(t.send("p", "COMPLETE", { evidenceRef: "e" }));
-  assert.equal(await t.state("g"), "unstarted"); // orphaned work under closed nodes
 });
 
-test("pinned: CANCEL on a parent with an in-progress child leaves that child active (cursor skips it)", async () => {
+test("no re-opening a task under a done parent: re-open the parent first, with a reason", async () => {
   const t = setup();
   await ok(t.born("p"));
   await ok(t.born("c", "p"));
-  await ok(t.born("q"));
   await ok(t.send("c", "START"));
-  await ok(t.send("p", "CANCEL")); // not gated (not yet ruled)
-  const tr = await t.tree();
-  assert.deepEqual(tr?.active, ["node:c"]);
-  assert.equal(tr?.cursor, "node:q");
-  assert.equal(st(await t.send("q", "START")), "rejected:gate"); // c still holds the one active slot
+  await ok(t.send("c", "COMPLETE", { evidenceRef: "e" }));
+  await ok(t.send("p", "START"));
+  await ok(t.send("p", "COMPLETE", { evidenceRef: "e" }));
+  const early = await t.send("c", "REOPEN", { reason: "regression" });
+  assert.equal(st(early), "rejected:gate");
+  assert.match(early.status === "rejected" ? early.detail : "", /re-open node:p first: node:c sits under a closed parent/);
+  await ok(t.send("p", "REOPEN", { reason: "regression found in c" }));
+  await ok(t.send("c", "REOPEN", { reason: "regression" }));
+  assert.deepEqual([await t.state("p"), await t.state("c")], ["in_progress", "in_progress"]);
+});
+
+test("a parent with work in progress under it can't be cancelled", async () => {
+  const t = setup();
+  await ok(t.born("p"));
+  await ok(t.born("c", "p"));
+  await ok(t.send("c", "START"));
+  assert.equal(st(await t.send("p", "CANCEL")), "rejected:gate");
+  assert.deepEqual((await t.tree())?.active, ["node:c"]);
 });
 
 test("legacy node.created and gate-breaking direct appends are anomalies on replay", async () => {

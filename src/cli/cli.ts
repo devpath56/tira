@@ -108,7 +108,9 @@ function payloadFrom(values: Values, pairs: string[]): Record<string, unknown> {
 function describe(r: WriteResult): string {
   if (r.status === "appended") {
     const regions = Object.entries(r.regions).map(([k, v]) => `${k}=${v}`).join(" ");
-    return `appended   seq ${r.seq}  ${r.key}  ${r.outcome}  ${regions}`;
+    const line = `appended   seq ${r.seq}  ${r.key}  ${r.outcome}  ${regions}`;
+    const closes = (r.closedByTira ?? []).map((c) => `\n  + tira closed ${c.key} (seq ${c.seqs.join(", ")}): you moved on`);
+    return line + closes.join("");
   }
   if (r.status === "duplicate") return `duplicate  seq ${r.seq}  (original was ${r.original}; nothing new stored)`;
   return `REJECTED   seq ${r.seq}  ${r.code}  ${r.detail}`;
@@ -269,7 +271,7 @@ async function render(store: SqliteEventStore, registry: Registry, stream: strin
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   const hash = sha256(canonicalJson(r));
   const out = values.out ?? "tira.html";
-  writeFileSync(out, renderHtml(r, stream, hash));
+  writeFileSync(out, renderHtml(r, stream, hash, await store.readStream(stream)));
   const nodes = streamView(r, stream).nodeCount;
   io.out(values.json ? JSON.stringify({ out, nodes, sha256: hash, lastSeq: r.lastSeq }) : `wrote ${out}  ${nodes} node(s) · seq ${r.lastSeq} · sha256:${hash}`);
   return 0;

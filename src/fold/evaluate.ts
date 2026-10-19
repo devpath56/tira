@@ -4,7 +4,7 @@
 import { step, type StepOutcome } from "../tables/table.ts";
 import type { EntityTypeDef, Registry, TreeConfig } from "../tables/registry.ts";
 import { entityKey, type EntityRef, type EntityState, type StateView, type TreeInfo } from "./types.ts";
-import { activeNodes, allChildrenTerminal, children, isTerminal } from "./tree.ts";
+import { activeNodes, allChildrenTerminal, children, isDrained, isTerminal } from "./tree.ts";
 import { overlayView } from "./view.ts";
 
 export type RejectCode =
@@ -19,7 +19,8 @@ export type RejectCode =
   | "unknown-parent"
   | "tree-cap"
   | "bad-provenance"
-  | "gate";
+  | "gate"
+  | "reserved-actor";
 
 export type Intent =
   | { kind: "create"; entity: EntityRef; payload: Record<string, unknown>; actor: string | undefined }
@@ -38,6 +39,16 @@ export type Evaluation =
   | { ok: false; code: RejectCode; detail: string };
 
 type Reject = Extract<Evaluation, { ok: false }>;
+
+export interface EvaluateOptions {
+  // tira closes an unstarted parent with START + COMPLETE back to back (decided with Isha
+  // 2026-10-18): one close written as two events. For that START the one-active rule is
+  // judged on the pair's end state — the parent is done again one event later — so it is
+  // not checked here. Every other gate still applies, and only a finished (drained)
+  // parent qualifies. The write path sets this only for its own paired START; the fold
+  // sets it only after checking the pair in the log, including that the COMPLETE lands.
+  pairedClose?: boolean;
+}
 const reject = (code: RejectCode, detail: string): Reject => ({ ok: false, code, detail });
 
 export function evaluate(
@@ -45,6 +56,7 @@ export function evaluate(
   entities: ReadonlyMap<string, EntityState>,
   view: StateView,
   intent: Intent,
+  opts: EvaluateOptions = {},
 ): Evaluation {
   const def = registry.get(intent.entity.type);
   if (!def) return reject("unknown-entity-type", intent.entity.type);
@@ -85,7 +97,7 @@ export function evaluate(
   }
   const regions = { ...current.regions, [hit.region]: res.to };
   if (res.outcome === "transition" && def.tree && hit.region === def.tree.region) {
-    const gate = treeGate(def, def.tree, current, intent.event, regions, entities, view);
+    const gate = treeGate(def, def.tree, current, intent.event, regions, entities, view, opts.pairedClose === true);
     if (gate !== undefined) return reject("gate", gate);
   }
   return { ok: true, outcome: res.outcome, key, region: hit.region, from, regions };
@@ -145,12 +157,26 @@ function treeGate(
   regions: Record<string, string>,
   entities: ReadonlyMap<string, EntityState>,
   view: StateView,
+  pairedClose: boolean,
 ): string | undefined {
-  if (t.completeEvent !== undefined && event === t.completeEvent && !allChildrenTerminal(t, current, view)) {
+  const closing = event === t.completeEvent || event === t.cancelEvent;
+  if (closing && !allChildrenTerminal(t, current, view)) {
     const open = children(current, view).filter((c) => !isTerminal(t, c)).map((c) => c.key);
-    return `subtree not drained: ${current.key} has open children ${open.join(", ")}`;
+    return event === t.completeEvent
+      ? `subtree not drained: ${current.key} has open children ${open.join(", ")}`
+      : `can't cancel ${current.key} while children are open: ${open.join(", ")} (close them first)`;
   }
-  if (t.oneActive) {
+  // Ruling 2026-10-18: no re-opening a child under a closed parent — re-open the parent
+  // first, with a reason, so the trail stays honest.
+  const parentKey = current.tree?.parent;
+  const leavesTerminal = t.terminal.includes(current.regions[t.region] as string) && !t.terminal.includes(regions[t.region] as string);
+  if (leavesTerminal && parentKey !== undefined) {
+    const parent = view.getKey(parentKey);
+    if (parent && isTerminal(t, parent)) {
+      return `re-open ${parent.key} first: ${current.key} sits under a closed parent (${parent.key} is ${parent.regions[t.region]}; only a done parent can be re-opened)`;
+    }
+  }
+  if (t.oneActive && !(pairedClose && event === t.startEvent && isDrained(t, current, view))) {
     // Evaluated on the would-be tree, so every way into the active state is covered
     // (START, UNBLOCK, REOPEN), not just START.
     const before = activeNodes(t, def.type, view).length;

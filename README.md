@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 62 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 107 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -85,18 +85,24 @@ dependency, used only by the chart verifiers.
 | `src/render/` | D1: the thin read-only HTML page and the text tree, both drawn from one view of the fold |
 | `src/cli/`, `scripts/tira.ts` | `tira` CLI for manual testing (below) |
 
-**Track C1 — the tree (rulings 2026-10-16/17).** Same-lifecycle rules only; the node
-table is unchanged ("same 5-state lifecycle, no special machine").
+**Track C1 — the tree (rulings 2026-10-16/17/18).** Same-lifecycle rules only. The node
+table is unchanged (same 5-state lifecycle); tira's own closes go through it like anyone's.
 
 | Rule | Behaviour |
 |---|---|
 | Birth | `node.born {parent_id?, kind?, discovered_during?}`. Children are appended at the end (ruling 1). `kind` = planned (default) or discovered; discovered must name `discovered_during`. The actor is recorded |
 | Parent's own table | A child is born only if the parent's table accepts `ADD_CHILD` — so done or cancelled parents refuse children until re-opened with a reason (ruling 4) |
 | Caps | Depth ≤ 8 (root = 1), ≤ 20 children per parent (ruling 1) |
-| Drain | A parent drains when every child is done or cancelled. A leaf never drains (it is the work) |
-| COMPLETE gate | A parent can't COMPLETE until every child is done or cancelled (ruling A2: gate, not review) |
+| Drain | A parent drains when every **direct** child is done or cancelled. A leaf never drains (it is the work) |
+| Closing gate | A parent can't COMPLETE, and can't be CANCELLED, while any child is open — close the children first, one by one if you like (rulings A2, 2026-10-18) |
+| Re-open order | A task under a done parent can't be re-opened; re-open the parent first, with a reason (2026-10-18) |
 | One active task | "Active" = in_progress with no in_progress descendant (ruling A4). Checked on the would-be tree, so START, UNBLOCK and REOPEN are all covered; descending into a child of the active task is allowed |
-| Cursor | First node in depth-first order (birth order, closed branches not entered) that is unstarted or in progress **and finishable now** — a leaf, or a parent whose children are all closed. See provisional choices |
+| **tira holds the pen** | When you start work (START / UNBLOCK / REOPEN into in progress) **outside** a drained, still-open parent, tira writes that parent's completion itself — `node.start` (if nobody started it) + `node.complete`, as actor `tira`, through the same rule checker, each citing your move (`trigger` + `causationId`). Closing one parent can drain its own parent, so the chain climbs. tira's events land in the same atomic append as your move, just ahead of it. If your move is rejected, tira writes nothing. "Moving on" means starting work; blocking, cancelling or completing elsewhere doesn't count. Starting an ancestor of a finished branch is outside that branch, so it counts (2026-10-18) |
+| One close, two events | tira's start + complete of an unstarted parent count as one close: the one-active rule judges the end state (the parent is done again one event later), so tira can close a finished branch while you're working elsewhere. Every other rule still applies. A close is all or nothing: if any step is refused, tira keeps none of that parent's events, logs the refusal under its own name, and your move still lands |
+| Protected name | `tira` is reserved in anything that reads as it (casing, spacing, invisible characters, accents, common lookalike letters): any caller claiming it is refused (`reserved-actor`) and logged without the name; a retry with the same eventId is a duplicate. A payload can't claim it either — only the caller's actor counts |
+| Replay check | On replay, every tira event must cite a move, and the very next non-tira event must be that move, into in progress, outside the parent tira closed — or it's an anomaly. tira may only write to finished parents. Its start gets the one-close treatment only when its complete (same node, same move) is the very next event and lands. "Closed by tira" follows whoever made the last real change, so a repeat click on a done parent doesn't wipe it |
+| Cursor | First **open leaf** in depth-first order (birth order). Closed branches aren't entered; blocked parents are (their children stay workable); parents waiting for tira are skipped, so the cursor never parks on a parent waiting for a click |
+| Last branch | The final branch of a tree has nowhere to move on to, so it stays open until someone closes it or starts work elsewhere (decided with Isha 2026-10-18) |
 
 ### Manual testing: the `tira` CLI
 
@@ -110,7 +116,7 @@ node scripts/tira.ts create node colors --parent dashboard            # a child 
 node scripts/tira.ts send node colors START
 node scripts/tira.ts send node colors COMPLETE                        # REJECTED guard-failed, exit 2
 node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
-node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained
+node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained, closed by tira
 node scripts/tira.ts render --out tira.html                           # D1 page; re-run and reload to refresh
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
@@ -146,7 +152,7 @@ M0 passes when both hashes match and the `command.rejected` row is in the log bu
 never reached `done`. `rm d0.db d0-fresh.db` to start over. Stores written before C1 hold
 `node.created` births, which now show as anomalies: start them over.
 
-### Demo D1 script (manual test M1): S3 backtrack, visible
+### Demo D1 script (manual test M1): S3 backtrack, visible — tira closes the branch
 
 ```
 export TIRA_DB=d1.db TIRA_STREAM=tasktree-dash TIRA_ACTOR=isha
@@ -162,48 +168,34 @@ t send node design_tokens START && t send node design_tokens COMPLETE evidenceRe
 t send node colors UNBLOCK && t send node colors COMPLETE evidenceRef=palette.png          # resumed
 t send node loading_state START && t send node loading_state COMPLETE evidenceRef=spinner.mp4
 t send node font START && t send node font CANCEL                                          # improve_visual drains
-t render --out d1.html && t tree                                                           # cursor: improve_visual
-t send node metrics_card START && t send node metrics_card COMPLETE evidenceRef=x          # REJECTED: not drained
-t send node improve_visual START && t send node improve_visual COMPLETE evidenceRef=4-of-4
-t send node metrics_card COMPLETE evidenceRef=2-of-2                                       # drain climbs the chain
-t render --out d1.html && t dump --hash                                                    # cursor: table
+t tree                                                                # cursor: table; improve_visual waits for tira
+t send node table START                    # moving on: tira closes improve_visual, then metrics_card, citing this
+t render --out d1.html && t tree && t dump --hash                     # both parents "closed by tira"; drain climbed
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
 same state, drain flag, cursor (◆) and active task (●); its header hash equals
-`t dump --hash`; and its `data-node-count` equals `data-fold-tree-count`.
+`t dump --hash`; and its `data-node-count` equals `data-fold-tree-count`. Parents tira
+closed carry a quiet "closed by tira" mark, and every task's "history" opens its event
+trail (tira's lines say why and which move they cite). Closing the branch took no clicks
+beyond moving on to `table`.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
 from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
 `idea.created`, `command.rejected`.
 
-**⚠ Deviates from build-plan §5 S3 as written — needs a ruling.** S3 expects, on the
-post-S1+S2+S7 log, *cursor = table* and *drain true up the chain* **without** completing
-any parent (the deck shows metrics_card "drained" while improve_visual is "unfinished").
-That can't coexist with ruling A2 (parents have a lifecycle; COMPLETE only when drained)
-plus "done-parent ⇒ children terminal": a parent that counts as drained while a child is
-still open could then complete above open work. So C1 builds, provisionally:
-- **Drain is direct-children-only and strict:** metrics_card is **not** drained until
-  improve_visual itself is done. At post-S1+S2+S7: cursor = improve_visual, metrics_card
-  drained = false.
-- **The cursor is scoped to finishable work** (C1 table). Read literally, the A3 wording
-  ("first task in DFS order that isn't done, cancelled or blocked") always picks the root.
-- **S3 therefore climbs by completing each drained parent** (the cursor lands on each in
-  turn), then reaches `table`. `test/tree.test.ts` S3 and the D1 script do exactly this.
-- The alternative, if that's what was meant: drain is recursive (a child counts if it is
-  closed or itself drained), the cursor is the first open non-blocked *leaf*, and the
-  COMPLETE gate requires every *descendant* closed. That passes S3 as written.
+**Decided 2026-10-18 (backtrack ruling).** Drain stays local; every parent completion is an
+explicit recorded event; tira writes the ones nobody clicks, when work moves on. Build-plan
+§5's S3 row is stale on drain (Devansh is updating it): at post-S1+S2+S7 the cursor is
+`table` and improve_visual is drained; metrics_card drains once tira closes improve_visual,
+which happens when you start `table`. Two calls made with Isha: a parent nobody started is
+closed with a tira start + complete; the last branch of a tree stays open (above).
+
+**Also decided 2026-10-18:** a blocked parent's children stay workable; T7 = no new child
+under a done or cancelled parent, while a drained-but-open parent accepts one and un-drains.
 
 **Provisional choices, pending the PM** (each is flagged at its source):
 - Several roots in one stream are allowed (D0 uses three); depth counts the root as 1.
-- A blocked parent's children stay workable: the cursor descends into them.
-- T7 is read as "no new child under a **done or cancelled** parent". A drained but still
-  open parent accepts a child (it un-drains); REOPEN isn't possible from unstarted, so
-  denying it would be a dead end.
-- Open, not gated (not yet ruled): CANCEL on a parent with open children, and REOPEN of a
-  child under a done parent. Both can leave a closed parent above open work. That work is
-  then invisible to the cursor (it never enters closed branches), and an in-progress child
-  there still holds the one active slot, so a START elsewhere is rejected. Pinned by tests.
 - Discovered work must carry an actor ("who found it"); `kind` must be planned or
   discovered when given; `parent_id` is rejected on types without a tree.
 - Replay re-checks births and gates, so changing the caps or gate rules later would turn

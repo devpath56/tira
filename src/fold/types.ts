@@ -1,5 +1,9 @@
 // Derived-state shapes shared by the registry, write path and fold.
 
+// The actor name tira writes under when it holds the pen (ruling 2026-10-18). Reserved:
+// the write path refuses it from any caller, so the label always means tira wrote it.
+export const MACHINE_ACTOR = "tira";
+
 export interface EntityRef {
   type: string;
   id: string;
