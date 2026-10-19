@@ -1,0 +1,66 @@
+{
+  "id": "S5",
+  "title": "vapor catch: a declared idea is materialized as a node under table",
+  "after": [
+    "seed-dashboard"
+  ],
+  "pendingParts": [
+    "the idea's age (aging and its SLA are Phase 3, A13)"
+  ],
+  "steps": [
+    {
+      "do": "create",
+      "type": "idea",
+      "id": "pagination"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "pagination",
+      "event": "DRAFT_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "pagination",
+      "event": "APPROVE_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "pagination",
+      "event": "PROPOSE_NODE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "pagination",
+      "event": "APPROVE_NODE",
+      "actor": "devansh",
+      "payload": {
+        "parent_id": "table"
+      },
+      "handoffs": [
+        "F1 node.born"
+      ]
+    }
+  ],
+  "expect": {
+    "states": {
+      "idea:pagination": "materialized",
+      "node:pagination": "unstarted"
+    },
+    "provenance": {
+      "node:pagination": {
+        "parent": "node:table",
+        "kind": "planned"
+      }
+    },
+    "paired": [
+      {
+        "from": "idea.approve-node idea:pagination",
+        "to": "node.born node:pagination"
+      }
+    ]
+  }
+}

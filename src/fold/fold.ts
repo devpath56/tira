@@ -13,7 +13,7 @@ import { MACHINE_ACTOR, entityKey, type EntityState, type StateView } from "./ty
 import { activeNodes, awaitingClose, contains, cursor, isDrained, isTerminal, roots } from "./tree.ts";
 import { compareCodeUnits, makeView } from "./view.ts";
 import { blockRefusal, due, indexKey, pending as pendingHandoffs, type PendingHandoff, type TriggerIndex } from "./handoffs.ts";
-import { DISPATCHER, ORCHESTRATOR } from "../tables/factory.ts";
+import { DISPATCHER, ORCHESTRATOR, frontier } from "../tables/factory.ts";
 
 export { compareCodeUnits, makeView } from "./view.ts";
 
@@ -57,6 +57,7 @@ export interface FoldResult {
   rejections: Rejection[];
   anomalies: Anomaly[];
   handoffs: Record<string, PendingHandoff[]>; // stream -> handoffs still waiting (proposal R3), when any
+  frontier: Record<string, string[]>; // stream -> briefs claimable now (G9), for streams with briefs
 }
 
 const isRejectedData = (d: unknown): d is RejectedData => {
@@ -295,7 +296,12 @@ export function foldDetailed(
     const waiting = pendingHandoffs(views.get(stream) as StateView, indexOf(stream), registry, streams.get(stream) as Map<string, EntityState>);
     if (waiting.length > 0) handoffs[stream] = waiting;
   }
-  return { result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs }, indexes };
+  const claimable: FoldResult["frontier"] = {};
+  for (const stream of [...streams.keys()].sort(compareCodeUnits)) {
+    const view = views.get(stream) as StateView;
+    if (view.all("brief").length > 0) claimable[stream] = frontier(view).map((b) => b.key);
+  }
+  return { result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable }, indexes };
 }
 
 // Stable serialization: sorted keys at every level. Two folds of the same log

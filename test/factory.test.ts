@@ -430,6 +430,7 @@ test("D2 page: a factory stream opens on Lanes — one lane per region, captured
   const filed = log.find((e) => e.type === "drop.filed");
   assert.match(html, new RegExp(`<li data-correlation="${filed?.eventId}"><code>drop.filed</code> drop:api@1 [^]*?brief.evidence[^]*?brief.drop-written`));
   assert.match(html, /<li class="waiting"><code>H1<\/code> brief:ui@1 [^]*?verified drops for api<\/li>/);
+  assert.match(html, /title="brief:ui@1" data-frontier="false">ui@1<span class="needs">needs api<\/span>/);
   // the header counts verified briefs and handoffs, not tree nodes
   assert.match(html, /<div class="big" title="verified briefs, of those current">0<small>\/2<\/small><\/div>/);
   assert.match(html, /<b>2<\/b> handoffs<\/li><li title="handoffs still waiting"><b>1<\/b> waiting<\/li>/);
@@ -542,4 +543,66 @@ test("a race that makes a due receiver unacceptable skips it: the dispatcher nev
     assert.deepEqual(r.rejections.filter((x) => x.intent.actor === "dispatcher"), [], `run ${n}`);
     assert.deepEqual(r.anomalies, []);
   }
+});
+
+// ---------- the dependency graph (G7) and the frontier (G9) ----------
+
+test("blocked_by never loops: a birth or revision that would close a loop is rejected, with the loop spelled out", async () => {
+  const t = setup();
+  await t.make(brief("a"), "orchestrator");
+  await t.make(brief("b"), "orchestrator", { blocked_by: ["a"] });
+  await t.make(brief("c"), "orchestrator", { blocked_by: ["b"] });
+  const loop = await t.make(brief("a", 2), "orchestrator", { supersedes: 1, blocked_by: ["c"] });
+  assert.equal(st(loop), "rejected:cycle");
+  assert.match(loop.result.status === "rejected" ? loop.result.detail : "", /blocked_by would loop: a → c → b → a/);
+  // forward references are fine until they close a loop
+  assert.equal(st(await t.make(brief("x"), "orchestrator", { blocked_by: ["y"] })), "appended");
+  assert.equal(st(await t.make(brief("y"), "orchestrator", { blocked_by: ["x"] })), "rejected:cycle");
+  // a revision replaces the old version's edges: a@2 may drop a dependency without a false loop
+  assert.equal(st(await t.make(brief("c", 2), "orchestrator", { supersedes: 1, blocked_by: [] })), "appended");
+  assert.equal(st(await t.make(brief("a", 2), "orchestrator", { supersedes: 1, blocked_by: ["c"] })), "appended");
+  await clean(t);
+});
+
+test("the frontier: gated, unclaimed, open briefs whose every dependency is verified, in birth order", async () => {
+  const t = setup();
+  const front = async () => (await t.now()).frontier[S];
+  await t.make({ type: "session", id: "s1" }, "s1");
+  await t.make(brief("a"), "orchestrator");
+  await t.make(brief("b"), "orchestrator", { blocked_by: ["a"] });
+  await t.make(brief("c"), "orchestrator");
+  assert.deepEqual(await front(), []); // nothing dispatched yet
+  for (const id of ["a", "b", "c"]) await t.ev(brief(id), "DISPATCHED", "orchestrator");
+  assert.deepEqual(await front(), ["brief:a@1", "brief:c@1"]); // b waits for a
+  assert.deepEqual((await t.now()).derived[S]?.["brief:b@1"]?.waitingOn, ["a"]);
+  await t.ev(brief("c"), "CLAIMED", "s1", { session: "s1" });
+  assert.deepEqual(await front(), ["brief:a@1"]); // claimed work leaves the frontier
+  await t.ev(brief("a"), "CLAIMED", "s1", { session: "s1" });
+  await t.make(dropRef("a"), "s1");
+  await t.ev(dropRef("a"), "VERIFIED", "orchestrator", { done_test_result: "PASS" });
+  assert.deepEqual(await front(), ["brief:b@1"]);
+  assert.deepEqual((await t.now()).derived[S]?.["brief:b@1"]?.waitingOn, []);
+  // on the page: the frontier is marked, and so is what a brief still needs
+  const { renderHtml } = await import("../src/render/html.ts");
+  const log = await t.log();
+  const html = renderHtml(fold(log, t.registry), S, "h", log);
+  assert.match(html, /title="brief:b@1" data-frontier="true">b@1<span class="ready">claimable now<\/span>/);
+  // a superseded version leaves the frontier (its revision starts ungated)
+  await t.make(brief("b", 2), "orchestrator", { supersedes: 1, blocked_by: ["a"] });
+  assert.deepEqual(await front(), []);
+  // a tree stream has no frontier
+  assert.equal(fold([], t.registry).frontier["tasktree-x"], undefined);
+});
+
+test("a tampered log can't put a brief on the frontier before its dependencies are verified", async () => {
+  const t = setup();
+  await t.make(brief("a"), "orchestrator");
+  await t.make(brief("b"), "orchestrator", { blocked_by: ["a"] });
+  await t.ev(brief("b"), "DISPATCHED", "orchestrator");
+  // a forged claimable, straight into the store: replay flags it, and the frontier still holds b back
+  await t.store.append(S, [{ type: "brief.claimable", data: { entity: { id: "b", version: 1 }, payload: {} }, metadata: { actor: "dispatcher", correlationId: "forged" } }]);
+  const r = await t.now();
+  assert.match(r.anomalies[0]?.problem ?? "", /no handoff rule called for it/);
+  assert.equal(r.entities.find((e) => e.key === "brief:b@1")?.regions.claim, "unclaimed");
+  assert.deepEqual(r.frontier[S], []);
 });

@@ -5,6 +5,7 @@
 // that couples regions or entities is a handoff the dispatcher writes (handoffs.ts).
 import type { GuardFn } from "./table.ts";
 import type { EntityTypeDef } from "./registry.ts";
+import type { EntityState, StateView } from "../fold/types.ts";
 
 // Role names are literal actor ids (A15). The dispatcher is the single append process
 // for handoff receivers (N2, A9); the write path reserves its name like tira's.
@@ -18,6 +19,22 @@ const ROLES = new Set([ORCHESTRATOR, DISPATCHER, MAC, USER, "tira"]);
 export const BLOCK_REASONS = ["dependency", "verdict", "retries-exhausted", "defective"] as const;
 
 const s = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+
+// The dependency graph (blocked_by, fixed per version: A4), read from the birth payload.
+export const depsOf = (b: EntityState): string[] => (Array.isArray(b.born?.blocked_by) ? (b.born?.blocked_by as string[]).filter(s) : []);
+export const isSuperseded = (view: StateView, e: EntityState) =>
+  e.version !== undefined && view.get({ type: e.type, id: e.id, version: e.version + 1 }) !== undefined;
+// A dependency is met once any version of it has a verified drop (drops only land on current versions).
+export const verifiedDrop = (view: StateView, briefId: string) =>
+  view.all("drop").filter((d) => d.id === briefId && d.regions.lifecycle === "verified").sort((a, b) => a.lastSeq - b.lastSeq)[0];
+export const unverifiedDeps = (view: StateView, b: EntityState) => depsOf(b).filter((id) => !verifiedDrop(view, id));
+// The claimable frontier (factory vocabulary: "sessions pick from the available frontier; the
+// DAG orders, the session doesn't choose"): current briefs that are gated, unclaimed, open, and
+// whose every blocked_by is verified, in birth order.
+export const frontier = (view: StateView): EntityState[] =>
+  view.all("brief")
+    .filter((b) => !isSuperseded(view, b) && b.regions.gate === "gated" && b.regions.claim === "unclaimed" && b.regions.outcome === "open" && unverifiedDeps(view, b).length === 0)
+    .sort((a, b) => a.createdSeq - b.createdSeq);
 
 export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,
@@ -61,6 +78,11 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
       revisedAs: "REVISED", // A3: v1 brief.created, v2+ brief.revised {supersedes}
       createGuard: "briefBirth",
       keepBirth: true, // blocked_by and slice_ref, fixed per version (A4)
+      dependsOn: "blocked_by", // G7: a second graph, checked for cycles at every birth and revision
+      derived: {
+        // what this brief still waits for (empty once every blocked_by is verified)
+        waitingOn: (b, { view }) => unverifiedDeps(view, b),
+      },
       regions: { gate: chart("brief-gate.json"), claim: chart("brief-claim.json"), outcome: chart("brief-outcome.json") },
     },
     { type: "session", createdAs: "NAMED", createGuard: "sessionNamesItself", regions: { lifecycle: chart("session.json") } },

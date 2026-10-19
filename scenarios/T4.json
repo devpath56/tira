@@ -1,0 +1,37 @@
+{
+  "id": "T4",
+  "title": "done → cancelled only through a reasoned re-open",
+  "after": [
+    "seed-dashboard"
+  ],
+  "steps": [
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "CANCEL",
+      "expect": "rejected:denied"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "REOPEN",
+      "payload": {
+        "reason": "not needed after all"
+      }
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "fetch_metrics",
+      "event": "CANCEL"
+    }
+  ],
+  "expect": {
+    "states": {
+      "node:fetch_metrics": "cancelled"
+    },
+    "rejections": 1
+  }
+}

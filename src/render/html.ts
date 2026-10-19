@@ -75,6 +75,8 @@ a{color:inherit;text-decoration:none}
 .pairs li{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px;color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:7px 10px}
 .pairs .arrow{color:var(--lime);font-weight:700}.pairs code{font-family:var(--mono);font-size:11.5px;color:var(--fg)}
 .pairs li.waiting{border-style:dashed}
+.ready{font-size:10.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--lime);display:block}
+.needs{font-size:11px;color:var(--pollen);display:block;overflow-wrap:anywhere}
 @keyframes fade{from{opacity:.3;transform:translateY(6px)}}
 .journey{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 16px 14px;overflow-x:auto;scrollbar-width:thin}
 .line{display:flex;align-items:flex-start;width:100%;min-width:max-content;margin:0;padding:0;list-style:none}
@@ -418,6 +420,7 @@ const pill = (state: string) => `<span class="pill ${TONE[state] ?? ""}">${esc(s
 function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]): string {
   const inStream = r.entities.filter((e) => e.stream === stream);
   const multi = inStream.filter((e) => Object.keys(e.regions).length > 1);
+  const ready = new Set(r.frontier[stream] ?? []);
   const superseded = (e: EntityState) => e.version !== undefined && inStream.some((x) => x.type === e.type && x.id === e.id && x.version === (e.version as number) + 1);
   const avatar = (who: unknown) => `<span class="av" aria-hidden="true">${esc(([...String(who)][0] ?? "?").toUpperCase())}</span>`;
   const rows = multi.map((e, k) => {
@@ -430,7 +433,9 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
       return `<div class="lane" style="animation-delay:${fx(0.04 * k)}s" data-lane="${esc(e.key)}" data-region="${esc(region)}" data-state="${esc(state)}">${pill(state)}${extra}</div>`;
     }).join("");
     const label = `${e.id}${e.version === undefined ? "" : `@${e.version}`}`;
-    return `<div class="who${superseded(e) ? " old" : ""}" title="${esc(e.key)}${superseded(e) ? " (superseded)" : ""}">${esc(label)}</div>${cells}`;
+    const needs = (r.derived[stream]?.[e.key]?.waitingOn as string[] | undefined) ?? [];
+    const tag = ready.has(e.key) ? `<span class="ready">claimable now</span>` : needs.length > 0 && !superseded(e) ? `<span class="needs">needs ${needs.map(esc).join(", ")}</span>` : "";
+    return `<div class="who${superseded(e) ? " old" : ""}" title="${esc(e.key)}${superseded(e) ? " (superseded)" : ""}" data-frontier="${ready.has(e.key)}">${esc(label)}${tag}</div>${cells}`;
   }).join("");
   const regionNames = multi[0] ? Object.keys(multi[0].regions) : [];
   const grid = multi.length === 0 ? "" : `<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;

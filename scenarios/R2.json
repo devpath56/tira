@@ -1,0 +1,51 @@
+{
+  "id": "R2",
+  "title": "handoff replay: idea → node with the same id, paired by correlation id",
+  "note": "build-plan's R2 row names claim.* (stale, per the 2026-10-18 ruling): the handoff is idea → node",
+  "steps": [
+    {
+      "do": "create",
+      "type": "idea",
+      "id": "x"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "DRAFT_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "APPROVE_FILE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "PROPOSE_NODE"
+    },
+    {
+      "do": "send",
+      "type": "idea",
+      "id": "x",
+      "event": "APPROVE_NODE",
+      "handoffs": [
+        "F1 node.born"
+      ]
+    }
+  ],
+  "expect": {
+    "states": {
+      "idea:x": "materialized",
+      "node:x": "unstarted"
+    },
+    "paired": [
+      {
+        "from": "idea.approve-node idea:x",
+        "to": "node.born node:x"
+      }
+    ]
+  }
+}

@@ -20,7 +20,7 @@
 // Plus one relay: the orchestrator asks to block a brief; the dispatcher writes
 // brief.blocked {block_reason, requested_by} when the B1 §4 conditions hold.
 import type { Registry } from "../tables/registry.ts";
-import { ORCHESTRATOR } from "../tables/factory.ts";
+import { ORCHESTRATOR, depsOf, isSuperseded, unverifiedDeps, verifiedDrop } from "../tables/factory.ts";
 import { evaluate, type Intent } from "./evaluate.ts";
 import type { EntityRef, EntityState, StateView } from "./types.ts";
 import { entityKey } from "./types.ts";
@@ -55,13 +55,8 @@ export interface PendingHandoff {
 }
 
 const HELD = new Set(["claimed-silent", "claimed-active"]);
-const isSuperseded = (view: StateView, e: EntityState) =>
-  e.version !== undefined && view.get({ type: e.type, id: e.id, version: e.version + 1 }) !== undefined;
 const liveBriefs = (view: StateView) => view.all("brief").filter((b) => !isSuperseded(view, b));
-const depsOf = (b: EntityState): string[] => (Array.isArray(b.born?.blocked_by) ? (b.born?.blocked_by as string[]) : []);
-const verifiedDrop = (view: StateView, briefId: string) =>
-  view.all("drop").filter((d) => d.id === briefId && d.regions.lifecycle === "verified").sort((a, b) => a.lastSeq - b.lastSeq)[0];
-export const unverifiedDeps = (view: StateView, b: EntityState) => depsOf(b).filter((id) => !verifiedDrop(view, id));
+export { unverifiedDeps };
 const ref = (e: EntityState): EntityRef => ({ type: e.type, id: e.id, ...(e.version === undefined ? {} : { version: e.version }) });
 const briefOf = (view: StateView, d: EntityState) => (d.version === undefined ? undefined : view.get({ type: "brief", id: d.id, version: d.version }));
 
@@ -84,16 +79,17 @@ export function due(view: StateView, idx: TriggerIndex): Receiver[] {
 
   for (const b of liveBriefs(view)) {
     const ready = unverifiedDeps(view, b).length === 0;
-    // H1: dispatched, not claimable yet, every dependency verified.
-    const dispatched = idx.get(indexKey(b.key, "brief.dispatched"));
-    if (dispatched && b.regions.gate === "gated" && b.regions.claim === "waiting" && ready) {
-      on("H1", b, "CLAIMABLE", {}, dispatched, latestCause(view, idx, b, dispatched));
-    }
-    // H6: a dependency block lifts once every dependency is verified.
+    // H6 first: a dependency block lifts once every dependency is verified (before H1, so a
+    // brief never sits claimable and blocked at once between the two writes).
     const blocked = idx.get(indexKey(b.key, "brief.blocked"));
     if (blocked && b.regions.outcome === "blocked" && b.context?.outcome?.block_reason === "dependency" && ready) {
       const cause = latestCause(view, idx, b, blocked);
       on("H6", b, "UNBLOCKED", {}, cause, cause);
+    }
+    // H1: dispatched, not claimable yet, every dependency verified.
+    const dispatched = idx.get(indexKey(b.key, "brief.dispatched"));
+    if (dispatched && b.regions.gate === "gated" && b.regions.claim === "waiting" && ready) {
+      on("H1", b, "CLAIMABLE", {}, dispatched, latestCause(view, idx, b, dispatched));
     }
   }
   for (const d of view.all("drop")) {

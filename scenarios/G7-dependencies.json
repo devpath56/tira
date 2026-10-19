@@ -1,0 +1,170 @@
+{
+  "id": "G7-dependencies",
+  "title": "the factory's dependency graph: no loops; the frontier is what can be claimed now",
+  "note": "b0 mapping G7 (blocked_by is a second graph, cycle-checked) and G9 (sessions pick from a frontier)",
+  "steps": [
+    {
+      "do": "create",
+      "type": "session",
+      "id": "s1",
+      "actor": "s1"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "api",
+      "version": 1,
+      "actor": "orchestrator"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "ui",
+      "version": 1,
+      "actor": "orchestrator",
+      "payload": {
+        "blocked_by": [
+          "api"
+        ]
+      }
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "docs",
+      "version": 1,
+      "actor": "orchestrator",
+      "payload": {
+        "blocked_by": [
+          "ui",
+          "api"
+        ]
+      }
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "api",
+      "version": 2,
+      "actor": "orchestrator",
+      "payload": {
+        "blocked_by": [
+          "docs"
+        ],
+        "supersedes": 1
+      },
+      "expect": "rejected:cycle"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "loop",
+      "version": 1,
+      "actor": "orchestrator",
+      "payload": {
+        "blocked_by": [
+          "loop2"
+        ]
+      }
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "loop2",
+      "version": 1,
+      "actor": "orchestrator",
+      "payload": {
+        "blocked_by": [
+          "loop"
+        ]
+      },
+      "expect": "rejected:cycle"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "api",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "ui",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "docs",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator",
+      "label": "all-dispatched"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "api",
+      "version": 1,
+      "event": "CLAIMED",
+      "actor": "s1",
+      "payload": {
+        "session": "s1"
+      },
+      "label": "api-claimed"
+    },
+    {
+      "do": "create",
+      "type": "drop",
+      "id": "api",
+      "version": 1,
+      "actor": "s1"
+    },
+    {
+      "do": "send",
+      "type": "drop",
+      "id": "api",
+      "version": 1,
+      "event": "VERIFIED",
+      "actor": "orchestrator",
+      "payload": {
+        "done_test_result": "PASS"
+      },
+      "label": "api-verified"
+    }
+  ],
+  "expect": {
+    "frontier": [
+      "brief:ui@1"
+    ],
+    "rejections": 2,
+    "pending": [
+      [
+        "H1",
+        "brief:docs@1"
+      ]
+    ]
+  },
+  "replayAt": [
+    {
+      "after": "all-dispatched",
+      "frontier": [
+        "brief:api@1"
+      ]
+    },
+    {
+      "after": "api-claimed",
+      "frontier": []
+    },
+    {
+      "after": "api-verified",
+      "frontier": [
+        "brief:ui@1"
+      ]
+    }
+  ]
+}

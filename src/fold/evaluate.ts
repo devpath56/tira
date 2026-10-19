@@ -23,7 +23,8 @@ export type RejectCode =
   | "reserved-actor"
   | "superseded"
   | "bad-version"
-  | "handoff-refused";
+  | "handoff-refused"
+  | "cycle";
 
 export type Intent =
   | { kind: "create"; entity: EntityRef; payload: Record<string, unknown>; actor: string | undefined }
@@ -99,6 +100,11 @@ export function evaluate(
         return reject("guard-failed", `${def.type} birth needs ${def.createGuard}`);
       }
     }
+    // G7: a dependency graph never loops (a waits for b waits for a would wait forever).
+    if (def.dependsOn !== undefined) {
+      const loop = dependencyLoop(def.type, def.dependsOn, intent.entity.id, intent.payload[def.dependsOn], view);
+      if (loop) return reject("cycle", `${def.dependsOn} would loop: ${loop.join(" → ")}`);
+    }
     if (!def.tree) {
       if (intent.payload.parent_id !== undefined) return reject("unknown-parent", `${def.type} has no tree; parent_id is not allowed`);
       return { ok: true, outcome: "created", key, regions };
@@ -138,6 +144,30 @@ export function evaluate(
   if (captured === undefined) delete context[hit.region];
   else context[hit.region] = captured;
   return { ok: true, outcome: res.outcome, key, region: hit.region, from, regions, ...(Object.keys(context).length > 0 ? { context } : {}) };
+}
+
+// The loop a new or revised version's dependencies would close, if any (ids, from the new
+// one back to itself). Each id's current dependencies come from its latest version.
+function dependencyLoop(type: string, field: string, id: string, deps: unknown, view: StateView): string[] | undefined {
+  const edges = new Map<string, string[]>();
+  for (const e of view.all(type)) {
+    const newer = e.version !== undefined && view.get({ type, id: e.id, version: e.version + 1 });
+    const list = e.born?.[field];
+    if (!newer) edges.set(e.id, Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : []);
+  }
+  edges.set(id, Array.isArray(deps) ? deps.filter((x): x is string => typeof x === "string") : []);
+  const path: string[] = [];
+  const seen = new Set<string>();
+  const walk = (at: string): boolean => {
+    if (at === id && path.length > 0) return true;
+    if (seen.has(at)) return false;
+    seen.add(at);
+    path.push(at);
+    for (const next of edges.get(at) ?? []) if (walk(next)) return true;
+    path.pop();
+    return false;
+  };
+  return walk(id) ? [...path, id] : undefined;
 }
 
 // Birth into a tree: provenance, parent, the parent's own table, caps.

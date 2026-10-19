@@ -1,0 +1,66 @@
+{
+  "id": "S3",
+  "title": "backtrack: tira closes the finished chain when work moves on",
+  "after": [
+    "S1",
+    "S2",
+    "S7"
+  ],
+  "steps": [
+    {
+      "do": "check",
+      "label": "before-moving-on"
+    },
+    {
+      "do": "send",
+      "type": "node",
+      "id": "table",
+      "event": "START",
+      "label": "moved-on"
+    }
+  ],
+  "expect": {
+    "cursor": "node:table",
+    "active": [
+      "node:table"
+    ],
+    "drained": [
+      "node:improve_visual",
+      "node:metrics_card"
+    ],
+    "closedByTira": [
+      "node:improve_visual",
+      "node:metrics_card"
+    ],
+    "states": {
+      "node:improve_visual": "done",
+      "node:metrics_card": "done",
+      "node:table": "in_progress"
+    },
+    "trail": {
+      "node:improve_visual": [
+        "node.born",
+        "node.start",
+        "node.complete"
+      ]
+    }
+  },
+  "replayAt": [
+    {
+      "after": "before-moving-on",
+      "cursor": "node:table",
+      "drained": [
+        "node:improve_visual"
+      ],
+      "notDrained": [
+        "node:metrics_card"
+      ],
+      "awaitingClose": [
+        "node:improve_visual"
+      ],
+      "states": {
+        "node:improve_visual": "unstarted"
+      }
+    }
+  ]
+}

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 160 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 182 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -248,6 +248,22 @@ reach every one, and check random commands never leave them.
 | C5 versions | v2+ needs the version before it and supersedes it; a superseded version takes no more events, and no drop is filed or verified on it (drops follow their brief's versions) |
 | C6 history-aware predicates | **Not built**: it serves liveness, and the SLA and vantages (A13) are still open |
 
+**Dependencies and the frontier.** `blocked_by` is a second graph (b0 mapping G7). Every
+brief birth and revision is checked against it, and one that would close a loop is
+rejected (`cycle`), with the loop spelled out: `blocked_by would loop: a → c → b → a`.
+Forward references are fine until they close a loop, and a revision replaces its old
+version's edges. The **frontier** (G9) is what sessions can claim now: current briefs
+that are gated, unclaimed and open, with every `blocked_by` verified, in birth order.
+
+"Open" is one condition more than the factory vocabulary's rule (gated, unclaimed, every
+dependency verified), so blocked work is never offered. It is flagged for the PM. The
+dispatcher lifts a dependency block (H6) before it makes the brief claimable (H1), so the
+two rules agree on every log the write path produces.
+
+- `tira state` prints it as "claimable now".
+- The fold reports it per stream (`frontier`), plus each brief's `waitingOn`.
+- The Lanes view marks frontier briefs **claimable now**, and briefs still waiting on dependencies with what they need.
+
 **Handoffs (the only coupling).** After each command, the dispatcher writes every
 receiver that is due, as the reserved actor `dispatcher`. Each carries `correlationId` =
 the first event of the pair and `causationId` = the event that made it due.
@@ -331,6 +347,40 @@ M2 passes when:
   - `CLAIMED` and `drop.filed` don't require a named session. A claim by a session that
     was never named can never be released, so it is listed as waiting.
   - `RENAMED` has no guard, so anyone can rename any session.
+
+## Scenario suite (build order C2): the plan's tests as event scripts
+
+`scenarios/*.json` holds one event script per scenario in build-plan §5 (S1–S9, T1–T8,
+R2, R3), plus both factory incidents (I1, I2) and the dependency graph (G7). They share
+a dashboard seed.
+
+A script lists its steps, each with its expected outcome (`appended`, `noop`,
+`rejected:<code>`) and, where it matters, the handoffs it should cause. It then lists
+the folded result, which can include:
+
+- states, the cursor, the active task;
+- drain and tira's closes;
+- the trail of events per task;
+- provenance and handoff pairs;
+- pending handoffs and the frontier;
+- snapshots at labelled steps (replay to N).
+
+`after` chains scripts on one log; for example, S3 runs after S1, S2 and S7.
+
+`npm run scenarios` (and `npm test`, so CI) runs each one through the real dispatcher on
+a fresh store. It also checks that each log folds to the same bytes twice, and from a
+shuffled copy, and that no prefix of it shows an anomaly. Self-tests feed the runner a
+script with a wrong expectation of every kind, and check each one is reported. They also
+check the runner refuses malformed scripts: a duplicate label, a script that runs after
+itself, or a one-word state for a brief with three regions.
+
+Waiting on unbuilt phases (shown as TODO, with the reason):
+
+| Script | Waits on |
+|---|---|
+| S8, T6 | the suggester (Phase 2) and Devansh's ranking rule |
+| S9, T5 | aging and its SLA (Phase 3, A13) |
+| S5's age check | aging; S5's idea → node part runs now |
 
 ## Docs & showcase
 

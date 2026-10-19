@@ -219,6 +219,11 @@ function printState(r: FoldResult, stream: string, upTo: number | undefined, io:
     })),
     ["seq", "command", "code", "detail"],
   )) io.out(l);
+  const ready = r.frontier[stream];
+  if (ready !== undefined) {
+    io.out("");
+    io.out(`claimable now (${ready.length})${ready.length > 0 ? `: ${ready.join(", ")}` : ""}`);
+  }
   const waiting = r.handoffs[stream] ?? [];
   if (waiting.length > 0) {
     io.out("");

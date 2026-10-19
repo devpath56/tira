@@ -13,7 +13,8 @@
     "mutants": "node --disable-warning=ExperimentalWarning scripts/mutants.ts",
     "tira": "node --disable-warning=ExperimentalWarning scripts/tira.ts",
     "check": "npm run verify && npm run typecheck && npm test && npm run scan",
-    "scan": "python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json && python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json"
+    "scan": "python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json && python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json",
+    "scenarios": "node --disable-warning=ExperimentalWarning --test test/scenarios.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.19.1",

@@ -1,0 +1,98 @@
+{
+  "id": "I1-silent-session",
+  "title": "README incident 1: a silent session is not stood down by a timeout or a VM",
+  "steps": [
+    {
+      "do": "create",
+      "type": "session",
+      "id": "s1",
+      "actor": "s1"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "actor": "orchestrator"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator",
+      "handoffs": [
+        "H1 brief.claimable"
+      ]
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "CLAIMED",
+      "actor": "s1",
+      "payload": {
+        "session": "s1"
+      },
+      "label": "silent"
+    },
+    {
+      "do": "send",
+      "type": "session",
+      "id": "s1",
+      "event": "ENDED",
+      "actor": "vm",
+      "payload": {
+        "declared_by": "mac-evidence"
+      },
+      "expect": "rejected:guard-failed"
+    },
+    {
+      "do": "send",
+      "type": "session",
+      "id": "s1",
+      "event": "ENDED",
+      "actor": "scheduler",
+      "payload": {
+        "declared_by": "timeout"
+      },
+      "expect": "rejected:guard-failed"
+    },
+    {
+      "do": "send",
+      "type": "session",
+      "id": "s1",
+      "event": "ENDED",
+      "actor": "mac",
+      "payload": {
+        "declared_by": "mac-evidence"
+      },
+      "handoffs": [
+        "H5 brief.released"
+      ]
+    }
+  ],
+  "expect": {
+    "states": {
+      "session:s1": "ended",
+      "brief:b@1": {
+        "gate": "gated",
+        "claim": "unclaimed",
+        "outcome": "open"
+      }
+    },
+    "rejections": 2
+  },
+  "replayAt": [
+    {
+      "after": "silent",
+      "states": {
+        "brief:b@1": {
+          "claim": "claimed-silent"
+        }
+      }
+    }
+  ]
+}
