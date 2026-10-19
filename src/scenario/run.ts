@@ -11,7 +11,7 @@ import type { StoredEvent } from "../store/types.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import type { Command, WriteResult } from "../write/write-path.ts";
-import { canonicalJson, fold, type FoldResult } from "../fold/fold.ts";
+import { canonicalJson, compareCodeUnits, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey, type EntityState } from "../fold/types.ts";
 
 export interface Step {
@@ -64,7 +64,7 @@ export const SCENARIO_DIR = new URL("../../scenarios/", import.meta.url);
 
 export function loadScenarios(dir: URL = SCENARIO_DIR): Map<string, Scenario> {
   const out = new Map<string, Scenario>();
-  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort()) {
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort(compareCodeUnits)) {
     const s = JSON.parse(readFileSync(join(dir.pathname, f), "utf8")) as Scenario;
     if (`${s.id}.json` !== f) throw new Error(`${f}: id ${s.id} must match the file name`);
     out.set(s.id, s);
@@ -112,11 +112,11 @@ function check(where: string, r: FoldResult, events: readonly StoredEvent[], str
   for (const key of x.absent ?? []) if (ents.has(key)) bad.push(`${where}: ${key} exists, expected none`);
   if (x.cursor !== undefined) eq("the cursor", tree?.cursor ?? null, x.cursor);
   if (x.active !== undefined) eq("the active task", tree?.active ?? [], x.active);
-  const flagged = (flag: string) => Object.entries(d).filter(([, v]) => v[flag] === true).map(([k]) => k).sort();
+  const flagged = (flag: string) => Object.entries(d).filter(([, v]) => v[flag] === true).map(([k]) => k).sort(compareCodeUnits);
   for (const k of x.drained ?? []) if (d[k]?.drained !== true) bad.push(`${where}: ${k} isn't drained`);
   for (const k of x.notDrained ?? []) if (d[k]?.drained === true) bad.push(`${where}: ${k} is drained`);
-  if (x.awaitingClose !== undefined) eq("waiting for tira", flagged("awaitingClose"), [...x.awaitingClose].sort());
-  if (x.closedByTira !== undefined) eq("closed by tira", flagged("closedByTira"), [...x.closedByTira].sort());
+  if (x.awaitingClose !== undefined) eq("waiting for tira", flagged("awaitingClose"), [...x.awaitingClose].sort(compareCodeUnits));
+  if (x.closedByTira !== undefined) eq("closed by tira", flagged("closedByTira"), [...x.closedByTira].sort(compareCodeUnits));
   if (x.rejections !== undefined) eq("rejections", r.rejections.filter((j) => j.stream === stream).length, x.rejections);
   const anomalies = r.anomalies.filter((a) => a.stream === stream);
   if (anomalies.length !== (x.anomalies ?? 0)) bad.push(`${where}: ${anomalies.length} anomalies (${anomalies.map((a) => a.problem).join("; ")}), expected ${x.anomalies ?? 0}`);

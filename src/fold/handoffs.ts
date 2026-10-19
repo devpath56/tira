@@ -24,6 +24,7 @@ import { ORCHESTRATOR, depsOf, isSuperseded, unverifiedDeps, verifiedDrop } from
 import { evaluate, type Intent } from "./evaluate.ts";
 import type { EntityRef, EntityState, StateView } from "./types.ts";
 import { entityKey } from "./types.ts";
+import { show } from "../text.ts";
 
 export interface TriggerRecord {
   eventId: string;
@@ -146,10 +147,10 @@ export function blockRefusal(view: StateView, b: EntityState | undefined, actor:
   if (b.regions.gate !== "gated") return "undispatched briefs are denied, not blocked: send DENIED";
   if (reason === "defective") return "defective blocks come from a rejected drop, not a request";
   if (reason === "verdict" || reason === "retries-exhausted") {
-    return HELD.has(b.regions.claim as string) ? undefined : `${String(reason)} blocks need a claimed brief`;
+    return HELD.has(b.regions.claim as string) ? undefined : `${show(reason)} blocks need a claimed brief`;
   }
   if (reason === "dependency") return unverifiedDeps(view, b).length > 0 ? undefined : "nothing to wait for: every blocked_by is verified";
-  return `block_reason must be dependency, verdict or retries-exhausted, got ${String(reason)}`;
+  return `block_reason must be dependency, verdict or retries-exhausted, got ${show(reason)}`;
 }
 
 // What is waiting on a handoff right now, and on what. Briefs waiting for dependencies

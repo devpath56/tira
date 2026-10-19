@@ -14,6 +14,7 @@ import { MACHINE_ACTOR, type EntityState } from "../fold/types.ts";
 import { REJECTED, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
+import { show } from "../text.ts";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -422,13 +423,13 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
   const multi = inStream.filter((e) => Object.keys(e.regions).length > 1);
   const ready = new Set(r.frontier[stream] ?? []);
   const superseded = (e: EntityState) => e.version !== undefined && inStream.some((x) => x.type === e.type && x.id === e.id && x.version === (e.version as number) + 1);
-  const avatar = (who: unknown) => `<span class="av" aria-hidden="true">${esc(([...String(who)][0] ?? "?").toUpperCase())}</span>`;
+  const avatar = (who: unknown) => `<span class="av" aria-hidden="true">${esc(([...show(who)][0] ?? "?").toUpperCase())}</span>`;
   const rows = multi.map((e, k) => {
     const cells = Object.entries(e.regions).map(([region, state]) => {
       const cap = e.context?.[region] ?? {};
       const extra = [
-        cap.claimant !== undefined ? `<span class="cap" title="claimed by ${esc(String(cap.claimant))}">${avatar(cap.claimant)}${esc(String(cap.claimant))}</span>` : "",
-        cap.block_reason !== undefined ? `<span class="cap">${esc(String(cap.block_reason))}</span>` : "",
+        cap.claimant !== undefined ? `<span class="cap" title="claimed by ${esc(show(cap.claimant))}">${avatar(cap.claimant)}${esc(show(cap.claimant))}</span>` : "",
+        cap.block_reason !== undefined ? `<span class="cap">${esc(show(cap.block_reason))}</span>` : "",
       ].join("");
       return `<div class="lane" style="animation-delay:${fx(0.04 * k)}s" data-lane="${esc(e.key)}" data-region="${esc(region)}" data-state="${esc(state)}">${pill(state)}${extra}</div>`;
     }).join("");

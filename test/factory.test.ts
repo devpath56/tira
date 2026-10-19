@@ -8,7 +8,7 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { loadTable, validateTable, type Table } from "../src/tables/table.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
-import { fold } from "../src/fold/fold.ts";
+import { compareCodeUnits, fold } from "../src/fold/fold.ts";
 import type { Command, WriteResult } from "../src/write/write-path.ts";
 import type { EntityRef } from "../src/fold/types.ts";
 
@@ -187,7 +187,7 @@ test("blocked_by: a dispatched brief waits (pending) until every dependency is v
   assert.deepEqual((await t.now()).handoffs[S]?.map((p) => [p.rule, p.key, p.waitingOn]), [["H1", "brief:b@1", "verified drops for a"]]);
   await t.make(dropRef("a"), "s1");
   const v = await t.ev(dropRef("a"), "VERIFIED", "orchestrator", { done_test_result: "PASS" });
-  assert.deepEqual(rules(v).sort(), ["H1 brief.claimable", "H3 brief.verified-done"]);
+  assert.deepEqual(rules(v).sort(compareCodeUnits), ["H1 brief.claimable", "H3 brief.verified-done"]);
   const log = await t.log();
   const claimable = log.find((e) => e.type === "brief.claimable" && (e.data as { entity: { id: string } }).entity.id === "b");
   assert.equal(claimable?.metadata.correlationId, log.find((e) => e.type === "brief.dispatched" && (e.data as { entity: { id: string } }).entity.id === "b")?.eventId);
@@ -216,7 +216,7 @@ test("the orchestrator's block requests: relayed by the dispatcher under the B1 
   // the dependency verifies: H6 lifts the block, H1 makes it claimable
   await t.make(dropRef("a"), "s1");
   const v = await t.ev(dropRef("a"), "VERIFIED", "orchestrator", { done_test_result: "PASS" });
-  assert.deepEqual(rules(v).sort(), ["H1 brief.claimable", "H3 brief.verified-done", "H6 brief.unblocked"]);
+  assert.deepEqual(rules(v).sort(compareCodeUnits), ["H1 brief.claimable", "H3 brief.verified-done", "H6 brief.unblocked"]);
   assert.equal(await t.joint(brief("b")), "gated × unclaimed × open");
   await clean(t);
 });
@@ -353,7 +353,7 @@ test("the composition declares the brief's regions and exactly 10 allowed config
   await mk("defective"); await go("defective"); await claim("defective", "s6"); await t.make(dropRef("defective"), "s6");
   await t.ev(dropRef("defective"), "REJECTED", "orchestrator", { reason: "tests fail" });
   const reached = new Set((await t.now()).entities.filter((e) => e.type === "brief").map(projected));
-  assert.deepEqual([...reached].sort(), [...TEN].sort());
+  assert.deepEqual([...reached].sort(compareCodeUnits), [...TEN].sort(compareCodeUnits));
   await clean(t);
 });
 

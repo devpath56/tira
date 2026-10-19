@@ -6,6 +6,7 @@ import type { EntityTypeDef, Registry, TreeConfig } from "../tables/registry.ts"
 import { entityKey, type EntityRef, type EntityState, type StateView, type TreeInfo } from "./types.ts";
 import { activeNodes, allChildrenTerminal, children, isDrained, isTerminal } from "./tree.ts";
 import { overlayView } from "./view.ts";
+import { show } from "../text.ts";
 
 export type RejectCode =
   | "unknown-entity-type"
@@ -89,7 +90,7 @@ export function evaluate(
         return reject("bad-version", `${key} needs ${def.type}:${intent.entity.id}@${v - 1} first`);
       }
       if (intent.payload.supersedes !== undefined && Number(intent.payload.supersedes) !== v - 1) {
-        return reject("bad-version", `${key} can only supersede version ${v - 1} (got supersedes=${String(intent.payload.supersedes)})`);
+        return reject("bad-version", `${key} can only supersede version ${v - 1} (got supersedes=${show(intent.payload.supersedes)})`);
       }
     }
     // C2: guards on create.
