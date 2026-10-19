@@ -101,7 +101,7 @@ const LOOKALIKE: Record<string, string> = {
   "ı": "i", "ι": "i", "α": "a", "τ": "t", "ο": "o", "ρ": "p", "ε": "e", "η": "h", // Turkish, Greek
 };
 const skeleton = (s: string) =>
-  [...s.normalize("NFC").replace(/[\p{M}\p{Cf}\p{Cc}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
+  [...s.normalize("NFKD").replace(/[\p{M}\p{Cf}\p{Cc}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
 const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);
 const isReserved = (actor: string | undefined) => actor !== undefined && RESERVED.has(skeleton(actor));
 
