@@ -40,6 +40,7 @@ import { REJECTED, toIntent, toNewEvent, toRejectedEvent, type RejectedData } fr
 import { canonicalJson, fold, makeView } from "../fold/fold.ts";
 import { children, nextCloseFor } from "../fold/tree.ts";
 import { MACHINE_ACTOR, entityKey, type EntityRef, type EntityState } from "../fold/types.ts";
+import { DISPATCHER } from "../tables/factory.ts";
 
 export type Command = {
   stream: string;
@@ -47,7 +48,11 @@ export type Command = {
   payload?: Record<string, unknown>;
   eventId?: string; // idempotency key: a retried command never lands twice
   actor?: string;
+  correlationId?: string; // handoff receivers: the first event of the pair (stored in metadata)
+  causationId?: string; // the event that caused this one (stored in metadata)
 } & ({ kind: "create" } | { kind: "event"; event: string });
+
+type Refusal = { code: RejectCode; detail: string };
 
 export interface TiraClose {
   key: string; // the parent tira closed
@@ -64,7 +69,8 @@ export type WriteResult =
       closedByTira?: TiraClose[]; // parents tira closed because this command moved work on
     }
   | { status: "rejected"; seq: number; code: RejectCode; detail: string }
-  | { status: "duplicate"; seq: number; original: "appended" | "rejected" };
+  | { status: "duplicate"; seq: number; original: "appended" | "rejected" }
+  | { status: "skipped"; seq: number }; // a dispatcher receiver that was no longer due: nothing written
 
 export interface WritePathOptions {
   maxAttempts?: number; // re-read/re-evaluate on a lost cross-process race; default 10
@@ -86,12 +92,18 @@ function queueFor(store: EventStore): Map<string, Promise<unknown>> {
 const backoff = (attempt: number) =>
   new Promise((r) => setTimeout(r, randomInt(0, Math.min(100, 5 * 2 ** attempt) + 1)));
 
-// Anything that reads as "tira" on the page is tira's: any casing or spacing, invisible
-// characters, accents, and the common lookalike letters (Cyrillic а/і/т, Turkish ı, Greek ι/α/τ).
-const LOOKALIKE: Record<string, string> = { "а": "a", "і": "i", "т": "t", "ı": "i", "ι": "i", "α": "a", "τ": "t" };
+// The machine roles' names are reserved: tira's, and the factory dispatcher's (B1: the
+// single writer of handoff receivers). Anything that reads as one of them on the page is
+// theirs: any casing or spacing, invisible characters, accents, and the common lookalike
+// letters (Cyrillic а/і/т, Turkish ı, Greek ι/α/τ).
+const LOOKALIKE: Record<string, string> = {
+  "а": "a", "с": "c", "е": "e", "і": "i", "о": "o", "р": "p", "т": "t", "х": "x", "һ": "h", "ԁ": "d", // Cyrillic
+  "ı": "i", "ι": "i", "α": "a", "τ": "t", "ο": "o", "ρ": "p", "ε": "e", "η": "h", // Turkish, Greek
+};
 const skeleton = (s: string) =>
-  [...s.normalize("NFKD").replace(/[\p{M}\p{Cf}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
-const isReserved = (actor: string | undefined) => actor !== undefined && skeleton(actor) === MACHINE_ACTOR;
+  [...s.normalize("NFKD").replace(/[\p{M}\p{Cf}\p{Cc}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
+const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);
+const isReserved = (actor: string | undefined) => actor !== undefined && RESERVED.has(skeleton(actor));
 
 const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
 const nonEmpty = (v: unknown) => typeof v === "string" && v.length > 0;
@@ -108,6 +120,9 @@ function checkShape(cmd: Command): void {
   if (cmd.payload !== undefined && !isObj(cmd.payload)) throw new TypeError("payload must be an object");
   if (cmd.eventId !== undefined && !nonEmpty(cmd.eventId)) throw new TypeError("eventId must be a non-empty string");
   if (cmd.actor !== undefined && !nonEmpty(cmd.actor)) throw new TypeError("actor must be a non-empty string");
+  for (const k of ["correlationId", "causationId"] as const) {
+    if (cmd[k] !== undefined && !nonEmpty(cmd[k])) throw new TypeError(`${k} must be a non-empty string`);
+  }
   if (cmd.kind !== "create" && cmd.kind !== "event") throw new TypeError(`bad kind: ${String((cmd as { kind: unknown }).kind)}`);
   if (cmd.kind === "event" && !nonEmpty(cmd.event)) throw new TypeError("event required");
 }
@@ -116,7 +131,7 @@ function checkShape(cmd: Command): void {
 const recordedIntent = (e: StoredEvent, registry: Registry): Intent | undefined =>
   e.type === REJECTED
     ? (e.data as unknown as RejectedData | undefined)?.intent
-    : toIntent(e, (t) => registry.creationName(t));
+    : toIntent(e, (t, v) => registry.creationName(t, v));
 
 interface ClosePlan {
   overlay: Map<string, EntityState>; // the tree after tira's closes
@@ -140,6 +155,21 @@ export class WritePath {
     return this.enqueue(cmd, false);
   }
 
+  // In-process only: the factory dispatcher writing a handoff receiver as itself, through
+  // the same evaluate() as everyone (handoffs.ts decides what it writes).
+  // `stillDue` is checked against the stream as it is when the write happens (inside the
+  // per-stream queue, and again after a lost race): two commands finishing at once can't
+  // both write the same receiver.
+  submitAsDispatcher(cmd: Command, stillDue?: (events: StoredEvent[]) => boolean): Promise<WriteResult> {
+    return this.enqueue({ ...cmd, actor: DISPATCHER }, true, undefined, stillDue);
+  }
+
+  // In-process only: log a command as rejected without evaluating it (a request the
+  // dispatcher won't relay). The rejection keeps the caller's actor.
+  refuse(cmd: Command, code: RejectCode, detail: string): Promise<WriteResult> {
+    return this.enqueue(cmd, true, { code, detail });
+  }
+
   // In-process only: tira closing a parent on its own authority, through the same
   // evaluate() as everyone. Used for fault injection (proof 2: a close on a parent that
   // isn't drained is denied and logged). A close that succeeds here has no move to cite,
@@ -152,7 +182,7 @@ export class WritePath {
     );
   }
 
-  private enqueue(cmd: Command, internal: boolean): Promise<WriteResult> {
+  private enqueue(cmd: Command, internal: boolean, refusal?: Refusal, stillDue?: (events: StoredEvent[]) => boolean): Promise<WriteResult> {
     let snapshot: Command;
     try {
       checkShape(cmd);
@@ -164,8 +194,8 @@ export class WritePath {
     const queues = queueFor(this.store);
     const prev = queues.get(snapshot.stream) ?? Promise.resolve();
     const run = prev.then(
-      () => this.submitNow(snapshot, internal),
-      () => this.submitNow(snapshot, internal),
+      () => this.submitNow(snapshot, internal, refusal, stillDue),
+      () => this.submitNow(snapshot, internal, refusal, stillDue),
     );
     const settled = run.catch(() => undefined);
     queues.set(snapshot.stream, settled);
@@ -175,7 +205,7 @@ export class WritePath {
     return run;
   }
 
-  private async submitNow(cmd: Command, internal: boolean): Promise<WriteResult> {
+  private async submitNow(cmd: Command, internal: boolean, refusal?: Refusal, stillDue?: (events: StoredEvent[]) => boolean): Promise<WriteResult> {
     const payload = cmd.payload ?? {};
     const intent: Intent =
       cmd.kind === "create"
@@ -198,8 +228,12 @@ export class WritePath {
         }
       }
       const last = events.at(-1);
+      if (stillDue && !stillDue(events)) return { status: "skipped", seq: last?.seq ?? 0 };
       const expectedRevision = last ? last.streamRevision : -1;
-      const { batch, result } = this.decide(intent, events, internal, moveId);
+      const meta = { ...(cmd.correlationId ? { correlationId: cmd.correlationId } : {}), ...(cmd.causationId ? { causationId: cmd.causationId } : {}) };
+      const { batch, result } = refusal
+        ? { batch: [toRejectedEvent(intent, refusal.code, refusal.detail, moveId)], result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, ...refusal }) }
+        : this.decide(intent, events, internal, moveId, meta);
       try {
         const { seqs } = await this.store.append(cmd.stream, batch, { expectedRevision });
         return result(seqs);
@@ -215,10 +249,11 @@ export class WritePath {
   }
 
   // What to append for this intent, and how to report it once the store assigns seqs.
-  private decide(intent: Intent, events: StoredEvent[], internal: boolean, moveId: string) {
+  private decide(intent: Intent, events: StoredEvent[], internal: boolean, moveId: string, meta: { correlationId?: string; causationId?: string } = {}) {
     if (!internal && isReserved(intent.actor)) {
-      // Proof 3: the "tira" label comes from the caller, never from what a command says.
-      const detail = `actor "${MACHINE_ACTOR}" is reserved for tira's own writes`;
+      // Proof 3: the machine's labels come from the caller, never from what a command says.
+      const name = skeleton(intent.actor as string);
+      const detail = `actor "${name}" is reserved for ${name === MACHINE_ACTOR ? "tira's" : "the dispatcher's"} own writes`;
       return {
         batch: [toRejectedEvent({ ...intent, actor: undefined }, "reserved-actor", detail, moveId)],
         result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code: "reserved-actor", detail }),
@@ -230,7 +265,8 @@ export class WritePath {
     const after = plan?.overlay ?? entities;
     const ev = evaluate(this.registry, after, makeView(after), intent);
     if (ev.ok) {
-      const move = toNewEvent(intent, moveId, (t) => this.registry.creationName(t));
+      const born = toNewEvent(intent, moveId, (t, v) => this.registry.creationName(t, v));
+      const move = Object.keys(meta).length > 0 ? { ...born, metadata: { ...born.metadata, ...meta } } : born;
       return {
         batch: [...(plan?.records ?? []), move],
         result: (seqs: number[]): WriteResult => ({
@@ -303,7 +339,7 @@ export class WritePath {
           break;
         }
         overlay.set(mev.key, { ...(overlay.get(mev.key) as EntityState), regions: mev.regions, lastActor: MACHINE_ACTOR });
-        const e = toNewEvent(mIntent, undefined, (x) => this.registry.creationName(x));
+        const e = toNewEvent(mIntent, undefined, (x, v) => this.registry.creationName(x, v));
         mine.push({ ...e, metadata: { actor: MACHINE_ACTOR, causationId: moveId } });
       }
       if (refused) {

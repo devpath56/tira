@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 116 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 158 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -219,6 +219,117 @@ under a done or cancelled parent, while a drained-but-open parent accepts one an
   content = error); malformed commands throw rather than being logged; `eventId` is globally
   unique, so re-using one in another stream throws; `subscribe()` is at-least-once with an
   `onError` hook.
+
+## Code — Track B1: the factory tables (signed off 2026-10-17) + D2 lanes
+
+Five tables in `charts/`, hand-authored as signed off (A1–A15; A8 and A13 still open):
+
+| Entity | Identity | Regions (initial first) | Born as |
+|---|---|---|---|
+| brief | `brief_id@version` | **gate** ungated · gated · denied — **claim** waiting · unclaimed · claimed-silent · claimed-active — **outcome** open · dropped-unverified · done-verified · blocked | `brief.created` (v1), `brief.revised` (v2+) |
+| session | stable id | lifecycle: live · ended | `session.named` |
+| drop | `brief_id@version` (one per version) | lifecycle: filed · verified · rejected | `drop.filed` |
+
+Every guard reads only the payload, the actor, its own entity and its **own** region's
+captured data: **0 cross-region guards**. A test also checks the guards' source never
+touches the view or names another region's state. `npm run scan` runs the region scan on
+each composition (node + idea; the factory's five), and `npm run check` includes it. The
+brief composition is declared in `charts/compositions.json`: its grain, its correlation
+convention, and Devansh's 10 allowed configurations. The tests read the 10 from there,
+reach every one, and check random commands never leave them.
+
+| Core change | What it does |
+|---|---|
+| C1 birth names | Per type and version: `brief.created` / `brief.revised`, `session.named`, `drop.filed` (`node.born` already) |
+| C2 birth guards | The orchestrator creates briefs (`blocked_by`: distinct ids, never itself); a session names itself; drops are filed by sessions, not roles |
+| C3 captured data | A table pair can `capture` payload fields into its own region (claimant, block_reason, a session's name); guards read only their own region's |
+| C4 handoffs | `src/fold/handoffs.ts` + `src/write/dispatcher.ts`, below |
+| C5 versions | v2+ needs the version before it and supersedes it; a superseded version takes no more events, and no drop is filed or verified on it (drops follow their brief's versions) |
+| C6 history-aware predicates | **Not built**: it serves liveness, and the SLA and vantages (A13) are still open |
+
+**Handoffs (the only coupling).** After each command, the dispatcher writes every
+receiver that is due, as the reserved actor `dispatcher`. Each carries `correlationId` =
+the first event of the pair and `causationId` = the event that made it due.
+
+| Rule | When | Writes |
+|---|---|---|
+| H1 | a brief is dispatched and every `blocked_by` brief has a verified drop | `brief.claimable` |
+| H2 | the claimant files the drop for an open brief | `brief.evidence` (if silent), then `brief.drop-written` |
+| H3 | the orchestrator verifies the drop | `brief.verified-done {done_test_result}` |
+| H4 | the orchestrator rejects the drop | `brief.blocked {block_reason: defective}` |
+| H5 | a session ends | `brief.released` for open briefs it held |
+| H6 | a dependency-blocked brief's dependencies are all verified | `brief.unblocked` |
+| F1 | an idea is approved into a node (materialized) | `node.born {idea_id}` (same id) |
+| relay | the orchestrator sends `BLOCKED` on a gated brief | `brief.blocked {block_reason, requested_by}`, or a logged `handoff-refused` |
+
+The rules are pure over the folded state, and each turns false once its receiver lands.
+Each receiver is re-checked as "still due" at the moment it is written, inside the
+stream's write queue, so two commands finishing at once can't write it twice. A crash
+between the two halves of a pair just leaves it due: the next command finishes it, and
+so does a retry of the same command with the same `--event-id`, or `Dispatcher.catchUp`.
+Replay re-checks every dispatcher write against the rules (with its correlation id) and
+flags anything else as an anomaly. `tira state` and the page list handoffs still waiting,
+and why: dependencies, a stray drop for the orchestrator, a claim by a session that was
+never named, a verified drop its brief can't take, or an idea whose node id is taken.
+Waiting is a legitimate state, not an error.
+
+### Demo D2 script (manual test M2): regions composed, handoffs paired
+
+```bash
+export TIRA_DB=d2.db TIRA_STREAM=factory-main
+t() { node scripts/tira.ts "$@"; }
+t create session s1 --actor s1 && t create session s2 --actor s2
+t create brief api --version 1 --actor orchestrator slice_ref=slice/api
+t create brief ui --version 1 --actor orchestrator --payload '{"blocked_by":["api"]}'
+t send brief api DISPATCHED --version 1 --actor orchestrator      # + dispatcher brief.claimable (H1)
+t send brief ui DISPATCHED --version 1 --actor orchestrator       # waits: api isn't verified yet
+t send brief api CLAIMED --version 1 --actor s1 session=s1        # claimed-silent
+t send session s1 ENDED --actor vm declared_by=mac-evidence       # REJECTED: a VM can't end a session
+t create drop api --version 1 --actor s1                          # + evidence, + drop-written (H2)
+t send drop api VERIFIED --version 1 --actor s1 done_test_result=PASS            # REJECTED: the filer
+t send drop api VERIFIED --version 1 --actor orchestrator done_test_result=PASS  # + verified-done (H3), + ui claimable (H1)
+t state && t render --out d2.html && t dump --hash
+# the idea -> node handoff (F1), in a tree stream: the same id on both sides
+export TIRA_STREAM=tasktree-ideas
+t create node dashboard --actor isha
+t create idea metrics_card --actor isha
+for e in DRAFT_FILE APPROVE_FILE PROPOSE_NODE; do t send idea metrics_card $e --actor isha; done
+t send idea metrics_card APPROVE_NODE --actor devansh parent_id=dashboard   # + dispatcher node.born on node:metrics_card (F1)
+t tree && t render --out d2-ideas.html
+```
+
+M2 passes when:
+
+- `npm run scan` exits 0 (both compositions);
+- the page opens on **Lanes**, with each brief's gate, claim and outcome matching `t state`;
+- every handoff pair shows the same correlation id on both sides (`data-correlation` on the page, `correlationId` in `t log --json`), including idea `metrics_card` → node `metrics_card` on the `tasktree-ideas` page;
+- anything still waiting is listed with its reason.
+
+**Calls made while building B1** (flagged for the PM):
+
+- **H2's failure branch.** The draft had the dispatcher append `drop.rejected` for a drop
+  its claimant didn't file. The signed-off drop table lets only the orchestrator reject. I
+  kept the table: such a drop waits in the pending list for the orchestrator.
+- **`dispatcher` is a reserved actor**, like `tira`. Orchestrator, mac and user stay plain
+  actor ids (A15).
+- **Block requests.** The dispatcher relays the orchestrator's `BLOCKED`:
+  - `defective` comes only from H4;
+  - `verdict` and `retries-exhausted` need a claim;
+  - `dependency` needs an unverified `blocked_by`.
+
+  Refusals are logged under the orchestrator as `handoff-refused`.
+- **A dependency counts as verified** when any version of it has a verified drop. A
+  superseded version can't take a drop at all (drops follow their brief's versions), so
+  only a drop on a version that was current at the time counts.
+- **F1 naming.** F1 births the node with the idea's id. A parent can come from the
+  approval's `parent_id`; if that parent doesn't exist yet, the birth waits.
+- **F1 trigger.** The idea table reaches `materialized` through its `APPROVE_NODE` event
+  (stored `idea.approve-node`), so that is the trigger. The ruling's
+  `idea.materialized {idea_id}` names the state it reaches.
+- **Two holes the signed-off tables leave open** (kept as signed; for the PM):
+  - `CLAIMED` and `drop.filed` don't require a named session. A claim by a session that
+    was never named can never be released, so it is listed as waiting.
+  - `RENAMED` has no guard, so anyone can rename any session.
 
 ## Docs & showcase
 

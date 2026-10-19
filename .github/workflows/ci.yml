@@ -22,5 +22,11 @@ jobs:
       - name: region-scan (warn mode)
         continue-on-error: true
         run: python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json
+      # The factory composition on its own, as signed off (brief's 3 regions, session, drop).
+      # The scan is lexical: across compositions, payload names like declared_by / done_test_result
+      # read as other tables' state names, so each composition is scanned separately.
+      - name: region-scan factory (warn mode)
+        continue-on-error: true
+        run: python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json
       # Every planted bug must be caught by the suite (scripts/mutants.ts).
       - run: npm run mutants

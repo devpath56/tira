@@ -58,6 +58,21 @@ test("moving on prints tira's closes; --actor tira is refused", async () => {
   }
 });
 
+test("factory through the CLI: handoffs print as + dispatcher lines; a revise takes supersedes=1 as typed", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "brief", "b", "--version", "1", "--actor", "orchestrator");
+    const d = await s.tira("send", "brief", "b", "DISPATCHED", "--version", "1", "--actor", "orchestrator");
+    assert.match(d.out, /^ {2}\+ dispatcher brief\.claimable on brief:b@1 \(H1, seq 3\)$/m);
+    const v2 = await s.tira("create", "brief", "b", "--version", "2", "--actor", "orchestrator", "supersedes=1");
+    assert.equal(v2.code, 0, v2.out);
+    const bad = await s.tira("create", "brief", "b", "--version", "3", "--actor", "orchestrator", "supersedes=1");
+    assert.match(bad.out, /bad-version\s+brief:b@3 can only supersede version 2 \(got supersedes=1\)/);
+  } finally {
+    s.done();
+  }
+});
+
 test("state persists across runs (file-backed) and shows entities + rejections", async () => {
   const s = sandbox();
   try {

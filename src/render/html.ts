@@ -47,8 +47,8 @@ a{color:inherit;text-decoration:none}
 .tabs{display:flex;gap:2px;border:1px solid var(--line);border-radius:10px;padding:3px;background:var(--panel-2)}
 .tabs label{cursor:pointer;font-weight:600;font-size:13px;padding:5px 12px;border-radius:7px;color:var(--mut)}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
-#v-tree:checked~main .tabs label[for=v-tree],#v-board:checked~main .tabs label[for=v-board],#v-log:checked~main .tabs label[for=v-log]{background:var(--panel);color:var(--fg);box-shadow:0 1px 0 var(--line)}
-#v-tree:focus-visible~main .tabs label[for=v-tree],#v-board:focus-visible~main .tabs label[for=v-board],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--lime);outline-offset:1px}
+#v-tree:checked~main .tabs label[for=v-tree],#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{background:var(--panel);color:var(--fg);box-shadow:0 1px 0 var(--line)}
+#v-tree:focus-visible~main .tabs label[for=v-tree],#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--lime);outline-offset:1px}
 .verify{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--panel-2);white-space:nowrap}
 .hero{display:flex;align-items:flex-end;gap:16px 22px;flex-wrap:wrap;margin:26px 0 8px}
 .big{font-size:clamp(64px,13vw,118px);font-weight:800;letter-spacing:-.06em;line-height:.82;font-variant-numeric:tabular-nums}
@@ -61,7 +61,20 @@ a{color:inherit;text-decoration:none}
 .stats b{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
 .stats .warn,.stats .warn b{color:var(--block)}
 .view{display:none;margin-top:14px;animation:fade .45s var(--ease) both}
-#v-tree:checked~main .view-tree,#v-board:checked~main .view-board,#v-log:checked~main .view-log{display:block}
+#v-tree:checked~main .view-tree,#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
+.lanes{display:grid;grid-template-columns:minmax(90px,.8fr) repeat(var(--n),minmax(120px,1fr));gap:6px;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px 12px;overflow-x:auto}
+.lanes .lh{font-size:11.5px;font-weight:650;color:var(--dim);padding:0 4px 4px}
+.lanes .who{font-weight:650;overflow-wrap:anywhere;padding:4px}.lanes .who.old{color:var(--dim);text-decoration:line-through}
+.lane{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);min-height:36px;animation:fade .45s var(--ease) both}
+.pill{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--panel-2);color:var(--mut);white-space:nowrap}
+.pill.go{color:var(--done);background:var(--done-bg)}.pill.work{color:var(--prog);background:var(--prog-bg)}.pill.stop{color:var(--block);background:var(--block-bg)}.pill.wait{color:var(--pollen);background:transparent;box-shadow:inset 0 0 0 1px var(--pollen)}
+.cap{font-size:11.5px;color:var(--mut);display:inline-flex;align-items:center;gap:4px}
+.cap .av{width:18px;height:18px;font-size:10px}
+.chips2{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0}
+.pairs{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
+.pairs li{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px;color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:7px 10px}
+.pairs .arrow{color:var(--lime);font-weight:700}.pairs code{font-family:var(--mono);font-size:11.5px;color:var(--fg)}
+.pairs li.waiting{border-style:dashed}
 @keyframes fade{from{opacity:.3;transform:translateY(6px)}}
 .stage{overflow-x:auto;padding:4px 0 8px;scrollbar-width:thin}
 svg.tree{display:block;height:auto;overflow:visible}
@@ -139,7 +152,7 @@ details.trail{margin-top:16px}details.trail summary{cursor:pointer;color:var(--d
 .alert{border:1px solid var(--block);border-radius:var(--r);padding:8px 12px;margin:12px 0 0;color:var(--block);font-size:13px}
 .pollen{position:absolute;width:4px;height:4px;border-radius:9px;background:var(--pollen);opacity:.35;animation:drift 13s ease-in-out infinite;pointer-events:none}
 @keyframes drift{50%{transform:translate(36px,-54px)}}
-@media (max-width:560px){.big{font-size:64px}.verify{margin-left:0}}
+@media (max-width:560px){.big{font-size:64px}.verify{margin-left:0}.lanes{grid-template-columns:1fr;overflow:visible}.lanes .lh{display:none}.lanes .who{padding-top:10px}.lane::before{content:attr(data-region);font-size:11px;color:var(--dim);min-width:52px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.branch{stroke-dashoffset:0}}
 @media print{:root{--bg1:#eef1e8;--bg2:#e3e8dc;--panel:#ffffff;--panel-2:#f4f6f1;--line:#dde3d6;--fg:#141a16;--mut:#56625a;--dim:#5f6a63;--moss:#5b7a3d;--moss-2:#5f8239;--petal:#fffaf0;--petal-edge:#a8946a;--pollen:#8f6700;--lime:#376b0b;--lime-bg:#e8f5d3;--prog:#1f5fcc;--prog-bg:#e4edff;--block:#b42318;--block-bg:#fde8e5;--done:#2c7a45;--done-bg:#e2f3e6;--gone:#69736c;}*,*::before,*::after{animation:none!important;transition:none!important}.branch{stroke-dashoffset:0}body{background:#fff}.view{display:block!important}.drawer{display:none}.stage{overflow:visible}svg.tree{max-width:100%;height:auto}}
 `;
@@ -363,6 +376,67 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
   return `${strip}<div class="cols">${cols}</div>`;
 }
 
+// ---------- lanes (D2: regions composed, handoffs paired) ----------
+
+const VIEWS: [string, string][] = [["tree", "Tree"], ["board", "Board"], ["lanes", "Lanes"], ["log", "Activity"]];
+
+// One tone per state family, so a lane reads at a glance; the state word stays as-is.
+const TONE: Record<string, string> = {
+  gated: "go", "done-verified": "go", verified: "go", live: "go",
+  "claimed-active": "work", "claimed-silent": "wait", "dropped-unverified": "wait", filed: "wait",
+  denied: "stop", blocked: "stop", rejected: "stop",
+};
+const pill = (state: string) => `<span class="pill ${TONE[state] ?? ""}">${esc(state)}</span>`;
+
+function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]): string {
+  const inStream = r.entities.filter((e) => e.stream === stream);
+  const multi = inStream.filter((e) => Object.keys(e.regions).length > 1);
+  const superseded = (e: EntityState) => e.version !== undefined && inStream.some((x) => x.type === e.type && x.id === e.id && x.version === (e.version as number) + 1);
+  const avatar = (who: unknown) => `<span class="av" aria-hidden="true">${esc(([...String(who)][0] ?? "?").toUpperCase())}</span>`;
+  const rows = multi.map((e, k) => {
+    const cells = Object.entries(e.regions).map(([region, state]) => {
+      const cap = e.context?.[region] ?? {};
+      const extra = [
+        cap.claimant !== undefined ? `<span class="cap" title="claimed by ${esc(String(cap.claimant))}">${avatar(cap.claimant)}${esc(String(cap.claimant))}</span>` : "",
+        cap.block_reason !== undefined ? `<span class="cap">${esc(String(cap.block_reason))}</span>` : "",
+      ].join("");
+      return `<div class="lane" style="animation-delay:${fx(0.04 * k)}s" data-lane="${esc(e.key)}" data-region="${esc(region)}" data-state="${esc(state)}">${pill(state)}${extra}</div>`;
+    }).join("");
+    const label = `${e.id}${e.version === undefined ? "" : `@${e.version}`}`;
+    return `<div class="who${superseded(e) ? " old" : ""}" title="${esc(e.key)}${superseded(e) ? " (superseded)" : ""}">${esc(label)}</div>${cells}`;
+  }).join("");
+  const regionNames = multi[0] ? Object.keys(multi[0].regions) : [];
+  const grid = multi.length === 0 ? "" : `<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
+  const singles = inStream.filter((e) => Object.keys(e.regions).length === 1 && !e.tree);
+  const chips = singles.length === 0 ? "" : `<div class="chips2">${singles.map((e) => {
+    const name = e.context?.lifecycle?.name;
+    return `<span class="chip" title="${esc(e.key)}">${esc(e.type)} ${esc(e.id)}${e.version === undefined ? "" : `@${e.version}`} ${pill(Object.values(e.regions)[0] as string)}${e.createdBy && e.type === "drop" ? ` by ${esc(e.createdBy)}` : ""}${typeof name === "string" ? ` · ${esc(name)}` : ""}</span>`;
+  }).join("")}</div>`;
+  // Handoff pairs: each first event and the receivers the dispatcher wrote for it,
+  // matched by correlation id (the done test: the same id on both sides).
+  const mine = events.filter((e) => e.stream === stream);
+  const byId = new Map(mine.map((e) => [e.eventId, e]));
+  const groups = new Map<string, StoredEvent[]>();
+  for (const e of mine) {
+    const c = e.metadata.correlationId;
+    if (e.metadata.actor === "dispatcher" && c !== undefined) groups.set(c, [...(groups.get(c) ?? []), e]);
+  }
+  const keyOf = (e: StoredEvent) => {
+    const d = e.data as unknown as EventData;
+    return d?.entity ? `${e.type.slice(0, e.type.indexOf("."))}:${d.entity.id}${d.entity.version === undefined ? "" : `@${d.entity.version}`}` : e.type;
+  };
+  const pairs = [...groups.entries()].map(([c, rs]) => {
+    const head = byId.get(c);
+    const from = head ? `<code>${esc(head.type)}</code> ${esc(keyOf(head))} <span class="ev-seq">seq ${head.seq}</span>` : `<code>${esc(c)}</code>`;
+    return `<li data-correlation="${esc(c)}">${from}<span class="arrow">→</span>${rs.map((x) => `<code>${esc(x.type)}</code> ${esc(keyOf(x))} <span class="ev-seq">seq ${x.seq}</span>`).join(" · ")}</li>`;
+  });
+  const waiting = (r.handoffs[stream] ?? []).map((p) => `<li class="waiting"><code>${esc(p.rule)}</code> ${esc(p.key)} <span class="ev-seq">since seq ${p.since}</span><span class="arrow">…</span>${esc(p.waitingOn)}</li>`);
+  const handoffs = pairs.length + waiting.length === 0 ? "" : `<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
+  if (!grid && !chips && !handoffs) return `<p class="empty">No regions or handoffs in this stream.</p>`;
+  return `${grid}${chips}${handoffs}`;
+}
+
+
 // ---------- activity ----------
 
 function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: EntityState[], rejections: Rejection[], dumpHash: string): string {
@@ -380,6 +454,8 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const rejections = r.rejections.filter((x) => x.stream === stream);
   const anomalies = r.anomalies.filter((a) => a.stream === stream);
   const rows = flatten(v.roots);
+  const mine = r.entities.filter((e) => e.stream === stream);
+  const multiNow = mine.filter((e) => Object.keys(e.regions).length > 1 && !(e.version !== undefined && mine.some((x) => x.type === e.type && x.id === e.id && x.version === (e.version as number) + 1)));
   const { byKey: trail, all } = trails(events, stream);
   const { nodes } = layout(v.roots);
   const pathOf = (n: Placed) => {
@@ -387,27 +463,36 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
     for (let p = n.parent; p; p = p.parent) up.unshift(esc(p.row.id));
     return up.length > 0 ? up.join(" › ") : "top level";
   };
-  const closed = rows.filter((x) => CLOSED.has(x.state)).length;
+  // The header counts what this stream is about: a tree's closed nodes, or (a stream of
+  // multi-region entities, like the factory's briefs) the verified ones still current.
+  const lanesOnly = v.roots.length === 0 && multiNow.length > 0;
+  const closed = lanesOnly ? multiNow.filter((e) => e.regions.outcome === "done-verified").length : rows.filter((x) => CLOSED.has(x.state)).length;
+  const total = lanesOnly ? multiNow.length : rows.length;
+  const handoffCount = new Set(events.filter((e) => e.stream === stream && e.metadata.actor === "dispatcher" && e.metadata.correlationId).map((e) => e.metadata.correlationId)).size;
   const stats = [
-    `<li title="closed by tira">${ICON.leaf}<b>${rows.filter((x) => x.closedByTira).length}</b> by tira</li>`,
-    `<li title="drained: every child done or cancelled"><b>${rows.filter((x) => x.drained).length}</b> drained</li>`,
+    ...(lanesOnly
+      ? [`<li title="handoff pairs the dispatcher completed"><b>${handoffCount}</b> handoffs</li>`, `<li title="handoffs still waiting"><b>${r.handoffs[stream]?.length ?? 0}</b> waiting</li>`]
+      : [`<li title="closed by tira">${ICON.leaf}<b>${rows.filter((x) => x.closedByTira).length}</b> by tira</li>`, `<li title="drained: every child done or cancelled"><b>${rows.filter((x) => x.drained).length}</b> drained</li>`]),
     `<li title="rejected commands">${ICON.ban}<b>${rejections.length}</b> rejected</li>`,
     ...(anomalies.length > 0 ? [`<li class="warn" title="replay anomalies">${ICON.alert}<b>${anomalies.length}</b> anomalies</li>`] : []),
   ];
   // Counted from the fold, independently of the rendered rows: M1 compares the two.
   const foldTreeCount = r.entities.filter((e) => e.stream === stream && e.tree !== undefined).length;
   const treeView = v.roots.length > 0 ? `${treeSvg(v.roots, trail)}${KEY}` : `<p class="empty">No tree yet.</p>`;
+  // Open on the view that has something: the tree, else the lanes, else the activity.
+  const first = v.roots.length > 0 ? "tree" : multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0 ? "lanes" : "log";
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
-<body><input class="view-radio" type="radio" name="view" id="v-tree" checked aria-label="Tree view"><input class="view-radio" type="radio" name="view" id="v-board" aria-label="Board view"><input class="view-radio" type="radio" name="view" id="v-log" aria-label="Activity view">
+<body>${VIEWS.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
 <span class="pollen" style="left:64%;top:180px"></span><span class="pollen" style="left:82%;top:420px;animation-delay:-5s"></span><span class="pollen" style="left:40%;top:560px;animation-delay:-9s"></span>
-<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs"><label for="v-tree">Tree</label><label for="v-board">Board</label><label for="v-log">Activity</label></div><span class="verify" title="sha256:${esc(dumpHash)} (compare with tira dump --hash)">seq ${v.lastSeq} · ${esc(shortHash)}</span></nav>
-<header class="hero"><div class="big">${closed}<small>/${rows.length}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
+<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("")}</div><span class="verify" title="sha256:${esc(dumpHash)} (compare with tira dump --hash)">seq ${v.lastSeq} · ${esc(shortHash)}</span></nav>
+<header class="hero"><div class="big"${lanesOnly ? ` title="verified briefs, of those current"` : ""}>${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 <section class="view view-tree" aria-label="Tree">${treeView}</section>
 <section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardHtml(nodes, trail) : `<p class="empty">No tree yet.</p>`}</section>
+<section class="view view-lanes" aria-label="Lanes">${lanesHtml(r, stream, events)}</section>
 <section class="view view-log" aria-label="Activity">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n))).join("")}
 </main></body></html>

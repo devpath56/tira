@@ -8,7 +8,8 @@ import { renderHtml } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
-import { WritePath, type Command, type WriteResult } from "../write/write-path.ts";
+import { type Command, type WriteResult } from "../write/write-path.ts";
+import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
@@ -47,6 +48,10 @@ Options:
   -h, --help       this help
 
 Event names: use the table's name (COMPLETE, ADD_CHILD) or the stored form (complete, add-child).
+
+Writes go through the dispatcher: after your command lands it writes any handoff it
+made due (factory briefs, drops and sessions; idea -> node births) as "dispatcher",
+and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
 
 Exit codes: 0 ok · 2 rejected by the rules · 1 usage or other error`;
 
@@ -105,14 +110,16 @@ function payloadFrom(values: Values, pairs: string[]): Record<string, unknown> {
   return payload;
 }
 
-function describe(r: WriteResult): string {
+function describe(r: WriteResult, handoffs: HandoffWrite[] = []): string {
   if (r.status === "appended") {
     const regions = Object.entries(r.regions).map(([k, v]) => `${k}=${v}`).join(" ");
     const line = `appended   seq ${r.seq}  ${r.key}  ${r.outcome}  ${regions}`;
     const closes = (r.closedByTira ?? []).map((c) => `\n  + tira closed ${c.key} (seq ${c.seqs.join(", ")}): you moved on`);
-    return line + closes.join("");
+    const passed = handoffs.map((h) => `\n  + dispatcher ${h.event} on ${h.key} (${h.rule}, seq ${h.seq})`);
+    return line + closes.join("") + passed.join("");
   }
   if (r.status === "duplicate") return `duplicate  seq ${r.seq}  (original was ${r.original}; nothing new stored)`;
+  if (r.status === "skipped") return `skipped    seq ${r.seq}  (no longer due; nothing new stored)`;
   return `REJECTED   seq ${r.seq}  ${r.code}  ${r.detail}`;
 }
 
@@ -139,8 +146,8 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
     ...(values["event-id"] !== undefined ? { eventId: values["event-id"] } : {}),
   };
   const cmd: Command = kind === "create" ? { ...base, kind: "create" } : { ...base, kind: "event", event };
-  const r = await new WritePath(store, registry).submit(cmd);
-  io.out(values.json ? JSON.stringify(r) : describe(r));
+  const { result: r, handoffs } = await new Dispatcher(store, registry).submit(cmd);
+  io.out(values.json ? JSON.stringify(handoffs.length > 0 ? { ...r, handoffs } : r) : describe(r, handoffs));
   return r.status === "rejected" ? 2 : 0;
 }
 
@@ -212,6 +219,15 @@ function printState(r: FoldResult, stream: string, upTo: number | undefined, io:
     })),
     ["seq", "command", "code", "detail"],
   )) io.out(l);
+  const waiting = r.handoffs[stream] ?? [];
+  if (waiting.length > 0) {
+    io.out("");
+    io.out(`handoffs waiting (${waiting.length})`);
+    for (const l of table(
+      waiting.map((p) => ({ since: String(p.since), rule: p.rule, on: p.key, "waiting on": p.waitingOn })),
+      ["since", "rule", "on", "waiting on"],
+    )) io.out(l);
+  }
   if (r.anomalies.length > 0) {
     io.out("");
     io.out(`ANOMALIES (${r.anomalies.length}) — events the rules would not have allowed`);

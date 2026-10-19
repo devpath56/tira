@@ -11,6 +11,7 @@
 import { DEFAULT_GUARDS, loadTable, type GuardFn, type Table } from "./table.ts";
 import type { EntityState, StateView } from "../fold/types.ts";
 import { TABLE_EVENT_NAME } from "../fold/events.ts";
+import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
 
 // Derived predicates see the entity (incl. lastRecordedAt / lastActor), the rest of
 // its stream, and the caller's clock and vantage. Nothing else — so they stay pure.
@@ -45,6 +46,19 @@ export interface EntityTypeDef {
   // Name of the birth event, UPPER_SNAKE like table events (stored lowercase-kebab).
   // Default CREATED. Node: BORN -> "node.born" (decided 2026-10-17).
   createdAs?: string;
+  // Versioned types only: version 2+ is born under this name and SUPERSEDES the version
+  // before it (B1 A3/A14, core change C5): it needs that version to exist, and events to
+  // a superseded version are rejected. Brief: REVISED -> "brief.revised".
+  revisedAs?: string;
+  // Guard (by name) every birth must pass (core change C2), e.g. a session names itself.
+  createGuard?: string;
+  // Versioned types whose versions belong to another type's versions (drop:b@v is brief
+  // b@v's drop): once that type's next version exists, this version takes no birth and
+  // no events either (A14: superseded versions reject events).
+  followsVersionsOf?: string;
+  // Keep the birth payload on the entity (EntityState.born), for facts fixed at birth
+  // that the dispatcher reads (brief: blocked_by, A4).
+  keepBirth?: boolean;
   tree?: TreeConfig;
   // Derived predicates (like drain or liveness): computed by the fold, never stored.
   derived?: Record<string, (entity: EntityState, ctx: DeriveContext) => unknown>;
@@ -72,13 +86,24 @@ export class Registry {
     if (regionNames.length === 0) throw new Error(`entity type ${def.type}: no regions`);
     const created = def.createdAs ?? "CREATED";
     if (!TABLE_EVENT_NAME.test(created)) throw new Error(`entity type ${def.type}: createdAs ${created} must be UPPER_SNAKE`);
+    const revised = def.revisedAs;
+    if (revised !== undefined) {
+      if (!def.versioned) throw new Error(`entity type ${def.type}: revisedAs needs a versioned type`);
+      if (!TABLE_EVENT_NAME.test(revised) || revised === created) throw new Error(`entity type ${def.type}: bad revisedAs ${revised}`);
+    }
+    if (def.followsVersionsOf !== undefined && (!def.versioned || !this.defs.get(def.followsVersionsOf)?.versioned)) {
+      throw new Error(`entity type ${def.type}: followsVersionsOf ${def.followsVersionsOf} needs both types versioned (and registered first)`);
+    }
+    if (def.createGuard !== undefined && !(def.createGuard in this.guards)) {
+      throw new Error(`entity type ${def.type}: createGuard ${def.createGuard} has no implementation`);
+    }
     const events = new Map<string, { region: string; table: Table }>();
     for (const region of regionNames) {
       const table = def.regions[region] as Table;
       for (const ev of table.events) {
         // Stored names are derived mechanically from these (fold/events.ts); keep it a bijection.
         if (!TABLE_EVENT_NAME.test(ev)) throw new Error(`table ${table.id}: event ${ev} must be UPPER_SNAKE`);
-        if (ev === "CREATED" || ev === created) throw new Error(`table ${table.id}: event name ${ev} is reserved`);
+        if (ev === "CREATED" || ev === created || ev === revised) throw new Error(`table ${table.id}: event name ${ev} is reserved`);
         const other = events.get(ev);
         if (other) {
           throw new Error(`entity type ${def.type}: event ${ev} in regions ${other.region} and ${region}`);
@@ -122,9 +147,11 @@ export class Registry {
     return [...this.defs.values()];
   }
 
-  // Birth event name (UPPER_SNAKE) for a type; CREATED for unknown types too.
-  creationName(type: string): string {
-    return this.defs.get(type)?.createdAs ?? "CREATED";
+  // Birth event name (UPPER_SNAKE) for a type and version; CREATED for unknown types too.
+  creationName(type: string, version?: number): string {
+    const def = this.defs.get(type);
+    if (def?.revisedAs !== undefined && version !== undefined && version > 1) return def.revisedAs;
+    return def?.createdAs ?? "CREATED";
   }
 
   resolve(type: string, event: string): Resolved | undefined {
@@ -140,10 +167,10 @@ export class Registry {
 
 const chart = (name: string) => loadTable(new URL(`../../charts/${name}`, import.meta.url));
 
-// The two vocabularies specced today: dashboard nodes (the S1–S9 test vocabulary)
-// and vapor ideas. Factory tables (B1) are added here once wired.
+// The vocabularies specced today: dashboard nodes (the S1–S9 test vocabulary), vapor
+// ideas, and the factory's brief / session / drop (Track B1).
 export function defaultRegistry(): Registry {
-  return new Registry()
+  const r = new Registry(FACTORY_GUARDS)
     .register({
       type: "node",
       createdAs: "BORN",
@@ -164,4 +191,6 @@ export function defaultRegistry(): Registry {
       },
     })
     .register({ type: "idea", regions: { lifecycle: chart("idea-lifecycle.json") } });
+  for (const def of factoryTypes(chart)) r.register(def);
+  return r;
 }

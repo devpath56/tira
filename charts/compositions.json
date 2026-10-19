@@ -1,0 +1,21 @@
+{
+  "brief": {
+    "grain": "one row = one brief version, brief:<id>@<version>",
+    "regions": ["gate", "claim", "outcome"],
+    "correlation": "each handoff receiver carries metadata.correlationId = the id of the pair's first event, minted by that event's emitter",
+    "projection": { "claim": { "waiting": "unclaimed" } },
+    "allowed": [
+      "ungated × unclaimed × open",
+      "denied × unclaimed × open",
+      "gated × unclaimed × open",
+      "gated × claimed-silent × open",
+      "gated × claimed-active × open",
+      "gated × claimed-active × dropped-unverified",
+      "gated × claimed-active × done-verified",
+      "gated × unclaimed × blocked",
+      "gated × claimed-silent × blocked",
+      "gated × claimed-active × blocked"
+    ],
+    "impossible": "every other gate × claim × outcome combination (26 of 36): the tables alone allow them, the handoff rules never produce them"
+  }
+}

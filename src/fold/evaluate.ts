@@ -1,7 +1,7 @@
 // The single legality function. The write path calls it before append; the fold
 // calls it again on replay. One function, so "what the writer allowed" and "what
 // the fold accepts" cannot drift apart.
-import { step, type StepOutcome } from "../tables/table.ts";
+import { applyCapture, step, type StepOutcome } from "../tables/table.ts";
 import type { EntityTypeDef, Registry, TreeConfig } from "../tables/registry.ts";
 import { entityKey, type EntityRef, type EntityState, type StateView, type TreeInfo } from "./types.ts";
 import { activeNodes, allChildrenTerminal, children, isDrained, isTerminal } from "./tree.ts";
@@ -20,7 +20,10 @@ export type RejectCode =
   | "tree-cap"
   | "bad-provenance"
   | "gate"
-  | "reserved-actor";
+  | "reserved-actor"
+  | "superseded"
+  | "bad-version"
+  | "handoff-refused";
 
 export type Intent =
   | { kind: "create"; entity: EntityRef; payload: Record<string, unknown>; actor: string | undefined }
@@ -35,6 +38,7 @@ export type Evaluation =
       from?: string;
       regions: Record<string, string>; // next region states
       tree?: TreeInfo; // for a birth into a tree type
+      context?: Record<string, Record<string, unknown>>; // next captured data (C3), when any
     }
   | { ok: false; code: RejectCode; detail: string };
 
@@ -68,10 +72,33 @@ export function evaluate(
   }
   const key = entityKey(intent.entity);
   const current = entities.get(key);
+  // A14 for types whose versions follow another type's (drop follows brief).
+  const owner = def.followsVersionsOf;
+  if (owner !== undefined && intent.entity.version !== undefined && view.get({ type: owner, id: intent.entity.id, version: intent.entity.version + 1 })) {
+    return reject("superseded", `${key} belongs to ${owner}:${intent.entity.id}@${intent.entity.version}, which was superseded`);
+  }
 
   if (intent.kind === "create") {
     if (current) return reject("already-exists", key);
     const regions = registry.initialRegions(def);
+    // C5: a revision needs the version it supersedes (and names it, if it says).
+    const v = intent.entity.version;
+    if (def.revisedAs !== undefined && v !== undefined && v > 1) {
+      if (!view.get({ type: def.type, id: intent.entity.id, version: v - 1 })) {
+        return reject("bad-version", `${key} needs ${def.type}:${intent.entity.id}@${v - 1} first`);
+      }
+      if (intent.payload.supersedes !== undefined && Number(intent.payload.supersedes) !== v - 1) {
+        return reject("bad-version", `${key} can only supersede version ${v - 1} (got supersedes=${String(intent.payload.supersedes)})`);
+      }
+    }
+    // C2: guards on create.
+    if (def.createGuard !== undefined) {
+      const born: EntityState = { stream: "", type: def.type, id: intent.entity.id, ...(v === undefined ? {} : { version: v }), key, regions, createdSeq: 0, lastSeq: 0, lastRecordedAt: "" };
+      const impl = registry.guards[def.createGuard];
+      if (!impl?.({ payload: intent.payload, actor: intent.actor, entity: born, view, own: {} })) {
+        return reject("guard-failed", `${def.type} birth needs ${def.createGuard}`);
+      }
+    }
     if (!def.tree) {
       if (intent.payload.parent_id !== undefined) return reject("unknown-parent", `${def.type} has no tree; parent_id is not allowed`);
       return { ok: true, outcome: "created", key, regions };
@@ -82,14 +109,20 @@ export function evaluate(
   }
 
   if (!current) return reject("unknown-entity", key);
+  // C5/A14: once a newer version exists, the old one takes no more events.
+  if (def.revisedAs !== undefined && current.version !== undefined && view.get({ type: def.type, id: current.id, version: current.version + 1 })) {
+    return reject("superseded", `${key} was superseded by version ${current.version + 1}`);
+  }
   const hit = registry.resolve(def.type, intent.event);
   if (!hit) return reject("unknown-event", `${def.type}.${intent.event}`);
   const from = current.regions[hit.region] as string;
+  const own = current.context?.[hit.region] ?? {};
   const res = step(hit.table, from, intent.event, registry.guards, {
     payload: intent.payload,
     actor: intent.actor,
     entity: current,
     view,
+    own,
   });
   if (res.outcome === "denied") return reject("denied", `${hit.table.id}: ${from} + ${intent.event}`);
   if (res.outcome === "guard-failed") {
@@ -100,7 +133,11 @@ export function evaluate(
     const gate = treeGate(def, def.tree, current, intent.event, regions, entities, view, opts.pairedClose === true);
     if (gate !== undefined) return reject("gate", gate);
   }
-  return { ok: true, outcome: res.outcome, key, region: hit.region, from, regions };
+  const captured = applyCapture(current.context?.[hit.region], res.capture, intent.payload);
+  const context = { ...(current.context ?? {}) };
+  if (captured === undefined) delete context[hit.region];
+  else context[hit.region] = captured;
+  return { ok: true, outcome: res.outcome, key, region: hit.region, from, regions, ...(Object.keys(context).length > 0 ? { context } : {}) };
 }
 
 // Birth into a tree: provenance, parent, the parent's own table, caps.

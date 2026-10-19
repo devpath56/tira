@@ -15,8 +15,9 @@ import type { Intent, RejectCode } from "./evaluate.ts";
 
 export const REJECTED = "command.rejected";
 
-// Birth event name per entity type (UPPER_SNAKE), e.g. registry.creationName.
-export type CreationNameOf = (type: string) => string;
+// Birth event name per entity type and version (UPPER_SNAKE), e.g. registry.creationName.
+// A versioned type may name later versions differently (brief: v1 CREATED, v2+ REVISED).
+export type CreationNameOf = (type: string, version?: number) => string;
 const defaultCreation: CreationNameOf = () => "CREATED";
 
 export const TABLE_EVENT_NAME = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/;
@@ -39,7 +40,7 @@ const refData = (e: EntityRef): EventData["entity"] =>
   e.version !== undefined ? { id: e.id, version: e.version } : { id: e.id };
 
 export function toNewEvent(intent: Intent, eventId?: string, creationNameOf: CreationNameOf = defaultCreation): NewEvent {
-  const name = storedName(intent.kind === "create" ? creationNameOf(intent.entity.type) : intent.event);
+  const name = storedName(intent.kind === "create" ? creationNameOf(intent.entity.type, intent.entity.version) : intent.event);
   const data: EventData = { entity: refData(intent.entity), payload: intent.payload };
   return {
     ...(eventId ? { eventId } : {}),
@@ -74,7 +75,7 @@ export function toIntent(e: StoredEvent, creationNameOf: CreationNameOf = defaul
     data.entity.version !== undefined ? { type, id: data.entity.id, version: data.entity.version } : { type, id: data.entity.id };
   const payload = data.payload ?? {};
   const actor = e.metadata.actor;
-  return name === storedName(creationNameOf(type))
+  return name === storedName(creationNameOf(type, entity.version))
     ? { kind: "create", entity, payload, actor }
     : { kind: "event", entity, event: tableEventName(name), payload, actor };
 }

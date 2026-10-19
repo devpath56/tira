@@ -1,0 +1,53 @@
+{
+  "id": "brief-gate",
+  "initial": "ungated",
+  "states": [
+    "ungated",
+    "gated",
+    "denied"
+  ],
+  "events": [
+    "DISPATCHED",
+    "DENIED"
+  ],
+  "pairs": [
+    {
+      "from": "ungated",
+      "event": "DISPATCHED",
+      "outcome": "transition",
+      "to": "gated",
+      "guard": "isOrchestrator"
+    },
+    {
+      "from": "ungated",
+      "event": "DENIED",
+      "outcome": "transition",
+      "to": "denied",
+      "guard": "orchestratorWithReason"
+    },
+    {
+      "from": "gated",
+      "event": "DISPATCHED",
+      "outcome": "noop"
+    },
+    {
+      "from": "gated",
+      "event": "DENIED",
+      "outcome": "denied"
+    },
+    {
+      "from": "denied",
+      "event": "DISPATCHED",
+      "outcome": "denied"
+    },
+    {
+      "from": "denied",
+      "event": "DENIED",
+      "outcome": "noop"
+    }
+  ],
+  "guards": {
+    "isOrchestrator": "actor is the orchestrator",
+    "orchestratorWithReason": "actor is the orchestrator and payload.reason is a non-empty string"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "session",
+  "initial": "live",
+  "states": [
+    "live",
+    "ended"
+  ],
+  "events": [
+    "RENAMED",
+    "ENDED"
+  ],
+  "pairs": [
+    {
+      "from": "live",
+      "event": "RENAMED",
+      "outcome": "noop",
+      "capture": {
+        "name": "payload.session"
+      }
+    },
+    {
+      "from": "live",
+      "event": "ENDED",
+      "outcome": "transition",
+      "to": "ended",
+      "guard": "declaredByAllowed"
+    },
+    {
+      "from": "ended",
+      "event": "RENAMED",
+      "outcome": "denied"
+    },
+    {
+      "from": "ended",
+      "event": "ENDED",
+      "outcome": "noop"
+    }
+  ],
+  "guards": {
+    "declaredByAllowed": "payload.declared_by is self (actor = this session), mac-evidence (actor = mac) or user (actor = user) — never a timeout"
+  }
+}

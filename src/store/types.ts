@@ -13,7 +13,8 @@
 
 export interface EventMetadata {
   actor?: string;
-  causationId?: string;
+  causationId?: string; // the event that caused this one
+  correlationId?: string; // handoffs: the first event of the pair (regions proposal R2)
 }
 
 export interface NewEvent {
