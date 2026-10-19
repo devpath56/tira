@@ -159,8 +159,8 @@ Each test replays an event script and asserts the folded result. S1–S9 are the
 | T7 drained resurrection | ADD_CHILD under drained subtree | denied; after REOPEN(with reason) succeeds; subtree un-drains |
 | T8 time travel | Fold to N for several N | historical states match the demo boards frame-for-frame |
 | R1 region scans | chart JSONs + composition config through `region-scan.py` | overlap scan exits 0 (no event in >1 region except declared handoff pairs); guard scan reports 0 cross-region reads |
-| R2 handoff replay | scripted log: `brief.claimed {claim_id: X}` → `node.born {claim_id: X}` | folds to brief-claim=claimed-active AND node=unstarted with matching X |
-| R3 dangling handoff | log with `claim.materialized`, no `node.born` | dangling-handoff check lists X as pending, not an error |
+| R2 handoff replay | scripted log: `idea.materialized {idea_id: X}` → `node.born` | folds to idea=MATERIALIZED AND node=unstarted with matching X |
+| R3 dangling handoff | log with `idea.materialized`, no `node.born` | dangling-handoff check lists X as pending, not an error |
 
 ## Demo checkpoints (added 2026-10-16) — Isha demos working features; UI starts thin at D1 and grows
 
@@ -168,13 +168,13 @@ Each test replays an event script and asserts the folded result. S1–S9 are the
 
 **D1 — Tree + cursor + drain (after Track C1). First UI — deliberately thin.** Surface: read-only HTML page rendering the fold (tree, cursor highlight, drain flags); static render, reload to refresh. Script: S3 backtrack — build a tree, BLOCK + ADD_CHILD mid-flight, resume; cursor returns by replay; drain flags propagate up the chain. Exit: the tree is visible, not described. (Judgment call: this pulls a thin render forward from Phase 4 — ~1 hour of work — so every later demo is visual.)
 
-**D2 — Regions composed (after Track B1 factory tables).** Surface: same HTML + region lanes. Script: the brief's 3-dimension state (gate × claim × outcome) rendered as composed regions, not one dial; handoff demo — `claim.materialized {claim_id: X}` → `node.born {claim_id: X}` with matching X; `region-scan.py` green on the composition. Exit: the orthogonal-regions spec is visible on screen.
+**D2 — Regions composed (after Track B1 factory tables).** Surface: same HTML + region lanes. Script: the brief's 3-dimension state (gate × claim × outcome) rendered as composed regions, not one dial; handoff demo — `idea.materialized {idea_id: X}` → `node.born` with matching X; `region-scan.py` green on the composition. Exit: the orthogonal-regions spec is visible on screen.
 
 **D3 — Dual-run live (after B2/B3).** Surface: HTML + divergence report panel. Script: real factory events land through the write path; he triggers the divergence comparison ad-hoc (no scheduled job — N3); 0 divergences shown. Exit: measured evidence, not a claim.
 
 **D4 — Suggester (Phase 2).** Surface: HTML + "what's next" panel with receipts. Script: S8 — the suggester proposes the next task with its reason chain; completion contract enforced (`vapor_declared` attestation on the gate). Exit: a suggestion he can audit.
 
-**D5 — Vapor pipeline (Phase 3).** Surface: HTML. Script: idea declared → filed → materialized as a node; `claim.*` namespace visible in the event stream; a stage-skip attempt → denied live. Exit: vapor → node, end to end.
+**D5 — Vapor pipeline (Phase 3).** Surface: HTML. Script: idea declared → filed → materialized as a node; `idea.*` → `node.born` visible in the event stream; a stage-skip attempt → denied live. Exit: vapor → node, end to end.
 
 **D6 — Edge-testing rig (Phase 4).** Surface: full lean UI. Script: manual event injection, on-demand sweep runs, S1–S9 + T1–T8 green. Exit: the suite he can break things against.
 
@@ -186,7 +186,7 @@ Each names its oracle (what the tester compares against) and the stop authority.
 |---|---|---|---|---|
 | M0 | D0 CLI | Specified: replay output byte-identical to pre-wipe derived state; denial row present in log | hashes match; `command.rejected` logged, never applied | him |
 | M1 | D1 thin HTML | Derived: rendered tree node-for-node against `tira dump` CLI output; cursor highlight = fold cursor | counts match; every node present; drain flags match fold | him |
-| M2 | D2 regions | Specified: `region-scan.py` exit 0; handoff `claim_id` identical in both lanes | 0 findings; X matches claim and node | him |
+| M2 | D2 regions | Specified: `region-scan.py` exit 0; handoff `idea_id` identical in both lanes | 0 findings; X matches idea and node | him |
 | M3 | D3 dual-run | Specified: divergence report reads 0, re-run twice identical | 0 divergences, repeatable | him |
 | M4 | D4 suggester | Derived: receipts reproduce on re-fold (run twice) | identical pick + identical rejected-alternatives | him |
 | M5 | D5 vapor | Specified: stage-skip denial in log; idea→node chain complete | skip denied; filed→materialized unbroken | him |
@@ -229,7 +229,7 @@ QE notes: (q04) a PASS on M1 licenses D2's lanes — so M1 checks completeness n
 **Decided 2026-10-18** (unblock replies on the TIRA task):
 - Drain semantics: drain stays local (a parent is drained when every *direct* child is terminal); tira holds the pen — when work moves on (START / UNBLOCK / REOPEN into in-progress) outside a drained, still-open parent, tira appends that parent's start (if unstarted) + complete as actor `tira`, through the same guarded write path, citing the move; the chain climbs. Cursor = first open leaf in depth-first order; parents awaiting close are skipped. Un-drain window preserved while inside the subtree; reopen stays human-only.
 - Four edge rulings: deny cancel-with-open-children (cancel-subtree is a client-side macro); deny reopen-under-done-parent, transitively, with reason; a blocked parent's children stay workable; no add-child under a done/cancelled parent (a drained-but-open parent accepts one and un-drains).
-- Handoff naming: `idea.materialized {idea_id}` → `node.born`. Plan rows R2, D2, D5, R3 still carry stale `claim.*` naming — his fix, not the builder's.
+- Handoff naming: `idea.materialized {idea_id}` → `node.born`. Plan rows R2, D2, D5, R3 carried stale `claim.*` naming — fixed 2026-10-18 (`idea.materialized {idea_id}` → `node.born`).
 - Factory table holes closed structurally: CLAIMED and drop.filed require a named session (a session names itself before claiming/filing); RENAMED guarded to the session itself, the orchestrator, or mac evidence. Re-sign brief-claim, drop, session after re-verification; two new mutants (unnamed CLAIMED denied, foreign rename denied).
 - B1 build calls 1–7 confirmed as built: H2 failure branch (non-claimant drop waits for the orchestrator), `dispatcher` reserved actor, block relay rules, dependency verified on any version's verified drop, F1 (node takes the idea's id), frontier requires outcome open with H6 lifted before H1, region scans per composition.
 - B2 ruled (decision record #5, hardened spec v2): factory workflows auto-emit tira events as part of every guarded transition (transition-embedded). Gate scripts invoke `tira send` guard → emit → apply; deterministic `fx:` + sha256 event-ids (never random per run); fail-closed policy class `emit-or-halt` (store down = transition does not commit; refusals to factory-side journal, reconciled as `refusal.recorded`); E1 break-glass approved as designed (operator-only, 4h auto-revert, journaled); E2 orphan triage = auto-re-run once then page; E3 rule rejection (exit 2) = transition does not commit, loud and logged. Pending-poll rides B2. Watchdog (divergence report) continuous, warn-only until it earns blocking. Split: Isha builds refusal/override event types + fx: rule (watchdog stays B3); operator wires the gate scripts + journal. Bet P=0.75: 30 days, 100% transitions emitting, 0 phantoms.
