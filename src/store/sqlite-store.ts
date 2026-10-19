@@ -66,7 +66,13 @@ export interface SqliteStoreOptions {
 }
 
 // Run `work` now and settle a promise with its result: a throw becomes a rejection.
-const settled = <T>(work: () => T): Promise<T> => new Promise<T>((resolve) => resolve(work()));
+function settled<T>(work: () => T): Promise<T> {
+  try {
+    return Promise.resolve(work());
+  } catch (err) {
+    return Promise.reject(err as Error);
+  }
+}
 
 export class SqliteEventStore implements EventStore {
   readonly db: DatabaseSync;

@@ -24,16 +24,16 @@ import os
 import sys
 
 
-def inside_cwd(p):
-    """A path from the command line, resolved, and refused unless it is inside the current
-    directory: the scan only reads the repo's charts and pairs files, and appends to its own
-    log. Exits 2 on a path that escapes (`..`, an absolute path elsewhere, a symlink out)."""
-    base = os.path.realpath(os.getcwd())
-    full = os.path.realpath(os.path.join(base, p))
-    if not full.startswith(base + os.sep):
-        print(f"region-scan.py: {p} is outside {base}", file=sys.stderr)
-        sys.exit(2)
-    return full
+def inside_cwd(path):
+    """A path from the command line, canonicalized, and refused unless it is inside the
+    directory the scan was run from: it only reads the repo's charts and pairs files, and
+    appends to its own log. Raises ValueError on a path that escapes (`..`, an absolute path
+    elsewhere, a symlink out, a sibling folder whose name starts the same)."""
+    resolved = os.path.realpath(path)
+    base_dir = os.path.realpath(os.getcwd())
+    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):
+        raise ValueError(f"path {path!r} is outside {base_dir}")
+    return resolved
 
 def load_charts(paths):
     charts = []
@@ -138,4 +138,8 @@ def _flag_values(args):
     return vals
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as e:
+        print(f"region-scan.py: {e}", file=sys.stderr)
+        sys.exit(2)

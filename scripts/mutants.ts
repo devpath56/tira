@@ -225,9 +225,9 @@ const MUTANTS: Mutant[] = [
   { name: "runner: guarded no-ops ignore their guard", file: "src/tables/table.ts", find: "  if (pair.guard) {\n    const impl = guards[pair.guard];", replace: "  if (pair.guard && pair.outcome !== \"noop\") {\n    const impl = guards[pair.guard];" },
   { name: "identity checks never run", file: "src/fold/evaluate.ts", find: "    if (m.on !== on) continue;", replace: "    continue;" },
   // SonarCloud gate fixes (2026-10-19)
-  { name: "region-scan: any path accepted", file: "docs/tools/region-scan.py", find: "    if not full.startswith(base + os.sep):\n", replace: "    if False:\n" },
-  { name: "region-scan: a path that only starts like the repo accepted", file: "docs/tools/region-scan.py", find: "    if not full.startswith(base + os.sep):\n", replace: "    if not full.startswith(base):\n" },
-  { name: "store: throws escape the promise", file: "src/store/sqlite-store.ts", find: "const settled = <T>(work: () => T): Promise<T> => new Promise<T>((resolve) => resolve(work()));", replace: "const settled = <T>(work: () => T): Promise<T> => Promise.resolve(work());" },
+  { name: "region-scan: any path accepted", file: "docs/tools/region-scan.py", find: "    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):\n", replace: "    if False:\n" },
+  { name: "region-scan: a path that only starts like the repo accepted", file: "docs/tools/region-scan.py", find: "    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):\n", replace: "    if resolved != base_dir and not resolved.startswith(base_dir):\n" },
+  { name: "store: throws escape the promise", file: "src/store/sqlite-store.ts", find: "    return Promise.reject(err as Error);\n", replace: "    throw err;\n" },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
