@@ -139,6 +139,15 @@ const MUTANTS: Mutant[] = [
   { name: "tira: everyone's closes count as tira's", file: "src/fold/fold.ts", find: "values.closedByTira = isTerminal(def.tree, ent) && movedBy.get(", replace: "values.closedByTira = isTerminal(def.tree, ent) || movedBy.get(" },
   { name: "tira: waiting-for-tira flag never set", file: "src/fold/fold.ts", find: "values.awaitingClose = awaitingClose(def.tree, ent, view);", replace: "values.awaitingClose = false;" },
   { name: "render: no closed-by-tira mark", file: "src/render/html.ts", find: "r.closedByTira ? `<span class=\"mark tira\">closed by tira</span>` : \"\",", replace: "\"\"," },
+  { name: "render: progress counts only done, not cancelled", file: "src/render/html.ts", find: 'const CLOSED = new Set(["done", "cancelled"]);', replace: 'const CLOSED = new Set(["done"]);' },
+  { name: "render: tree marks the active task as next", file: "src/render/html.ts", find: "r.cursor ? `<text class=\"next\"", replace: "r.active ? `<text class=\"next\"" },
+  { name: "render: tree hides the waiting-for-tira ring", file: "src/render/html.ts", find: "r.awaitingClose ? `<circle class=\"wait\"", replace: "false ? `<circle class=\"wait\"" },
+  { name: "render: no tira leaf in the tree", file: "src/render/html.ts", find: "r.closedByTira ? `<path class=\"tira-leaf\"", replace: "false ? `<path class=\"tira-leaf\"" },
+  { name: "render: drawer ids don't match the links", file: "src/render/html.ts", find: "<section class=\"drawer\" id=\"t${n.i}\"", replace: "<section class=\"drawer\" id=\"d${n.i}\"" },
+  { name: "render: board puts parents in the columns", file: "src/render/html.ts", find: "const leaves = nodes.filter((n) => n.row.children.length === 0);", replace: "const leaves = nodes;" },
+  { name: "render: --at N shows history from after N", file: "src/render/html.ts", find: "  events = events.filter((e) => e.seq <= r.lastSeq);", replace: "" },
+  { name: "render: glow on every in-progress node", file: "src/render/html.ts", find: "${r.active ? `<circle class=\"halo\"", replace: "${true ? `<circle class=\"halo\"" },
+  { name: "render: long names not shortened in the tree", file: "src/render/html.ts", find: "${esc(short(r.id))}${found}", replace: "${esc(r.id)}${found}" },
   { name: "render: no history per task", file: "src/render/html.ts", find: "const lines = trail.get(r.key) ?? [];", replace: "const lines: string[] = [];" },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
