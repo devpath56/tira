@@ -16,7 +16,7 @@ import type { StoredEvent } from "../store/types.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const esc = (s: string) => s.replace(/[&<>']/g, (c) => `&#${c.charCodeAt(0)};`);
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
 const CLOSED = new Set(["done", "cancelled"]);
