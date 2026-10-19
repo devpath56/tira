@@ -1,7 +1,7 @@
 # MVP Build Plan — Deterministic Task-Tree Tracking
 
 - **Date:** 2026-10-16
-- **Status:** Track A built + merged to main (PR #1, 2026-10-17); C1 go-word given 2026-10-17; everything else needs an explicit go-word.
+- **Status:** Track A + B1 merged to main (PRs #1, #4); C1 go-word given 2026-10-17 (confirmed 2026-10-19); Track A independently verified 2026-10-19 — SonarCloud red on the PR-#1 head (C security rating on new code) is the one pre-merge gap; blind mutant round proposed, parallel to C1.
 - **Companions:** proposal (`proposal-deterministic-tracking-mvp-20261016.md`), functional requirements (`functional-requirements-deterministic-tracking-mvp-2026-10-16.md`), exec brief (126 trust queries), state chart (`tracking-mvp/charts/node-lifecycle.mjs`), demo (`tracking-mvp/demo/`)
 
 ## 0. What's already built (do not rebuild)
@@ -234,6 +234,13 @@ QE notes: (q04) a PASS on M1 licenses D2's lanes — so M1 checks completeness n
 - B1 build calls 1–7 confirmed as built: H2 failure branch (non-claimant drop waits for the orchestrator), `dispatcher` reserved actor, block relay rules, dependency verified on any version's verified drop, F1 (node takes the idea's id), frontier requires outcome open with H6 lifted before H1, region scans per composition.
 - B2 ruled (decision record #5, hardened spec v2): factory workflows auto-emit tira events as part of every guarded transition (transition-embedded). Gate scripts invoke `tira send` guard → emit → apply; deterministic `fx:` + sha256 event-ids (never random per run); fail-closed policy class `emit-or-halt` (store down = transition does not commit; refusals to factory-side journal, reconciled as `refusal.recorded`); E1 break-glass approved as designed (operator-only, 4h auto-revert, journaled); E2 orphan triage = auto-re-run once then page; E3 rule rejection (exit 2) = transition does not commit, loud and logged. Pending-poll rides B2. Watchdog (divergence report) continuous, warn-only until it earns blocking. Split: Isha builds refusal/override event types + fx: rule (watchdog stays B3); operator wires the gate scripts + journal. Bet P=0.75: 30 days, 100% transitions emitting, 0 phantoms.
 - Tables re-signed 2026-10-18 (operator word "do it"): session (rename guard self/orchestrator/mac), brief-claim + drop (mustExist named-session) re-verified — 186/186 tests, 0 region-scan findings, CI+SonarCloud green on 7ce5a4b. Stack merged #2 → #3 → #4 (merge commits, 2026-10-19T07:10Z).
+
+**Decided 2026-10-19** (verification reply on the TIRA task):
+- Track A independently verified (five gates, fresh clone of the PR branch): 82/82 tests pass; 43/43 planted bugs killed (all read — fine-grained faults, several subtle, not gamed); CI green on the head SHA; dump --hash identical 3× including from a fresh store copy; rejected commands exit 2, are logged, and leave entity state byte-identical (never applied); stored event names all lowercase-kebab; region-scan --all PASS (2 regions, 13 events, 0 findings).
+- Gaps before Track-A sign-off: SonarCloud red on the PR-#1 head (C Security Rating on New Code, required ≥ A — green on the 05:56 push, broke on the docs commit); factory-tables draft not attached to the review thread (36→10 composition unverifiable until pushed).
+- C1 go-word confirmed: the 05:32 2026-10-17 message counts as the go-word (tree, drain, cursor); the status line above is the record.
+- Factory-table shape confirmed: cross-region rules live in the declared H1–H6 handoff policy; tables stay small with zero cross-region guards; composition declared in config, never coded into tables. The policy must stay declarative — sign-off checks that.
+- Blind mutant round proposed (parallel to C1, lands before Track-A sign-off): Isha plants 10 fresh faults on a scratch branch and shares only the branch name; the full suite runs against the mutated code; target 10/10 killed; any survivor is a detector gap fixed before sign-off. Rationale: 43/43 proves the suite isn't vacuous, but planter and detector were the same person.
 
 **Resolved since the proposal** (see `packing.md` §5):
 - Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
