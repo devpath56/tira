@@ -78,7 +78,7 @@ export function activeNodes(cfg: TreeConfig, type: string, view: StateView): Ent
 export function cursor(cfg: TreeConfig, type: string, view: StateView): EntityState | undefined {
   let found: EntityState | undefined;
   const walk = (e: EntityState) => {
-    if (found || isTerminal(cfg, e)) return; // the gates keep closed branches free of open work: a speed-up
+    if (found || !isActionable(cfg, e)) return; // the gates keep closed branches free of open work: a speed-up
     if (isActionable(cfg, e) && (e.tree?.children.length ?? 0) === 0) {
       found = e;
       return;
