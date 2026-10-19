@@ -47,10 +47,10 @@ const clean = async (t: T) => assert.deepEqual((await t.now()).anomalies, []);
 
 // ---------- the tables ----------
 
-test("the 5 signed-off tables load, validate (captures included) and register with 0 shared events", () => {
+test("the factory tables load, validate (captures included) and register with 0 shared events", () => {
   const r = defaultRegistry();
   assert.deepEqual(r.types().map((x) => `${x.type}:${Object.keys(x.regions).join("+")}`), [
-    "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "drop:lifecycle",
+    "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "refusal:lifecycle", "override:lifecycle", "drop:lifecycle",
   ]);
   assert.equal(r.creationName("brief", 1), "CREATED");
   assert.equal(r.creationName("brief", 2), "REVISED");
@@ -654,4 +654,205 @@ test("a tampered log can't put a brief on the frontier before its dependencies a
   assert.match(r.anomalies[0]?.problem ?? "", /no handoff rule called for it/);
   assert.equal(r.entities.find((e) => e.key === "brief:b@1")?.regions.claim, "unclaimed");
   assert.deepEqual(r.frontier[S], []);
+});
+
+// ---------- B2: factory transitions write their events (ruling 2026-10-19) ----------
+
+test("the fx: key rule: fx: + sha256 of the transition's canonical JSON; same transition, same key", async () => {
+  const { fxKey } = await import("../src/write/fxkey.ts");
+  const { createHash } = await import("node:crypto");
+  const t1 = { stream: S, entity: brief("b"), event: "DISPATCHED", actor: "orchestrator", payload: {} };
+  const body = '{"actor":"orchestrator","entity":{"id":"b","type":"brief","version":1},"event":"DISPATCHED","payload":{},"stream":"factory"}';
+  assert.equal(fxKey(t1), `fx:${createHash("sha256").update(body).digest("hex")}`);
+  assert.equal(fxKey({ ...t1 }), fxKey(t1)); // deterministic
+  for (const change of [{ actor: "user" }, { payload: { reason: "x" } }, { event: "DENIED" }, { entity: brief("b", 2) }, { stream: "other" }]) {
+    assert.notEqual(fxKey({ ...t1, ...change }), fxKey(t1), JSON.stringify(change));
+  }
+  assert.match(fxKey({ stream: S, entity: { type: "session", id: "s1" }, event: "NAMED" }), /^fx:[0-9a-f]{64}$/); // no actor, no payload
+});
+
+test("the README's fx: key test vectors (numbers, UTF-8, UTF-16 key order, REVISED, no actor) match the code", async () => {
+  const { fxKey } = await import("../src/write/fxkey.ts");
+  const { readFileSync } = await import("node:fs");
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const block = /<!-- fx-vectors -->\n```jsonl\n([\s\S]*?)\n```\n<!-- \/fx-vectors -->/.exec(readme)?.[1];
+  assert.ok(block, "README has the fx-vectors block");
+  const vectors = block.split("\n").map((l) => JSON.parse(l) as { key: string; transition: Parameters<typeof fxKey>[0] & { actor: string | null } });
+  assert.equal(vectors.length, 5);
+  for (const v of vectors) {
+    const { actor, ...rest } = v.transition;
+    assert.equal(fxKey({ ...rest, ...(actor === null ? {} : { actor }) }), v.key, JSON.stringify(v.transition));
+  }
+  assert.ok(vectors.some((v) => Object.keys(v.transition.payload ?? {}).join() === "ﬁ,😀,Z,a")); // the code-unit case is there
+});
+
+test("a crash-retry with the same fx: key is a duplicate, never a second row; a malformed fx: id is refused outright", async () => {
+  const { fxKey } = await import("../src/write/fxkey.ts");
+  const t = setup();
+  await t.make(brief("b"), "orchestrator");
+  const key = fxKey({ stream: S, entity: brief("b"), event: "DISPATCHED", actor: "orchestrator" });
+  const first = await t.run({ kind: "event", entity: brief("b"), event: "DISPATCHED", actor: "orchestrator", eventId: key });
+  const retry = await t.run({ kind: "event", entity: brief("b"), event: "DISPATCHED", actor: "orchestrator", eventId: key });
+  assert.equal(first.result.status, "appended");
+  assert.equal(retry.result.status, "duplicate");
+  assert.equal((await t.log()).filter((e) => e.type === "brief.dispatched").length, 1);
+  for (const bad of ["fx:abc", `fx:${"A".repeat(64)}`, `fx:${"a".repeat(63)}`, `fx:${"a".repeat(64)}0`]) {
+    await assert.rejects(t.run({ kind: "event", entity: brief("b"), event: "DISPATCHED", actor: "orchestrator", eventId: bad }), /fx: eventId must be fx: \+ 64 lowercase hex/, bad);
+  }
+});
+
+test("refusals: recorded under the refused transition's fx: key and actor, once; malformed ones are refused", async () => {
+  const t = setup();
+  const id = `fx:${"c".repeat(64)}`;
+  const good = { transition: { type: "brief", id: "b", version: 1, event: "CLAIMED" }, reason: "tira store unreachable", journaled_at: "2026-10-19T09:00:00Z" };
+  const rec = (rid: string, actor: string | undefined, payload: Record<string, unknown>) => t.run({ kind: "create", entity: { type: "refusal", id: rid }, ...(actor ? { actor } : {}), payload });
+  assert.equal(st(await rec("not-an-fx-key", "s1", good)), "rejected:guard-failed");
+  assert.equal(st(await rec(id, undefined, good)), "rejected:guard-failed");
+  for (const broken of [{ ...good, reason: "" }, { ...good, journaled_at: "yesterday" }, { ...good, transition: { type: "brief", id: "b" } }, { ...good, transition: "brief b" }]) {
+    assert.equal(st(await rec(id, "s1", broken)), "rejected:guard-failed", JSON.stringify(broken));
+  }
+  assert.equal(st(await rec(id, "s1", good)), "appended");
+  assert.equal((await t.log()).at(-1)?.type, "refusal.recorded");
+  assert.equal(st(await rec(id, "s1", good)), "rejected:already-exists"); // without a key: refused, so recorded once
+  assert.deepEqual((await t.now()).entities.find((e) => e.type === "refusal")?.born, good);
+});
+
+test("overrides: operator-invoked, at most 4 hours; expiry recorded by an operator or Mac; overdue and late are flagged", async () => {
+  const t = setup();
+  const inv = (id: string, actor: string, invoked_at: string, expires_at: string) =>
+    t.run({ kind: "create", entity: { type: "override", id }, actor, payload: { incident: "store down", reason: "hotfix", invoked_at, expires_at } });
+  assert.equal(st(await inv("o1", "s1", "2026-10-19T09:00:00Z", "2026-10-19T13:00:00Z")), "rejected:guard-failed"); // not an operator
+  assert.equal(st(await inv("o1", "user", "2026-10-19T09:00:00Z", "2026-10-19T13:00:01Z")), "rejected:guard-failed"); // over 4 hours
+  assert.equal(st(await inv("o1", "user", "2026-10-19T09:00:00Z", "2026-10-19T08:00:00Z")), "rejected:guard-failed"); // ends before it starts
+  assert.equal(st(await inv("o1", "user", "2026-10-19T09:00:00Z", "2026-10-19T13:00:00Z")), "appended");
+  assert.equal((await t.log()).at(-1)?.type, "override.invoked");
+  assert.equal(st(await inv("o2", "orchestrator", "2026-10-19T10:00:00Z", "2026-10-19T11:00:00Z")), "appended");
+  // still active past its expiry: overdue (the log records its own violation); not before
+  const at = async (now: string) => fold(await t.log(), t.registry, { now }).derived[S] ?? {};
+  assert.equal((await at("2026-10-19T12:00:00Z"))["override:o1"]?.overdue, false);
+  assert.equal((await at("2026-10-19T13:00:01Z"))["override:o1"]?.overdue, true);
+  // expiry: an operator or Mac, with the time it happened
+  const exp = (id: string, actor: string, payload: Record<string, unknown>) => t.ev({ type: "override", id }, "EXPIRED", actor, payload);
+  assert.equal(st(await exp("o1", "s1", { expired_at: "2026-10-19T13:00:00Z" })), "rejected:guard-failed");
+  assert.equal(st(await exp("o1", "mac", {})), "rejected:guard-failed");
+  assert.equal(st(await exp("o1", "mac", { expired_at: "2026-10-19T08:59:59Z" })), "rejected:guard-failed"); // before it was invoked
+  assert.equal(st(await exp("o1", "mac", { expired_at: "2026-10-19T13:00:00" })), "rejected:guard-failed"); // no zone
+  assert.equal(st(await exp("o1", "mac", { expired_at: "2026-10-19T13:00:00Z" })), "appended");
+  // once expired, a repeat is a no-op for the same people, and refused for anyone else
+  const again = (await exp("o1", "user", { expired_at: "2026-10-19T13:00:00Z" })).result;
+  assert.equal(again.status === "appended" ? again.outcome : again.status, "noop");
+  assert.equal(st(await exp("o1", "s1", { expired_at: "2026-10-19T13:00:00Z" })), "rejected:guard-failed");
+  assert.equal(st(await exp("o1", "mac", { expired_at: "2026-10-19T08:00:00Z" })), "rejected:guard-failed");
+  assert.equal(st(await exp("o2", "user", { expired_at: "2026-10-19T11:30:00Z" })), "appended"); // half an hour late
+  const d = await at("2026-10-19T14:00:00Z");
+  assert.deepEqual([d["override:o1"]?.overdue, d["override:o1"]?.late, d["override:o2"]?.late], [false, false, true]);
+  await clean(t);
+});
+
+test("fx: ids are checked against their own transition before anything is stored, relayed blocks included", async () => {
+  const { fxKey } = await import("../src/write/fxkey.ts");
+  const t = setup();
+  const wrong = `fx:${"a".repeat(64)}`;
+  const born = fxKey({ stream: S, entity: brief("b"), event: "CREATED", actor: "orchestrator" });
+  await assert.rejects(t.run({ kind: "create", entity: brief("b"), actor: "orchestrator", eventId: wrong }), new RegExp(`isn't this transition's fx: key \\(it would be ${born};`));
+  assert.equal((await t.log()).length, 0);
+  assert.equal(st(await t.run({ kind: "create", entity: brief("b"), actor: "orchestrator", eventId: born })), "appended");
+  // v2+ births hash the revision's name
+  const v2 = { kind: "create", entity: brief("b", 2), actor: "orchestrator", payload: { supersedes: 1 } } as const;
+  await assert.rejects(t.run({ ...v2, eventId: fxKey({ stream: S, entity: brief("b", 2), event: "CREATED", actor: "orchestrator", payload: { supersedes: 1 } }) }), /isn't this transition's fx: key/);
+  assert.equal(st(await t.run({ ...v2, eventId: fxKey({ stream: S, entity: brief("b", 2), event: "REVISED", actor: "orchestrator", payload: { supersedes: 1 } }) })), "appended");
+  // the orchestrator's block request is checked as sent, before the dispatcher rewrites it
+  await t.ev(brief("b", 2), "DISPATCHED", "orchestrator");
+  await t.make({ type: "session", id: "s1" }, "s1");
+  await t.ev(brief("b", 2), "CLAIMED", "s1", { session: "s1" });
+  const block = { kind: "event", entity: brief("b", 2), event: "BLOCKED", actor: "orchestrator", payload: { block_reason: "verdict" } } as const;
+  await assert.rejects(t.run({ ...block, eventId: wrong }), /isn't this transition's fx: key/);
+  const k = fxKey({ stream: S, entity: brief("b", 2), event: "BLOCKED", actor: "orchestrator", payload: { block_reason: "verdict" } });
+  assert.equal(st(await t.run({ ...block, eventId: k })), "appended");
+  assert.equal(st(await t.run({ ...block, eventId: k })), "duplicate");
+  const relayed = (await t.log()).filter((e) => e.type === "brief.blocked");
+  assert.deepEqual(relayed.map((e) => [e.eventId, e.metadata.actor, e.metadata.causationId]), [[k, "dispatcher", k]]);
+  await clean(t);
+});
+
+test("reconciling an outage: the refusal is keyed by its own transition, so the refused claim still lands once tira is back", async () => {
+  const { fxKey, transitionOf } = await import("../src/write/fxkey.ts");
+  const t = setup();
+  await t.make({ type: "session", id: "s1" }, "s1");
+  await t.make(brief("b"), "orchestrator");
+  await t.ev(brief("b"), "DISPATCHED", "orchestrator");
+  const claim = { kind: "event", entity: brief("b"), event: "CLAIMED", actor: "s1", payload: { session: "s1" } } as const;
+  const k = fxKey(transitionOf({ stream: S, ...claim }, (ty, v) => t.registry.creationName(ty, v)));
+  const record = { kind: "create", entity: { type: "refusal", id: k }, actor: "s1", payload: { transition: { type: "brief", id: "b", version: 1, event: "CLAIMED" }, reason: "tira store unreachable", journaled_at: "2026-10-19T09:00:00Z" } } as const;
+  // recorded under the claim's key, the refusal would take the id the claim needs: refused at once
+  await assert.rejects(t.run({ ...record, eventId: k }), /isn't this transition's fx: key/);
+  const own = fxKey(transitionOf({ stream: S, ...record }, (ty, v) => t.registry.creationName(ty, v)));
+  assert.notEqual(own, k);
+  assert.equal(st(await t.run({ ...record, eventId: own })), "appended");
+  assert.equal(st(await t.run({ ...record, eventId: own })), "duplicate"); // reconciling twice records it once
+  assert.equal(st(await t.run({ ...claim, eventId: k })), "appended");
+  assert.equal(st(await t.run({ ...claim, eventId: k })), "duplicate");
+  const log = await t.log();
+  assert.deepEqual(log.filter((e) => e.eventId === k || e.eventId === own).map((e) => e.type), ["refusal.recorded", "brief.claimed"]);
+  assert.equal((await t.at(brief("b")))?.regions.claim, "claimed-silent");
+  await clean(t);
+});
+
+test("times are strict ISO-8601 with a zone, parsed by hand: no time zone, Date.parse leniency or two-digit years", async () => {
+  const { isoMs } = await import("../src/time.ts");
+  const at = Date.UTC(2026, 9, 19, 9, 30);
+  assert.equal(isoMs("2026-10-19T09:30Z"), at);
+  assert.equal(isoMs("2026-10-19T09:30:00Z"), at);
+  assert.equal(isoMs("2026-10-19T15:00:00+05:30"), at);
+  assert.equal(isoMs("2026-10-19T04:30:00-05:00"), at);
+  assert.equal(isoMs("2026-10-19T09:30:00.5Z"), at + 500);
+  assert.equal(isoMs("2026-10-19T09:30:00.123456789Z"), at + 123);
+  assert.equal(isoMs("2028-02-29T00:00:00Z"), Date.UTC(2028, 1, 29));
+  assert.equal(isoMs("0050-01-01T00:00:00Z"), new Date("0050-01-01T00:00:00Z").getTime()); // year 50, not 1950
+  for (const bad of [
+    "2026-10-19T09:30:00", "2026-10-19", "2026-10-19 09:30:00Z", "2026-10-19t09:30:00z", "2026-02-30T00:00:00Z", "2026-02-29T00:00:00Z",
+    "2026-13-01T00:00:00Z", "2026-00-10T00:00:00Z", "2026-10-00T00:00:00Z", "2026-10-19T24:00:00Z", "2026-10-19T09:60:00Z",
+    "2026-10-19T09:30:60Z", "2026-10-19T09:30:00+5:30", "2026-10-19T09:30:00+0530", "2026-10-19T09:30:00+24:00", "2026-10-19T09:30:00.Z",
+    "+002026-10-19T09:30:00Z", " 2026-10-19T09:30:00Z", "2026-10-19T09:30:00Z\n", 1760866200000, null, undefined, {},
+  ]) assert.equal(isoMs(bad), undefined, JSON.stringify(bad));
+});
+
+test("an override's guards give the same answer in every time zone (replay can't depend on where it runs)", async () => {
+  const saved = process.env.TZ;
+  try {
+    const t = setup();
+    process.env.TZ = "UTC";
+    const inv = (id: string, invoked_at: string, expires_at: string) =>
+      t.run({ kind: "create", entity: { type: "override", id }, actor: "user", payload: { incident: "store down", reason: "hotfix", invoked_at, expires_at } });
+    // zone-less times are local time to Date.parse: refused everywhere, so no log can hold one
+    assert.equal(st(await inv("o1", "2026-10-19T09:00:00Z", "2026-10-19T13:00:00")), "rejected:guard-failed");
+    process.env.TZ = "Asia/Kolkata";
+    assert.equal(st(await inv("o1", "2026-10-19T09:00:00Z", "2026-10-19T13:00:00")), "rejected:guard-failed");
+    // exactly 4 hours across two offsets, and an expiry in a third
+    assert.equal(st(await inv("o1", "2026-10-19T09:00:00Z", "2026-10-19T18:30:00+05:30")), "appended");
+    await t.ev({ type: "override", id: "o1" }, "EXPIRED", "mac", { expired_at: "2026-10-19T09:00:00-04:00" });
+    const folds = [];
+    for (const tz of ["UTC", "Asia/Kolkata", "America/New_York", "Pacific/Kiritimati"]) {
+      process.env.TZ = tz;
+      const r = fold(await t.log(), t.registry, { now: "2026-10-19T14:00:00Z" });
+      assert.deepEqual(r.anomalies, [], tz);
+      folds.push(JSON.stringify([r.entities, r.derived, r.rejections]));
+    }
+    assert.equal(new Set(folds).size, 1);
+    assert.equal(fold(await t.log(), t.registry).entities.find((e) => e.key === "override:o1")?.regions.lifecycle, "expired");
+  } finally {
+    if (saved === undefined) delete process.env.TZ;
+    else process.env.TZ = saved;
+  }
+});
+
+test("the page marks rows a factory transition wrote (fx: ids) as automatic", async () => {
+  const { renderHtml } = await import("../src/render/html.ts");
+  const t = setup();
+  const { fxKey } = await import("../src/write/fxkey.ts");
+  await t.run({ kind: "create", entity: brief("b"), actor: "orchestrator", eventId: fxKey({ stream: S, entity: brief("b"), event: "CREATED", actor: "orchestrator" }) });
+  await t.make(brief("c"), "orchestrator");
+  const log = await t.log();
+  const html = renderHtml(fold(log, t.registry), S, "h", log);
+  assert.equal((html.match(/<span class="auto"/g) ?? []).length, 1); // b's birth, in Activity (briefs have no drawer); c's is not marked
 });

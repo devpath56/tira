@@ -1,0 +1,163 @@
+{
+  "id": "B2-emission",
+  "title": "factory transitions write their events: retries are duplicates; outages leave refusals and overrides on the record",
+  "note": "ruling 2026-10-19 (decision record #5): transitions emit tira events with fx: keys, fail closed, and reconcile refusals. The refusal's id is the refused claim's key; the refusal row's own event id is its own transition's key, so the claim, sent once tira is back, still lands",
+  "steps": [
+    {
+      "do": "create",
+      "type": "session",
+      "id": "s1",
+      "actor": "s1",
+      "eventId": "fx"
+    },
+    {
+      "do": "create",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "actor": "orchestrator",
+      "eventId": "fx"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator",
+      "eventId": "fx",
+      "handoffs": [
+        "H1 brief.claimable"
+      ]
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "DISPATCHED",
+      "actor": "orchestrator",
+      "eventId": "fx",
+      "expect": "duplicate",
+      "handoffs": [],
+      "label": "retried"
+    },
+    {
+      "do": "create",
+      "type": "refusal",
+      "id": "fx:72426832b5f320e670b26ce7b00e93c2bbb9cd6f17cea333ba183f8c31316e20",
+      "actor": "s1",
+      "eventId": "fx",
+      "payload": {
+        "transition": {
+          "type": "brief",
+          "id": "b",
+          "version": 1,
+          "event": "CLAIMED"
+        },
+        "reason": "tira store unreachable",
+        "journaled_at": "2026-10-19T09:00:00Z"
+      }
+    },
+    {
+      "do": "create",
+      "type": "refusal",
+      "id": "fx:72426832b5f320e670b26ce7b00e93c2bbb9cd6f17cea333ba183f8c31316e20",
+      "actor": "s1",
+      "eventId": "fx",
+      "payload": {
+        "transition": {
+          "type": "brief",
+          "id": "b",
+          "version": 1,
+          "event": "CLAIMED"
+        },
+        "reason": "tira store unreachable",
+        "journaled_at": "2026-10-19T09:00:00Z"
+      },
+      "expect": "duplicate",
+      "label": "reconciled twice"
+    },
+    {
+      "do": "create",
+      "type": "override",
+      "id": "incident-1",
+      "actor": "user",
+      "payload": {
+        "incident": "tira store unreachable",
+        "reason": "ship the hotfix",
+        "invoked_at": "2026-10-19T09:05:00Z",
+        "expires_at": "2026-10-19T13:05:00Z"
+      },
+      "eventId": "fx"
+    },
+    {
+      "do": "send",
+      "type": "override",
+      "id": "incident-1",
+      "event": "EXPIRED",
+      "actor": "mac",
+      "payload": {
+        "expired_at": "2026-10-19T13:05:00Z"
+      },
+      "eventId": "fx"
+    },
+    {
+      "do": "send",
+      "type": "override",
+      "id": "incident-1",
+      "event": "EXPIRED",
+      "actor": "s1",
+      "payload": {
+        "expired_at": "2026-10-19T13:05:00Z"
+      },
+      "expect": "rejected:guard-failed",
+      "label": "an outsider can't expire it again"
+    },
+    {
+      "do": "send",
+      "type": "brief",
+      "id": "b",
+      "version": 1,
+      "event": "CLAIMED",
+      "actor": "s1",
+      "payload": {
+        "session": "s1"
+      },
+      "eventId": "fx",
+      "label": "the refused claim, once tira is back"
+    }
+  ],
+  "expect": {
+    "states": {
+      "brief:b@1": {
+        "gate": "gated",
+        "claim": "claimed-silent"
+      },
+      "refusal:fx:72426832b5f320e670b26ce7b00e93c2bbb9cd6f17cea333ba183f8c31316e20": "recorded",
+      "override:incident-1": "expired"
+    },
+    "rejections": 1,
+    "frontier": []
+  },
+  "replayAt": [
+    {
+      "after": "retried",
+      "states": {
+        "brief:b@1": {
+          "claim": "unclaimed"
+        }
+      },
+      "frontier": [
+        "brief:b@1"
+      ]
+    },
+    {
+      "after": "reconciled twice",
+      "states": {
+        "refusal:fx:72426832b5f320e670b26ce7b00e93c2bbb9cd6f17cea333ba183f8c31316e20": "recorded"
+      },
+      "rejections": 0
+    }
+  ]
+}

@@ -67,6 +67,15 @@ test("factory through the CLI: handoffs print as + dispatcher lines; a revise ta
     assert.match((await s.tira("state")).out, /^claimable now \(1\): brief:b@1$/m);
     const v2 = await s.tira("create", "brief", "b", "--version", "2", "--actor", "orchestrator", "supersedes=1");
     assert.equal(v2.code, 0, v2.out);
+    // the fx: key a factory transition uses, the same as the library computes; a malformed fx: id is a usage error
+    const { fxKey } = await import("../src/write/fxkey.ts");
+    const k = await s.tira("key", "brief", "b", "DISPATCHED", "--version", "1", "--actor", "orchestrator", "--stream", "tasktree-main");
+    assert.equal(k.out, fxKey({ stream: "tasktree-main", entity: { type: "brief", id: "b", version: 1 }, event: "DISPATCHED", actor: "orchestrator", payload: {} }));
+    const birth = await s.tira("key", "drop", "b", "--version", "1", "--actor", "s1");
+    assert.equal(birth.out, fxKey({ stream: "tasktree-main", entity: { type: "drop", id: "b", version: 1 }, event: "FILED", actor: "s1", payload: {} }));
+    const malformed = await s.tira("send", "brief", "b", "DENIED", "--version", "1", "--actor", "orchestrator", "--event-id", "fx:nope", "reason=x");
+    assert.equal(malformed.code, 1);
+    assert.match(malformed.err, /fx: eventId must be fx: \+ 64 lowercase hex/);
     const bad = await s.tira("create", "brief", "b", "--version", "3", "--actor", "orchestrator", "supersedes=1");
     assert.match(bad.out, /bad-version\s+brief:b@3 can only supersede version 2 \(got supersedes=1\)/);
   } finally {
@@ -278,6 +287,48 @@ test("types lists entity types with their states and events", async () => {
   assert.equal(await run(["types"], { out: (l) => out.push(l), err: () => {}, env: {} }), 0);
   assert.match(out.join("\n"), /node\n\s+lifecycle: states unstarted, in_progress, blocked, done, cancelled \(starts unstarted\)/);
   assert.match(out.join("\n"), /events DRAFT_FILE, APPROVE_FILE/);
+});
+
+test("tira key: checks what send would refuse without a log, never opens the store, and its key is accepted by send", async () => {
+  const s = sandbox();
+  try {
+    const { existsSync } = await import("node:fs");
+    for (const [argv, why] of [
+      [["key", "brief", "b", "DISPATCHED", "--actor", "orchestrator"], /brief is versioned: pass --version/],
+      [["key", "session", "s1", "--version", "1", "--actor", "s1"], /session is not versioned: drop --version/],
+      [["key", "brief", "b", "DISPATCHED", "--version", "0"], /entity.version must be an integer >= 1/],
+      [["key", "brief", "b", "DISPATCHED", "--version", "x"], /entity.version must be an integer >= 1/],
+      [["key", "brief", "b", "NOPE", "--version", "1"], /unknown event: brief.NOPE/],
+      [["key", "gizmo", "g"], /unknown entity type: gizmo/],
+      [["key", "brief", "b", "DISPATCHED", "--version", "1", "--parent", "p"], /--parent only applies to create/],
+      [["key", "brief", "b", "DISPATCHED", "--version", "1", "--event-id", "fx:x"], /tira key prints the event id/],
+    ] as [string[], RegExp][]) {
+      const r = await s.tira(...argv);
+      assert.equal(r.code, 1, argv.join(" "));
+      assert.match(r.err, why, argv.join(" "));
+    }
+    const born = await s.tira("key", "brief", "b", "--version", "1", "--actor", "orchestrator", "slice_ref=slice/b");
+    assert.equal(born.code, 0);
+    assert.equal(existsSync(s.db), false); // key reads nothing and writes nothing
+    // send accepts the key key printed, retries are duplicates, and any other well-formed fx: id is refused
+    const send = ["create", "brief", "b", "--version", "1", "--actor", "orchestrator", "slice_ref=slice/b", "--event-id"];
+    assert.equal((await s.tira(...send, born.out)).code, 0);
+    assert.match((await s.tira(...send, born.out)).out, /duplicate/);
+    const wrong = await s.tira("send", "brief", "b", "DISPATCHED", "--version", "1", "--actor", "orchestrator", "--event-id", born.out);
+    assert.equal(wrong.code, 1);
+    assert.match(wrong.err, /isn't this transition's fx: key \(it would be fx:[0-9a-f]{64};/);
+    // --payload keeps JSON types; key=value gives strings: different payloads, different keys
+    const typed = await s.tira("key", "brief", "b", "DISPATCHED", "--version", "1", "--payload", '{"n":1}');
+    const text = await s.tira("key", "brief", "b", "DISPATCHED", "--version", "1", "n=1");
+    assert.notEqual(typed.out, text.out);
+    // state --now takes the same strict times
+    const now = await s.tira("state", "--now", "2026-10-19T09:00:00");
+    assert.equal(now.code, 1);
+    assert.match(now.err, /--now must be an ISO-8601 date-time with a zone/);
+    assert.equal((await s.tira("state", "--now", "2026-10-19T09:00:00+05:30")).code, 0);
+  } finally {
+    s.done();
+  }
 });
 
 test("environment defaults: TIRA_DB, TIRA_STREAM, TIRA_ACTOR", async () => {

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 189 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 218 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -357,6 +357,93 @@ against the signed tables, and ruled on the 8th (the two holes, closed below).
     engine now allows a guard on a no-op (never on a denied pair).
   - A regression test pins the order: a drop filed while its session ends mid-handoff
     goes through (H2 runs before H5), and the brief isn't released.
+
+## Factory event writing (B2, ruling 2026-10-19): tira's side
+
+The factory's gate scripts write the tira event as part of every state transition, in the
+order guard → emit → apply, fail-closed (`emit-or-halt`). The factory side (the `tira send`
+calls, the outage journal, and the check that no script drops its emission) is the PM's.
+This is what tira provides:
+
+**The fx: key rule** (`src/write/fxkey.ts`). A transition's event id is:
+
+```
+fx: + lowercase hex sha256( UTF-8 bytes of canonicalJson({ stream, entity, event, actor, payload }) )
+```
+
+| Field | Rule |
+|---|---|
+| `stream` | The stream the event is sent to |
+| `entity` | `{ type, id }`, plus `version` exactly when the type is versioned (brief, drop). tira refuses a versioned type without one and an unversioned type with one |
+| `event` | The table event (`DISPATCHED`). For a birth, the type's birth name: `CREATED` for brief v1, **`REVISED` for v2 and later**, `FILED`, `NAMED`, `RECORDED`, `INVOKED` |
+| `actor` | The trigger, or `null` |
+| `payload` | The payload as sent, or `{}`. With `tira send`, `key=value` pairs are strings and `--payload` keeps JSON types, so `n=1` and `--payload '{"n":1}'` are different payloads with different keys |
+
+`canonicalJson` is `JSON.stringify` with no spaces after keys are sorted at every level by
+**UTF-16 code units**, so:
+
+- strings are not ASCII-escaped (`café` stays `café`);
+- numbers are written the way JavaScript writes them: `1`, `0.1`, `1e+21`. A float that
+  holds a whole number is written `1`, never `1.0`;
+- keys sort by code unit, not code point: `😀` (U+1F600, units D83D DE00) sorts before `ﬁ`
+  (U+FB01). Python's `sort_keys=True` sorts by code point and gets this wrong; sort by
+  `k.encode("utf-16-be")` instead.
+
+The same transition always gives the same key, so a crash-retry returns `duplicate` and
+never writes a second row. tira **recomputes the key of every fx: id it is sent** and refuses,
+before anything is stored, an id that isn't its own transition's key (the error gives the
+right key). An fx: id that isn't `fx:` + 64 lowercase hex is refused the same way.
+`tira key <type> <id> [EVENT] [key=value ...]` prints the key, with the same flags as `send`
+and the same checks send can make without a log. It never opens the store. The page marks
+fx: rows **auto** in the history.
+
+Test vectors (`test/factory.test.ts` checks every line):
+
+<!-- fx-vectors -->
+```jsonl
+{"key":"fx:c0b1bc5ca1d107f2884f25c764d23a073d6357eff51e8b7d4d319381e10fb420","transition":{"stream":"factory","entity":{"type":"brief","id":"b","version":1},"event":"DISPATCHED","actor":"orchestrator","payload":{}}}
+{"key":"fx:404c3f7f6ec88759b69783852248f6d0b6a1c666525b67345dc17a43ec64f181","transition":{"stream":"factory","entity":{"type":"session","id":"s1"},"event":"NAMED","actor":null,"payload":{}}}
+{"key":"fx:cb9f7a132754bf7a0d077c6bc8e5e503595cdcb11404d80b1dcd96c55e9c87a9","transition":{"stream":"factory","entity":{"type":"brief","id":"b","version":2},"event":"REVISED","actor":"orchestrator","payload":{"supersedes":1,"blocked_by":["a"]}}}
+{"key":"fx:b6ddc9204e17def3b9022fb7a62dc9e8346c1ca0581b29d4d01e743d3d5799a7","transition":{"stream":"factory","entity":{"type":"brief","id":"b","version":1},"event":"CLAIMED","actor":"s1","payload":{"session":"s1","n":1,"x":0.1,"big":1e+21}}}
+{"key":"fx:54977adf80a5bee8740d47c90f0f62508fd9d0ca4e430457e526104ce8b60913","transition":{"stream":"factory","entity":{"type":"brief","id":"b","version":1},"event":"DENIED","actor":"orchestrator","payload":{"ﬁ":"café","😀":"b","Z":"z","a":"a"}}}
+```
+<!-- /fx-vectors -->
+
+**Refusals and overrides** (`charts/refusal.json`, `charts/override.json`):
+
+| Event | Rule |
+|---|---|
+| `refusal.recorded` | A transition refused while tira was unreachable, reconciled from the factory's journal on recovery. The refusal's **id** is the refused transition's fx: key. It names the transition (type, id, version, event), the reason and when it was journaled, and is recorded under that transition's actor (its trigger). Every factory guard checks the actor, so a transition with no actor could never have been legal and has no refusal |
+| `override.invoked` | Per incident, by an operator (the user or the orchestrator), with a reason. It lasts at most **4 hours** (`expires_at` − `invoked_at`) |
+| `override.expired` | Recorded by an operator or Mac, with `expired_at`, no earlier than `invoked_at`. A repeat is a no-op for the same people and refused for anyone else |
+
+**Reconciling an outage.** The refusal row's own event id is the key of the refusal's own
+transition (`tira key refusal <K> --actor <trigger> --payload '<the refusal payload>'`),
+never `K`. `K` is the id the refused transition needs when it is sent again once tira is
+back; reusing it for the refusal is refused at once. Reconciling twice is a duplicate.
+
+**Times** (`src/time.ts`) are strict ISO-8601 date-times with a zone: `Z` or `±hh:mm`, as in
+`2026-10-19T09:30:00Z` or `2026-10-19T15:00:00.250+05:30`. A time with no zone, an impossible
+date (`2026-02-30`) or `T24:00` is refused. tira parses them itself, so a guard gives the same
+answer in every time zone and replay can't drift.
+
+**Flags.** An override still active past `expires_at` is `overdue` (`tira state --now …`).
+One whose `expired_at` is after `expires_at` is `late`: the log records its own violation.
+`late` trusts the factory's `expired_at`, since an expiry journaled during an outage is
+recorded after the fact. Both show in `tira state` and `tira dump`, not on the page yet.
+
+Both are declared in `charts/compositions.json` and scanned with the factory composition.
+The watchdog (the divergence report) is the next step, not this one.
+
+**Calls made here, for the PM:**
+
+- A refusal is recorded under the refused transition's own actor (its trigger). There is
+  no separate "factory writer" actor, and no refusal for a transition with no actor.
+- Overrides are invoked by the user or the orchestrator; expiry is recorded by an operator
+  or Mac.
+- tira checks an fx: id's **hash**, not just its shape. The key covers only what tira is
+  sent, so tira can recompute it, and a wrong key fails at the factory's first send.
+- Times need a zone. The factory must send `Z` or an offset.
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 

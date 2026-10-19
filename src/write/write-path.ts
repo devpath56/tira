@@ -40,7 +40,8 @@ import { REJECTED, toIntent, toNewEvent, toRejectedEvent, type RejectedData } fr
 import { canonicalJson, fold, makeView } from "../fold/fold.ts";
 import { children, nextCloseFor } from "../fold/tree.ts";
 import { MACHINE_ACTOR, entityKey, type EntityRef, type EntityState } from "../fold/types.ts";
-import { DISPATCHER } from "../tables/factory.ts";
+import { DISPATCHER, FX_KEY } from "../tables/factory.ts";
+import { fxKey, transitionOf } from "./fxkey.ts";
 
 export type Command = {
   stream: string;
@@ -119,12 +120,30 @@ function checkShape(cmd: Command): void {
   }
   if (cmd.payload !== undefined && !isObj(cmd.payload)) throw new TypeError("payload must be an object");
   if (cmd.eventId !== undefined && !nonEmpty(cmd.eventId)) throw new TypeError("eventId must be a non-empty string");
+  // fx: ids are transition-embedded (B2): only the rule's exact shape may use the prefix
+  if (cmd.eventId?.startsWith("fx:") && !FX_KEY.test(cmd.eventId)) throw new TypeError("an fx: eventId must be fx: + 64 lowercase hex (see src/write/fxkey.ts)");
   if (cmd.actor !== undefined && !nonEmpty(cmd.actor)) throw new TypeError("actor must be a non-empty string");
   for (const k of ["correlationId", "causationId"] as const) {
     if (cmd[k] !== undefined && !nonEmpty(cmd[k])) throw new TypeError(`${k} must be a non-empty string`);
   }
   if (cmd.kind !== "create" && cmd.kind !== "event") throw new TypeError(`bad kind: ${String((cmd as { kind: unknown }).kind)}`);
   if (cmd.kind === "event" && !nonEmpty(cmd.event)) throw new TypeError("event required");
+}
+
+// B2: an fx: id must be its own transition's key. Checked on what the caller sent, before the
+// dispatcher relays it or anything is stored, so a mix-up (say, a refusal recorded under the
+// refused transition's key, which the real send needs later) is refused at once with the
+// expected key, instead of clashing with a later write.
+function checkFxKey(cmd: Command, registry: Registry): void {
+  if (!cmd.eventId?.startsWith("fx:")) return;
+  const want = fxKey(transitionOf(cmd, (t, v) => registry.creationName(t, v)));
+  if (cmd.eventId !== want) throw new TypeError(`${cmd.eventId} isn't this transition's fx: key (it would be ${want}; see src/write/fxkey.ts)`);
+}
+
+// Everything a command is checked for before it is queued: its shape, and its fx: key.
+export function checkCommand(cmd: Command, registry: Registry): void {
+  checkShape(cmd);
+  checkFxKey(cmd, registry);
 }
 
 // The intent a stored event recorded, for comparing a retried command with its original.
@@ -185,7 +204,10 @@ export class WritePath {
   private enqueue(cmd: Command, internal: boolean, refusal?: Refusal, stillDue?: (events: StoredEvent[]) => boolean): Promise<WriteResult> {
     let snapshot: Command;
     try {
-      checkShape(cmd);
+      // internal writes are tira's and the dispatcher's own (a relayed block keeps the caller's
+      // fx: id as its own, checked before the relay: Dispatcher.submit)
+      if (internal) checkShape(cmd);
+      else checkCommand(cmd, this.registry);
       // Evaluate the command as it was at submit(), not as it is when dequeued.
       snapshot = structuredClone(cmd);
     } catch (err) {

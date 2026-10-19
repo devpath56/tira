@@ -10,6 +10,7 @@ import { SqliteEventStore } from "../store/sqlite-store.ts";
 import type { StoredEvent } from "../store/types.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
+import { fxKey, transitionOf } from "../write/fxkey.ts";
 import type { Command, WriteResult } from "../write/write-path.ts";
 import { canonicalJson, compareCodeUnits, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey, type EntityState } from "../fold/types.ts";
@@ -23,6 +24,7 @@ export interface Step {
   parent?: string;
   actor?: string;
   payload?: Record<string, unknown>;
+  eventId?: string; // "fx": the step's own fx: key (B2, src/write/fxkey.ts); else used as given
   expect?: string; // "appended" (default) | "noop" | "rejected:<code>" | "duplicate"
   handoffs?: string[]; // receivers the dispatcher must write for this step, e.g. "H1 brief.claimable"
   label?: string;
@@ -165,9 +167,11 @@ export async function runScenario(s: Scenario, all: Map<string, Scenario>, regis
       if (!step.type || !step.id) throw new Error(`${s.id} ${where}: type and id are required`);
       const entity = { type: step.type, id: step.id, ...(step.version === undefined ? {} : { version: step.version }) };
       const payload = { ...(step.payload ?? {}), ...(step.parent ? { parent_id: step.parent } : {}) };
-      const cmd = (step.do === "create"
+      const plain = (step.do === "create"
         ? { stream, kind: "create", entity, payload, actor: step.actor ?? "isha" }
         : { stream, kind: "event", entity, event: step.event, payload, actor: step.actor ?? "isha" }) as Command;
+      const eventId = step.eventId === "fx" ? fxKey(transitionOf(plain, (t, v) => registry.creationName(t, v))) : step.eventId;
+      const cmd = { ...plain, ...(eventId ? { eventId } : {}) } as Command;
       const { result, handoffs } = await d.submit(cmd);
       const got = outcomeOf(result);
       const want = step.expect ?? "appended";

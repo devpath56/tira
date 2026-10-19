@@ -6,6 +6,7 @@
 import type { GuardFn } from "./table.ts";
 import type { EntityTypeDef } from "./registry.ts";
 import type { EntityState, StateView } from "../fold/types.ts";
+import { isIsoTime, isoMs } from "../time.ts";
 
 // Role names are literal actor ids (A15). The dispatcher is the single append process
 // for handoff receivers (N2, A9); the write path reserves its name like tira's.
@@ -14,6 +15,14 @@ export const DISPATCHER = "dispatcher";
 export const MAC = "mac";
 export const USER = "user";
 const ROLES = new Set([ORCHESTRATOR, DISPATCHER, MAC, USER, "tira"]);
+
+// Event writing (B2, ruling 2026-10-19): factory transitions emit their tira event with a
+// deterministic id, "fx:" + the sha256 of the transition (src/write/fxkey.ts), so a crash-retry
+// is a duplicate, never a second row. The fx: prefix marks transition-embedded rows.
+export const FX_KEY = /^fx:[0-9a-f]{64}$/;
+// An override lasts at most this long (ruling: per-incident, operator-invoked, 4h auto-expiry).
+export const OVERRIDE_MAX_MS = 4 * 60 * 60 * 1000;
+const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 
 // A5: only dependency blocks recover (H6); the others need a revise.
 export const BLOCK_REASONS = ["dependency", "verdict", "retries-exhausted", "defective"] as const;
@@ -66,6 +75,29 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
     if (deps === undefined) return true;
     return Array.isArray(deps) && deps.every(s) && new Set(deps).size === deps.length && !deps.includes(entity.id);
   },
+  // B2: a transition refused while tira was down, recorded on recovery from the factory's
+  // journal. Its id is the refused transition's fx: key, so reconciling twice records it once.
+  // Recorded under the refused transition's own actor (its trigger): every factory guard
+  // checks the actor, so a transition with none could never have been legal.
+  refusalWellFormed: ({ actor, payload, entity }) => {
+    const t = payload.transition;
+    return s(actor) && FX_KEY.test(entity.id) && isObj(t) && s(t.type) && s(t.id) && s(t.event) && s(payload.reason) && isIsoTime(payload.journaled_at);
+  },
+  // B2: an override is per-incident, invoked by an operator, and lasts at most 4 hours.
+  overrideInvokedByOperator: ({ actor, payload }) => {
+    if (actor !== USER && actor !== ORCHESTRATOR) return false;
+    const invoked = isoMs(payload.invoked_at);
+    const expires = isoMs(payload.expires_at);
+    if (!s(payload.incident) || !s(payload.reason) || invoked === undefined || expires === undefined) return false;
+    return expires > invoked && expires - invoked <= OVERRIDE_MAX_MS;
+  },
+  // ... and expires no earlier than it was invoked (the expiry time is the factory's word).
+  expiryRecorded: ({ actor, payload, entity }) => {
+    const at = isoMs(payload.expired_at);
+    const invoked = isoMs(entity.born?.invoked_at);
+    return (actor === USER || actor === ORCHESTRATOR || actor === MAC) && at !== undefined && invoked !== undefined && at >= invoked;
+  },
+
   // A11: a session's identity is its stable birth name, and it names itself.
   sessionNamesItself: ({ actor, entity }) => s(actor) && actor === entity.id,
   // A9: sessions file drops; a role can't (the filer is who the claim is checked against).
@@ -91,6 +123,17 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
     { type: "session", createdAs: "NAMED", createGuard: "sessionNamesItself", regions: { lifecycle: chart("session.json") } },
     // A12: one drop per brief version, enforced by identity (drop:<brief>@<version>).
     // A14: a drop for a superseded brief version is refused, so it can't satisfy dependents.
+    // B2: refusals and overrides, so the log holds what happened while tira was unreachable.
+    { type: "refusal", createdAs: "RECORDED", createGuard: "refusalWellFormed", keepBirth: true, regions: { lifecycle: chart("refusal.json") } },
+    {
+      type: "override", createdAs: "INVOKED", createGuard: "overrideInvokedByOperator", keepBirth: true, regions: { lifecycle: chart("override.json") },
+      derived: {
+        // still active past its expiry: the log records its own violation (needs `now`)
+        overdue: (o, { now }) => o.regions.lifecycle === "active" && (isoMs(now) ?? -Infinity) > (isoMs(o.born?.expires_at) ?? Infinity),
+        // expired later than it should have, by the expiry time the factory reported
+        late: (o) => o.regions.lifecycle === "expired" && (isoMs(o.context?.lifecycle?.expired_at) ?? -Infinity) > (isoMs(o.born?.expires_at) ?? Infinity),
+      },
+    },
     {
       type: "drop", versioned: true, createdAs: "FILED", createGuard: "dropFiledBySession", followsVersionsOf: "brief",
       mustExist: [{ on: "birth", type: "session", from: "actor" }], // ruling 2026-10-18: a named session files
