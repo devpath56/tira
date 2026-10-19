@@ -91,7 +91,7 @@ const MUTANTS: Mutant[] = [
   { name: "c1: discovered work without discovered_during", file: "src/fold/evaluate.ts", find: 'if (kind === "discovered" && discoveredDuring === undefined) {', replace: "if (false) {" },
   { name: "c1: node birth name ignored (node.created)", file: "src/tables/registry.ts", find: '      createdAs: "BORN",\n', replace: "" },
   { name: "c1: render drops the cursor flag", file: "src/render/html.ts", find: 'data-cursor="${r.cursor}"', replace: 'data-cursor="false"' },
-  { name: "c1: render escapes nothing", file: "src/render/html.ts", find: "const esc = (s: string) => s.replace(/[&<>\"']/g, (c) => `&#${c.charCodeAt(0)};`);", replace: "const esc = (s: string) => s;" },
+  { name: "c1: render escapes nothing", file: "src/render/html.ts", find: "const esc = (s: string) => s.replace(/[&<>\"']/g, (c) => `&#${c.codePointAt(0)};`);", replace: "const esc = (s: string) => s;" },
   { name: "c1: active looks at direct children only", file: "src/fold/tree.ts", find: "return children(e, view).some((c) => test(c) || anyDescendant(c, view, test));", replace: "return children(e, view).some((c) => test(c));" },
   { name: "c1: roots sorted by key, not birth", file: "src/fold/tree.ts", find: ".sort((a, b) => a.createdSeq - b.createdSeq);", replace: ".sort((a, b) => (a.key < b.key ? -1 : 1));" },
   { name: "c1: render never shows drained", file: "src/render/tree-view.ts", find: "drained: derived[e.key]?.drained === true,", replace: "drained: false," },
@@ -224,6 +224,10 @@ const MUTANTS: Mutant[] = [
   { name: "ruling: anyone can rename a session", file: "src/tables/factory.ts", find: "renamedByAllowed: ({ actor, entity }) => s(actor) && (actor === entity.id || actor === ORCHESTRATOR || actor === MAC),", replace: "renamedByAllowed: ({ actor }) => s(actor)," },
   { name: "runner: guarded no-ops ignore their guard", file: "src/tables/table.ts", find: "  if (pair.guard) {\n    const impl = guards[pair.guard];", replace: "  if (pair.guard && pair.outcome !== \"noop\") {\n    const impl = guards[pair.guard];" },
   { name: "identity checks never run", file: "src/fold/evaluate.ts", find: "    if (m.on !== on) continue;", replace: "    continue;" },
+  // SonarCloud gate fixes (2026-10-19)
+  { name: "region-scan: any path accepted", file: "docs/tools/region-scan.py", find: "    if not full.startswith(base + os.sep):\n", replace: "    if False:\n" },
+  { name: "region-scan: a path that only starts like the repo accepted", file: "docs/tools/region-scan.py", find: "    if not full.startswith(base + os.sep):\n", replace: "    if not full.startswith(base):\n" },
+  { name: "store: throws escape the promise", file: "src/store/sqlite-store.ts", find: "const settled = <T>(work: () => T): Promise<T> => new Promise<T>((resolve) => resolve(work()));", replace: "const settled = <T>(work: () => T): Promise<T> => Promise.resolve(work());" },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
@@ -234,13 +238,13 @@ const MUTANTS: Mutant[] = [
 
 function scratchCopy(): string {
   const dir = mkdtempSync(join(tmpdir(), "tira-mutant-"));
-  for (const p of ["src", "test", "charts", "scenarios", "scripts", "package.json", "tsconfig.json"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
+  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "package.json", "tsconfig.json"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   return dir;
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan"].map((n) => `test/${n}.test.ts`);
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8" });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
   return r.status ?? 1;

@@ -20,12 +20,25 @@ Usage:
   region-scan.py --all charts/*.json [--handoff-pairs pairs.json] [--log-decisions decisions.jsonl]
 """
 import json
+import os
 import sys
+
+
+def inside_cwd(p):
+    """A path from the command line, resolved, and refused unless it is inside the current
+    directory: the scan only reads the repo's charts and pairs files, and appends to its own
+    log. Exits 2 on a path that escapes (`..`, an absolute path elsewhere, a symlink out)."""
+    base = os.path.realpath(os.getcwd())
+    full = os.path.realpath(os.path.join(base, p))
+    if not full.startswith(base + os.sep):
+        print(f"region-scan.py: {p} is outside {base}", file=sys.stderr)
+        sys.exit(2)
+    return full
 
 def load_charts(paths):
     charts = []
     for p in paths:
-        with open(p) as f:
+        with open(inside_cwd(p)) as f:
             d = json.load(f)
         st = d.get("states", [])
         charts.append({
@@ -82,11 +95,11 @@ def main():
         a = args[i]
         if a == "--handoff-pairs":
             i += 1
-            with open(args[i]) as f:
+            with open(inside_cwd(args[i])) as f:
                 handoff_pairs = set(json.load(f).get("allowed_shared_events", []))
         elif a == "--log-decisions":
             i += 1
-            log_path = args[i]
+            log_path = inside_cwd(args[i])
         elif not a.startswith("--") and a not in flag_vals:
             positional.append(a)
         i += 1
