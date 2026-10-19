@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 107 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 116 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -174,11 +174,25 @@ t render --out d1.html && t tree && t dump --hash                     # both par
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
-same state, drain flag, cursor (◆) and active task (●); its header hash equals
-`t dump --hash`; and its `data-node-count` equals `data-fold-tree-count`. Parents tira
-closed carry a quiet "closed by tira" mark, and every task's "history" opens its event
-trail (tira's lines say why and which move they cite). Closing the branch took no clicks
-beyond moving on to `table`.
+same state, drain flag, cursor (◆ next) and active task (the glowing node). The ✓ chip at
+the top right shows the hash; hover it, or open **Activity**, for the full value, which
+must equal `t dump --hash`. The page's `data-node-count` must equal
+`data-fold-tree-count`. Parents tira closed carry a leaf. Click any task to open its
+drawer and history; tira's entries say why and which move they cite. Closing the branch
+took no clicks beyond moving on to `table`.
+
+The page has three views:
+
+| View | Shows |
+|---|---|
+| **Tree** (default) | Branches grow from the root; tasks are buds (to do), glowing (in progress), blossoms (done) or fallen petals (dropped). A dashed ring means tira closes it when you move on; a leaf means tira closed it |
+| **Board** | Jira-style status columns of the work (the leaf tasks), with a strip of parents and their "children closed" meters above |
+| **Activity** | The whole log, newest first, including rejected commands, anomalies, other entities and the full hash |
+
+Words live in the drawers, not on the canvas. The page follows the system's light or dark
+setting. It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
+are CSS), so the bytes still depend only on the fold. Motion is CSS only and turns off
+for reduced motion and for print.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
 from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
