@@ -34,7 +34,7 @@ export const unverifiedDeps = (view: StateView, b: EntityState) => depsOf(b).fil
 export const frontier = (view: StateView): EntityState[] =>
   view.all("brief")
     .filter((b) => !isSuperseded(view, b) && b.regions.gate === "gated" && b.regions.claim === "unclaimed" && b.regions.outcome === "open" && unverifiedDeps(view, b).length === 0)
-    .sort((a, b) => a.createdSeq - b.createdSeq);
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
 export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,

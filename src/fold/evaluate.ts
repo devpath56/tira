@@ -227,7 +227,7 @@ function evaluateBirth(
     return reject("denied", `${table?.id}: ${parentState} + ${t.childEvent} (re-open ${parent.key} first)`);
   }
   const depth = parent.tree.depth + 1;
-  if (depth >= t.maxDepth) return reject("tree-cap", `depth ${depth} exceeds the cap of ${t.maxDepth}`);
+  if (depth > t.maxDepth) return reject("tree-cap", `depth ${depth} exceeds the cap of ${t.maxDepth}`);
   if (parent.tree.children.length >= t.maxChildren) {
     return reject("tree-cap", `${parent.key} already has ${t.maxChildren} children (the cap)`);
   }
