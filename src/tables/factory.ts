@@ -34,7 +34,7 @@ export const unverifiedDeps = (view: StateView, b: EntityState) => depsOf(b).fil
 export const frontier = (view: StateView): EntityState[] =>
   view.all("brief")
     .filter((b) => !isSuperseded(view, b) && b.regions.gate === "gated" && b.regions.claim === "unclaimed" && b.regions.outcome === "open" && unverifiedDeps(view, b).length === 0)
-    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    .sort((a, b) => a.createdSeq - b.createdSeq);
 
 export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,
@@ -55,7 +55,7 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
   renamedByAllowed: ({ actor, entity }) => s(actor) && (actor === entity.id || actor === ORCHESTRATOR || actor === MAC),
   // Incident 2: the filer never verifies its own drop, and nothing verifies without a PASS.
   orchestratorVerifiesPass: ({ actor, payload, entity }) =>
-    actor === ORCHESTRATOR && actor !== entity.createdBy && payload.done_test_result === "PASS",
+    actor === ORCHESTRATOR && actor !== entity.createdBy && String(payload.done_test_result).toUpperCase() === "PASS",
 
   // Births (core change C2).
   // A3/A4: the orchestrator creates a brief version; blocked_by is fixed per version.
