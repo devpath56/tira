@@ -246,12 +246,24 @@ LEGEND = """
 </div>"""
 
 
+def _block_label(lines):
+    """The label of the first `caption: {` block: the first `label: "..."` line that the
+    block's closing `}` follows directly. A line scan, so no input can make it backtrack."""
+    starts = [i for i, line in enumerate(lines) if re.match(r"caption: \{\s*$", line)]
+    for start in starts:
+        for i in range(start + 1, len(lines) - 1):
+            m = re.match(r"\s*label: \"(.*)\"$", lines[i])
+            if m and lines[i + 1].startswith("}"):
+                return m.group(1)
+    return None
+
+
 def parse_captions(path):
     text = open(path, encoding="utf-8").read()
     caps = []
-    m = re.search(r"^caption: \{\s*\n(?:.*\n)*?\s*label: \"(.*)\"\n\}", text, re.M)
-    if m:
-        caps.append(m.group(1))
+    first = _block_label(text.split("\n"))
+    if first is not None:
+        caps.append(first)
     for m in re.finditer(r"^\s*caption\.label: \"(.*)\"$", text, re.M):
         caps.append(m.group(1))
     return [html.escape(c).replace("\\n", "<br>") for c in caps]

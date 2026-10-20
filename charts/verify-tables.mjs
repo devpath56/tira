@@ -10,6 +10,12 @@ import { ideaLifecycle } from "./idea-lifecycle.mjs";
 import { loadTable, run as runJson } from "./transition-runner.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+// Code-unit order, so the comparison never depends on the machine's locale.
+const byCodeUnit = (a, b) => {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+};
 let pass = 0,
   fail = 0;
 const check = (n, c) => {
@@ -49,7 +55,7 @@ function diff(name, chart, jsonFile, pathTo) {
   // structural criteria (q01)
   check(`${name}: pair count = ${states.length * events.length}`, table.pairs.length === states.length * events.length);
   check(`${name}: states identical`, JSON.stringify(table.states) === JSON.stringify(states));
-  check(`${name}: events identical`, JSON.stringify([...table.events].sort()) === JSON.stringify([...events].sort()));
+  check(`${name}: events identical`, JSON.stringify([...table.events].sort(byCodeUnit)) === JSON.stringify([...events].sort(byCodeUnit)));
   check(`${name}: initial identical`, table.initial === chart.initial);
   for (const p of table.pairs)
     if (p.guard) check(`${name}: guard ${p.guard} registered`, p.guard in table.guards);

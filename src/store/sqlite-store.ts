@@ -65,6 +65,15 @@ export interface SqliteStoreOptions {
   pollIntervalMs?: number; // subscribe() poll loop; default 50
 }
 
+// Run `work` now and settle a promise with its result: a throw becomes a rejection.
+function settled<T>(work: () => T): Promise<T> {
+  try {
+    return Promise.resolve(work());
+  } catch (err) {
+    return Promise.reject(err as Error);
+  }
+}
+
 export class SqliteEventStore implements EventStore {
   readonly db: DatabaseSync;
   private readonly pollIntervalMs: number;
@@ -91,7 +100,13 @@ export class SqliteEventStore implements EventStore {
     return r?.rev ?? -1;
   }
 
-  async append(stream: string, events: NewEvent[], opts: AppendOptions = {}): Promise<AppendResult> {
+  // The store is synchronous underneath; these return promises for the interface (§3).
+  // `settled` runs the work now, as an async method would, and turns a throw into a rejection.
+  append(stream: string, events: NewEvent[], opts: AppendOptions = {}): Promise<AppendResult> {
+    return settled(() => this.appendNow(stream, events, opts));
+  }
+
+  private appendNow(stream: string, events: NewEvent[], opts: AppendOptions): AppendResult {
     if (stream === ALL) throw new Error(`cannot append to ${ALL}`);
     for (const e of events) {
       if (e.eventId !== undefined && (typeof e.eventId !== "string" || e.eventId.length === 0)) {
@@ -153,7 +168,11 @@ export class SqliteEventStore implements EventStore {
     }
   }
 
-  async readStream(stream: string, opts: ReadStreamOptions = {}): Promise<StoredEvent[]> {
+  readStream(stream: string, opts: ReadStreamOptions = {}): Promise<StoredEvent[]> {
+    return settled(() => this.readStreamNow(stream, opts));
+  }
+
+  private readStreamNow(stream: string, opts: ReadStreamOptions): StoredEvent[] {
     const backwards = opts.direction === "backwards";
     const from = opts.fromRevision ?? (backwards ? Number.MAX_SAFE_INTEGER : 0);
     const rows = this.db
@@ -165,7 +184,11 @@ export class SqliteEventStore implements EventStore {
     return rows.map(toStored);
   }
 
-  async readAll(opts: ReadAllOptions = {}): Promise<StoredEvent[]> {
+  readAll(opts: ReadAllOptions = {}): Promise<StoredEvent[]> {
+    return settled(() => this.readAllNow(opts));
+  }
+
+  private readAllNow(opts: ReadAllOptions): StoredEvent[] {
     const rows = this.db
       .prepare("SELECT * FROM events WHERE seq >= ? ORDER BY seq ASC LIMIT ?")
       .all(opts.fromSeq ?? 1, opts.limit ?? -1) as unknown as Row[];
