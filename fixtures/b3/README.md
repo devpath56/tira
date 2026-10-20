@@ -4,7 +4,25 @@ The blind test of the divergence report (build-plan §7, decided 2026-10-19): Is
 Devansh writes the differ blind, the machine scores.
 
 **M = 8.** Eight divergences are planted between the two files below. The manifest (which
-event ids, which kinds) is held outside the repo until your verdicts are locked.
+event ids, which kinds) was held outside the repo until the verdicts were locked; it is
+published now, with the generator and the scorer.
+
+## Round 1 result (2026-10-20)
+
+**47/47: all 8 planted caught, 0 false positives on the 39 clean transitions.** The bar is met.
+
+| File | What it is |
+|---|---|
+| `verdicts.json` | Devansh's locked verdicts, one per event id (47), with the precedence and the one judgment he documented before the reveal |
+| `manifest.json` / `manifest.md` | The key: every event id and its expected verdict; the md lists the 8 plants and how each was made |
+| `scripts/b3-fixture.ts` | The generator: rebuilds both files and the manifest |
+| `scripts/b3-score.ts` | The scorer: `node scripts/b3-score.ts` (defaults to this folder); exits 1 if the bar isn't met |
+
+Detector: Muse (assistant), blind, from this README and the two files only. Precedence when
+several verdicts could apply: DUPLICATE, then WRONG-ENTITY, then ORPHAN, then MISSING /
+PHANTOM, then OK (it gives the same expected verdicts as the table below on this fixture). His
+documented judgment: a `command.rejected` entry is not an applied event, so the refused
+dispatch of a brief born in neither file is ORPHAN, which is what the manifest says.
 
 | File | Side | Format |
 |---|---|---|
@@ -65,10 +83,15 @@ fx: `eventId` in tira's log.
 | `DUPLICATE` | The same event id appears more than once in one file |
 | `ORPHAN` | A transition on an entity that was never born |
 
-Lock your verdicts (post them on the ticket), then the manifest is revealed and scoring is
+Verdicts are locked first (posted on the ticket), then the manifest is revealed and scoring is
 mechanical: each event id's verdict against the manifest's. The bar: all 8 caught, 0 false
 positives on the clean transitions.
 
-`test/fixture-b3.test.ts` checks the files keep this format and that tira's side is a
-genuine log (it folds with no anomalies, and every fx: id is its own transition's key). It
-says nothing about the plants.
+`test/fixture-b3.test.ts` checks the files keep this format, that tira's side is a genuine
+log (it folds with no anomalies, and every fx: id is its own transition's key), that the
+manifest has exactly one entry per event id in either file, and that the generator rebuilds
+both files and the manifest (apart from what tira stamps itself: store times and its
+dispatcher's own handoff ids). It re-scores round 1, and checks the scorer can't pass a
+plant called by the wrong kind or a clean transition called anything but OK.
+
+A next round needs a fresh fixture: this one's key is public.

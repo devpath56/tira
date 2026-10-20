@@ -1,0 +1,257 @@
+{
+  "stream": "factory-b3",
+  "M": 8,
+  "counts": {
+    "OK": 39,
+    "MISSING": 2,
+    "DUPLICATE": 1,
+    "ORPHAN": 1,
+    "WRONG-ENTITY": 2,
+    "PHANTOM": 2
+  },
+  "verdicts": [
+    {
+      "event_id": "fx:6add99293e1005136742faa532ecfdd52206fc323e7c3b8ebfef4c4ec8a10fc6",
+      "verdict": "OK",
+      "transition": "NAMED session:s1 by s1"
+    },
+    {
+      "event_id": "fx:da198ca5a374ce0f229cc22376120cbf2d15f79180fbdc3baee06dcf1f5c5cec",
+      "verdict": "OK",
+      "transition": "NAMED session:s2 by s2"
+    },
+    {
+      "event_id": "fx:01b36033991059e27c82ead604198c2daa5191e461fdeb1623eabf2d118b389a",
+      "verdict": "OK",
+      "transition": "NAMED session:s3 by s3"
+    },
+    {
+      "event_id": "fx:db81a5ca66a8395d0472b19b239ff1858e484f2bf135b40d7bc3c567f3079d71",
+      "verdict": "OK",
+      "transition": "NAMED session:s4 by s4"
+    },
+    {
+      "event_id": "fx:0a54f7ba8d84396f589674406c2978aceadcd88e25c704f3531c8d2c6a767534",
+      "verdict": "OK",
+      "transition": "NAMED session:s5 by s5"
+    },
+    {
+      "event_id": "fx:d60286a7b4d2fd94b36e048f65ca4d8fdbb1e2ca6ab727421ea2ac52828ae701",
+      "verdict": "OK",
+      "transition": "NAMED session:s6 by s6"
+    },
+    {
+      "event_id": "fx:50e5e86c8fa7ee5458eea6258f485f356203d240f1584f65055ed4bf30ab0a14",
+      "verdict": "MISSING",
+      "transition": "NAMED session:s7 by s7",
+      "how": "the factory committed s7's naming; tira never received it"
+    },
+    {
+      "event_id": "fx:b17c37f47655a4c793de486b1d5457b43d7673f6bb40210e0eff981f04877a65",
+      "verdict": "OK",
+      "transition": "CREATED brief:b1@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:d9f27c1e74fc8b3b45ab5c67d2b9e8a14e020d05fa529b8729415c71f958f1e0",
+      "verdict": "OK",
+      "transition": "CREATED brief:b2@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:84bc0f4f062477c907a76f589ddf8666e39c2d31e64e27953bf3f9fa105dd3b7",
+      "verdict": "OK",
+      "transition": "CREATED brief:b3@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:4f753e9ef1311a65785a94269ccc9738b5528728fdd0ccf895f7ebdb9bf70630",
+      "verdict": "OK",
+      "transition": "CREATED brief:b4@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:b59d97856d807e3e9cd75ed8aa0f51ec175bd4d0e42ec30f7ed5bf0b6b90173b",
+      "verdict": "OK",
+      "transition": "CREATED brief:b6@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:ea74e4b6be23ef620b476bf8b5a33623cd1492db4df6372a04911a903081e334",
+      "verdict": "OK",
+      "transition": "CREATED brief:b7@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:6ca203ec23570fbe6353fd6dfde6d7502e3088b4021555c9b8012900212ded7d",
+      "verdict": "OK",
+      "transition": "CREATED brief:b8@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:405283e34f9c887c82c1ad9c0cccd6da9c6516552f21a5197a702cc9920832eb",
+      "verdict": "OK",
+      "transition": "CREATED brief:b9@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:de9dcb0730a8ea0da3047259159d84e434bc232030c2d6ce13242b8f38e1720f",
+      "verdict": "OK",
+      "transition": "CREATED brief:b10@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:1de0e8123574cd80f77815649cfcceb24086c4de0fbfa1d77ecdbb05766f1895",
+      "verdict": "OK",
+      "transition": "CREATED brief:b5@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:b760f871d85fb30efcc57978cd89cbd9f118a30425ed45efde8926543e955359",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b1@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:6c5a85536bb560b369c2d56be0fa97573e55704d516e7637fb52ca43938da545",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b2@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:1d06c86ad35f6ec5636c9e234f124c0ef16c753155b7ae79effa175a94af612a",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b3@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:ee4b11286010171e015ce8523147b665c92d619a9b7ffcd58c2aff54f6c4fa4f",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b4@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:6157a4902236879aaa840ff1d58f68010b5005eb6c9c7c4bd1e2fbf2824908db",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b5@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:f8e10fa40a669c913d52055f0dddd3d8b2f6b14f918fd651fa4b18eed56adc9b",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b7@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:55689111967886f4f1b6e61fc190c47620460e2ea749567541d3f193b456ed9f",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b8@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:98d24ba3c96c185433680bdf7f891daa8832cbad0dcfa4d32d0d9700e2e54f86",
+      "verdict": "OK",
+      "transition": "DISPATCHED brief:b9@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:dd3ced3c37938068e54a73080ad48e65e48090408e4db8450c5c6ef236388b4c",
+      "verdict": "DUPLICATE",
+      "transition": "DISPATCHED brief:b6@1 by orchestrator",
+      "how": "the factory journaled b6's dispatch twice (a retry); tira deduplicated it"
+    },
+    {
+      "event_id": "fx:d66354df4cbb8a6c0f3528239622f8960ee54ef0b5b11143bb1dff3d930e4ae5",
+      "verdict": "MISSING",
+      "transition": "DISPATCHED brief:b10@1 by orchestrator",
+      "how": "the factory committed b10's dispatch; tira never received it"
+    },
+    {
+      "event_id": "fx:ab0d3a84a70c5924823cfa42bc250e2ffa3926ce27a6eb951cb588b57dda55f7",
+      "verdict": "ORPHAN",
+      "transition": "DISPATCHED brief:zz@1 by orchestrator",
+      "how": "a dispatch of brief zz, which was never created: tira refused it (unknown-entity); the factory recorded it as committed"
+    },
+    {
+      "event_id": "fx:2ee2c10601f8b415cbd31067fcaafbe2b046f4e5776c75c6d8868eafbb3951a9",
+      "verdict": "OK",
+      "transition": "CLAIMED brief:b1@1 by s1"
+    },
+    {
+      "event_id": "fx:91da3c027a92ac102ea53b0e18193b4e2b2516769cd7481b2cced2e20f78896f",
+      "verdict": "OK",
+      "transition": "CLAIMED brief:b2@1 by s2"
+    },
+    {
+      "event_id": "fx:c4772452e29f5c16e20887c42349a9e71261ba300d85058bbede6e426dcc62cc",
+      "verdict": "OK",
+      "transition": "CLAIMED brief:b3@1 by s3"
+    },
+    {
+      "event_id": "fx:0e040d14b59857699215300ffb5512d5e360b06e4717121826f9ba46d9450e8f",
+      "verdict": "WRONG-ENTITY",
+      "transition": "CLAIMED brief:b4@1 by s4",
+      "how": "tira has s4's claim on b4@1; the factory's record of the same event_id names b7@1"
+    },
+    {
+      "event_id": "fx:abf6714a74dc7b9a59e42106656b7469b1dbbb1ab7529de670f99b918bccc610",
+      "verdict": "OK",
+      "transition": "CLAIMED brief:b6@1 by s6"
+    },
+    {
+      "event_id": "fx:7f663f03435e1090044acdf0dec0638578f9e91556e0b4ce9e333d480f8733fe",
+      "verdict": "PHANTOM",
+      "transition": "CLAIMED brief:b7@1 by s5",
+      "how": "tira has s5's claim on b7; the factory has no record of it (rolled back after emitting)"
+    },
+    {
+      "event_id": "fx:778812476355ec4773d72d33e2e7ba6c9e0d63d5cc9356888cc94100895abf19",
+      "verdict": "OK",
+      "transition": "FILED drop:b1@1 by s1"
+    },
+    {
+      "event_id": "fx:f5a5acc33dd31c9865d4e84625e7441cdba0d6711baff28dbf6d1505a9d6824e",
+      "verdict": "OK",
+      "transition": "FILED drop:b2@1 by s2"
+    },
+    {
+      "event_id": "fx:7d449a22d31a072065043cda22727519832d860e9903b1338db9c30875aa1bee",
+      "verdict": "WRONG-ENTITY",
+      "transition": "FILED drop:b3@1 by s3",
+      "how": "tira has s3's drop for b3@1; the factory's record of the same event_id names b9@1"
+    },
+    {
+      "event_id": "fx:8615d24f09e20493f321084588aafe79308e1f289a786559b6e2bc422cf78538",
+      "verdict": "OK",
+      "transition": "FILED drop:b6@1 by s6"
+    },
+    {
+      "event_id": "fx:0d5a6c17ca64c8ad6a5982c31ccd18ace929faf2c7b23d7cfa76c2e1a50f4831",
+      "verdict": "OK",
+      "transition": "VERIFIED drop:b1@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:ab686203b60ee0929d4f1e805029fc1f222a73e49f4f715069239bc4b9f9ab8f",
+      "verdict": "OK",
+      "transition": "VERIFIED drop:b2@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:47160aef755f1b8746bc306ba6e909528e1e5a19ade274eb11416b60a2cabf5f",
+      "verdict": "OK",
+      "transition": "REJECTED drop:b6@1 by orchestrator"
+    },
+    {
+      "event_id": "fx:0a662dd1b0a7d49a66eeb9c8bd8791be0826acf24010264374daf6e7888e0224",
+      "verdict": "OK",
+      "transition": "CLAIMED brief:b5@1 by s5"
+    },
+    {
+      "event_id": "fx:487ed835b27c411dcdbc13383003d58a6a32aaa764ef16c0c9ce625573483806",
+      "verdict": "OK",
+      "transition": "RENAMED session:s4 by s4"
+    },
+    {
+      "event_id": "fx:b44d8235446f0a3608ef4b21826ce1ae65ddc1e2f8f9d73f936f73849b873725",
+      "verdict": "PHANTOM",
+      "transition": "RENAMED session:s2 by s2",
+      "how": "tira has s2's rename; the factory has no record of it"
+    },
+    {
+      "event_id": "fx:2481d49b0e7e8fe276b02c78ffb94a42b5f0398176bf9be1784257334b306c00",
+      "verdict": "OK",
+      "transition": "ENDED session:s1 by s1"
+    },
+    {
+      "event_id": "fx:75f0c169d36dc6dce82af3c8c3a72aa6c0b2d92dd55f5feacaf16fa4f84d4100",
+      "verdict": "OK",
+      "transition": "REVISED brief:b8@2 by orchestrator"
+    },
+    {
+      "event_id": "fx:644614845800d0713bb9c840ae3149998b0e9594058afad9a0e57adcc8d6cbe7",
+      "verdict": "OK",
+      "transition": "DENIED brief:b10@1 by orchestrator"
+    }
+  ]
+}
