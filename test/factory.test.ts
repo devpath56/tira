@@ -99,7 +99,7 @@ test("a brief end to end: dispatch → claimable (H1), claim, drop → evidence 
   const log = await t.log();
   const id = (type: string) => log.find((e) => e.type === type)?.eventId;
   const corr = (type: string) => log.find((e) => e.type === type)?.metadata;
-  assert.deepEqual(corr("brief.claimable"), { actor: "dispatcher", correlationId: id("brief.dispatched"), causationId: id("brief.dispatched") });
+  assert.deepEqual(corr("brief.claimable"), { actor: "dispatcher", correlationId: id("brief.dispatched"), causationId: id("brief.dispatched"), era: 2 }); // decided under today's rules era
   assert.equal(corr("brief.evidence")?.correlationId, id("drop.filed"));
   assert.equal(corr("brief.drop-written")?.correlationId, id("drop.filed"));
   assert.equal(corr("brief.verified-done")?.correlationId, id("drop.verified"));

@@ -13,6 +13,18 @@ import type { EntityState, StateView } from "../fold/types.ts";
 import { TABLE_EVENT_NAME } from "../fold/events.ts";
 import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
 
+// Versioned rules (ruling 2026-10-20). Every event the write path appends carries the rules
+// era it was decided under (metadata.era), and replay applies that era's tables: a rule
+// change governs new writes only and never rewrites history. Events with no era were
+// written before the marker existed, so they are the legacy era.
+//   era 1 (legacy): the tables as first built.
+//   era 2 (2026-10-20): a node's BLOCK needs a reason, and BLOCK's and REOPEN's reason must
+//   have text, not only spaces (hasReasonText).
+// A rule change adds an era: freeze the old table under charts/eras/, list it under the
+// type's `eras` for every earlier era it governed, and bump RULES_ERA.
+export const LEGACY_ERA = 1;
+export const RULES_ERA = 2;
+
 // Derived predicates see the entity (incl. lastRecordedAt / lastActor), the rest of
 // its stream, and the caller's clock and vantage. Nothing else — so they stay pure.
 export interface DeriveContext {
@@ -69,6 +81,9 @@ export interface EntityTypeDef {
   tree?: TreeConfig;
   // Derived predicates (like drain or liveness): computed by the fold, never stored.
   derived?: Record<string, (entity: EntityState, ctx: DeriveContext) => unknown>;
+  // Earlier eras' tables, by era then region, where the rules have changed since (versioned
+  // rules). An era not listed here ran under today's tables.
+  eras?: Record<number, Record<string, Table>>;
 }
 
 export interface Resolved {
@@ -81,6 +96,7 @@ export class Registry {
   private readonly defs = new Map<string, EntityTypeDef>();
   private readonly byEvent = new Map<string, Map<string, { region: string; table: Table }>>();
   readonly guards: Record<string, GuardFn>;
+  readonly era = RULES_ERA; // the era new writes are decided under
 
   constructor(guards: Record<string, GuardFn> = {}) {
     this.guards = { ...DEFAULT_GUARDS, ...guards };
@@ -127,10 +143,31 @@ export class Registry {
         if (!(g in this.guards)) throw new Error(`table ${table.id}: guard ${g} has no implementation`);
       }
     }
+    for (const [era, regions] of Object.entries(def.eras ?? {})) this.checkEra(def, Number(era), regions);
     if (def.tree) this.checkTree(def, def.tree);
     this.defs.set(def.type, def);
     this.byEvent.set(def.type, events);
     return this;
+  }
+
+  // An earlier era's table may change which pairs are allowed and guarded, never the shape:
+  // same states, events and initial state, so an entity can cross eras mid-life.
+  private checkEra(def: EntityTypeDef, era: number, regions: Record<string, Table>): void {
+    const fail = (msg: string): never => {
+      throw new Error(`entity type ${def.type}: era ${era} ${msg}`);
+    };
+    if (!Number.isInteger(era) || era < LEGACY_ERA || era >= this.era) fail(`must be an earlier era (${LEGACY_ERA}..${this.era - 1})`);
+    for (const [region, table] of Object.entries(regions)) {
+      const now = def.regions[region];
+      if (!now) return fail(`region ${region} is not a region of this type`);
+      const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+      if (table.initial !== now.initial || !same(table.states, now.states) || !same(table.events, now.events)) {
+        fail(`table ${table.id} must keep today's states, events and initial state`);
+      }
+      for (const g of Object.keys(table.guards)) {
+        if (!(g in this.guards)) fail(`table ${table.id}: guard ${g} has no implementation`);
+      }
+    }
   }
 
   private checkTree(def: EntityTypeDef, t: TreeConfig): void {
@@ -167,10 +204,16 @@ export class Registry {
     return def?.createdAs ?? "CREATED";
   }
 
-  resolve(type: string, event: string): Resolved | undefined {
+  // The table an event runs under: its era's (default: today's, for new writes).
+  resolve(type: string, event: string, era: number = this.era): Resolved | undefined {
     const def = this.defs.get(type);
     const hit = this.byEvent.get(type)?.get(event);
-    return def && hit ? { def, ...hit } : undefined;
+    return def && hit ? { def, region: hit.region, table: this.tableFor(def, hit.region, era) } : undefined;
+  }
+
+  // A region's table in an era: the era's own where the rules have changed since, else today's.
+  tableFor(def: EntityTypeDef, region: string, era: number = this.era): Table {
+    return def.eras?.[era]?.[region] ?? (def.regions[region] as Table);
   }
 
   initialRegions(def: EntityTypeDef): Record<string, string> {
@@ -188,6 +231,7 @@ export function defaultRegistry(): Registry {
       type: "node",
       createdAs: "BORN",
       regions: { lifecycle: chart("node-lifecycle.json") },
+      eras: { [LEGACY_ERA]: { lifecycle: chart("eras/node-lifecycle.era1.json") } },
       tree: {
         region: "lifecycle",
         terminal: ["done", "cancelled"],

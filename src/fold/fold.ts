@@ -6,7 +6,8 @@
 // => byte-identical output (see canonicalJson). Works on one stream or on readAll():
 // entities are namespaced by stream, so the same id in two trees never collides.
 import type { StoredEvent } from "../store/types.ts";
-import type { Registry } from "../tables/registry.ts";
+import { LEGACY_ERA, type Registry } from "../tables/registry.ts";
+import { show } from "../text.ts";
 import { evaluate, type Evaluation, type Intent, type RejectCode } from "./evaluate.ts";
 import { REJECTED, toIntent, type EventData, type RejectedData } from "./events.ts";
 import { MACHINE_ACTOR, entityKey, type EntityState, type StateView } from "./types.ts";
@@ -94,6 +95,10 @@ function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creation
   );
 }
 
+// An event's rules era (versioned rules): what the write path stamped, or legacy if nothing.
+export const eraOf = (e: StoredEvent): number => (e.metadata?.era === undefined ? LEGACY_ERA : (e.metadata.era as number));
+const knownEra = (era: unknown, registry: Registry): boolean => Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.era;
+
 export function fold(events: readonly StoredEvent[], registry: Registry, opts: FoldOptions = {}): FoldResult {
   return foldDetailed(events, registry, opts).result;
 }
@@ -171,7 +176,7 @@ export function foldDetailed(
     const after = new Map(entities);
     after.set(ev.key, { ...(entities.get(ev.key) as EntityState), regions: ev.regions });
     const ci = toIntent(done, creationNameOf);
-    return ci !== undefined && evaluate(registry, after, makeView(after), ci).ok;
+    return ci !== undefined && evaluate(registry, after, makeView(after), ci, { era: eraOf(done) }).ok;
   };
   for (const e of ordered) {
     if (opts.upToSeq !== undefined && e.seq > opts.upToSeq) break;
@@ -211,9 +216,16 @@ export function foldDetailed(
         : due(view, idx).some((r) => entityKey(r.target) === k && r.kind === intent.kind && (intent.kind === "create" || r.event === intent.event) && r.correlationId === e.metadata.correlationId);
       if (!called) anomaly(`the dispatcher wrote ${e.type} on ${k}, but no handoff rule called for it`);
     }
+    // Versioned rules: each event is judged by the rules of the era it was written in.
+    const era = eraOf(e);
+    if (!knownEra(era, registry)) {
+      anomaly(`written under rules era ${show(e.metadata?.era)}, which this build doesn't know (eras ${LEGACY_ERA} to ${registry.era})`);
+      if (!byTira) settle(e, undefined);
+      continue;
+    }
     const paired = pairedStarts.get(e.seq);
-    let ev = evaluate(registry, entities, view, intent, { pairedClose: paired !== undefined });
-    if (ev.ok && paired && !completes(paired, entities, ev)) ev = evaluate(registry, entities, view, intent);
+    let ev = evaluate(registry, entities, view, intent, { pairedClose: paired !== undefined, era });
+    if (ev.ok && paired && !completes(paired, entities, ev)) ev = evaluate(registry, entities, view, intent, { era });
     if (!ev.ok) {
       anomaly(`${ev.code}: ${ev.detail}`);
       if (!byTira) settle(e, undefined);

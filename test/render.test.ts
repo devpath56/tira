@@ -264,12 +264,12 @@ test("needs attention lists the task being worked on, not the parents in progres
   assert.deepEqual([...html.matchAll(/data-attention-key="([^"]*)"/g)].map((m) => m[1]), ["node:a"]);
 });
 
-test("needs attention reads only what replay applied: a refused block can't date or explain the row; a finished active parent says tira closes it", async () => {
+test("needs attention reads only what replay applied: a refused block can't date or explain the row; a finished active parent leaves the count and stays in the tree", async () => {
   const store = new SqliteEventStore();
   const registry = defaultRegistry();
   const wp = new WritePath(store, registry);
   for (const id of ["a", "b"]) await wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha" });
-  await store.append(S, [{ type: "node.block", data: { entity: { id: "b" }, payload: {} }, metadata: { actor: "old-writer" } }]); // seq 3: no reason, refused on replay
+  await store.append(S, [{ type: "node.block", data: { entity: { id: "b" }, payload: {} }, metadata: { actor: "old-writer", era: 2 } }]); // seq 3: no reason under today's rules, refused on replay
   await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "b" }, event: "BLOCK", actor: "isha", payload: { reason: "the real why" } }); // seq 4
   const events = await store.readStream(S);
   const r = fold(events, registry);
@@ -286,7 +286,11 @@ test("needs attention reads only what replay applied: a refused block can't date
     await w2.submit({ stream: S, kind: "event", entity: { type: "node", id }, event: ev, actor: "isha", payload });
   }
   const e2 = await s2.readStream(S);
-  assert.match(renderHtml(fold(e2, registry), S, "h", e2), /data-attention-key="node:p"[^]*?<span class="since">finished: tira closes it when you move on<\/span>/);
+  const h2 = renderHtml(fold(e2, registry), S, "h", e2);
+  // ruling 2026-10-20: not a decision for a person, so not in the count; tira closes it when work moves on
+  assert.doesNotMatch(h2, /data-attention-key="node:p"/);
+  assert.match(h2, /<section class="attention calm" data-attention-count="0"/);
+  assert.match(h2, /data-key="node:p"[^>]*data-active="true"[^>]*data-awaiting-close="true"/); // still in the tree, waiting for tira
 });
 
 test("needs attention escapes reasons, labels a blank one, and is left out of a stream with no tree", async () => {
@@ -296,8 +300,11 @@ test("needs attention escapes reasons, labels a blank one, and is left out of a 
   await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "x" }, actor: "isha" });
   await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "y" }, actor: "isha" });
   await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "x" }, event: "BLOCK", actor: "isha", payload: { reason: `<img src=x onerror="alert(1)">` } });
-  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "y" }, event: "BLOCK", actor: "isha", payload: { reason: "   " } });
+  // a blank reason can't be written any more (2026-10-20), but a legacy log can hold one
+  assert.equal((await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "y" }, event: "BLOCK", actor: "isha", payload: { reason: "   " } })).status, "rejected");
+  await store.append(S, [{ type: "node.block", data: { entity: { id: "y" }, payload: { reason: "   " } }, metadata: { actor: "isha" } }]);
   const events = await store.readStream(S);
+  assert.deepEqual(fold(events, registry).anomalies, []); // legacy era: a blank reason was a reason then
   const html = renderHtml(fold(events, registry), S, "h", events);
   assert.ok(!html.includes("<img"));
   assert.ok(html.includes('data-reason="&#60;img src=x onerror=&#34;alert(1)&#34;&#62;"'));

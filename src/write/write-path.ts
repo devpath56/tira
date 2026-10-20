@@ -276,8 +276,11 @@ export class WritePath {
       const { batch, result } = refusal
         ? { batch: [toRejectedEvent(intent, refusal.code, refusal.detail, moveId)], result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, ...refusal }) }
         : this.decide(intent, events, internal, moveId, meta);
+      // Versioned rules: every event carries the era it was decided under, so replay can judge
+      // it by the same rules after they change.
+      const stamped = batch.map((x) => ({ ...x, metadata: { ...x.metadata, era: this.registry.era } }));
       try {
-        const { seqs } = await this.store.append(cmd.stream, batch, { expectedRevision });
+        const { seqs } = await this.store.append(cmd.stream, stamped, { expectedRevision });
         return result(seqs);
       } catch (err) {
         if (err instanceof WrongExpectedRevisionError && attempt < this.maxAttempts) {

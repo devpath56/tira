@@ -76,21 +76,33 @@ test("T1 invalid transitions: rejected, state unchanged, rejection logged", asyn
   assert.deepEqual(s.rejections.map((r) => r.code), ["denied", "denied", "denied"]);
 });
 
-test("blocking a task needs a reason, like re-opening one (2026-10-20): bare blocks are refused and logged", async () => {
+test("blocking a task needs a reason with text, like re-opening one (2026-10-20): bare and blank blocks are refused and logged", async () => {
   const t = setup();
   await t.create();
   assert.equal(status(await t.send("BLOCK")), "rejected:guard-failed"); // from unstarted
-  assert.equal(status(await t.send("BLOCK", { reason: "  " })), "appended:transition"); // the rule takes whitespace (as for REOPEN); the page shows "no reason given"
-  await t.send("UNBLOCK");
-  assert.equal(await t.lifecycle(), "in_progress");
+  assert.equal(status(await t.send("BLOCK", { reason: "  " })), "rejected:guard-failed"); // only spaces is no reason: the gate and the page agree
+  assert.equal(await t.lifecycle(), "unstarted");
+  await t.send("START");
   assert.equal(status(await t.send("BLOCK")), "rejected:guard-failed"); // from in progress
   assert.equal(status(await t.send("BLOCK", { reason: 42 })), "rejected:guard-failed");
+  assert.equal(status(await t.send("BLOCK", { reason: "\t\n " })), "rejected:guard-failed");
   assert.equal(await t.lifecycle(), "in_progress");
-  assert.equal(status(await t.send("BLOCK", { reason: "waiting on the token decision" })), "appended:transition");
+  assert.equal(status(await t.send("BLOCK", { reason: "  waiting on the token decision " })), "appended:transition"); // padding is fine: it has text
   assert.equal(await t.lifecycle(), "blocked");
   assert.equal(status(await t.send("BLOCK")), "appended:noop"); // already blocked: nothing changes, no reason needed
   const s = await t.state();
-  assert.deepEqual(s.rejections.map((r) => [r.code, r.intent.kind === "event" ? r.intent.event : "create"]), [["guard-failed", "BLOCK"], ["guard-failed", "BLOCK"], ["guard-failed", "BLOCK"]]);
+  assert.deepEqual(s.rejections.map((r) => [r.code, r.intent.kind === "event" ? r.intent.event : "create"]), Array(5).fill(["guard-failed", "BLOCK"]));
+  assert.match(s.rejections[1]?.detail ?? "", /needs hasReasonText/);
+});
+
+test("re-opening needs a reason with text too (2026-10-20): a blank REOPEN is refused", async () => {
+  const t = setup();
+  await t.create();
+  await t.send("START");
+  await t.send("COMPLETE", { evidenceRef: "e" });
+  assert.equal(status(await t.send("REOPEN", { reason: "   " })), "rejected:guard-failed");
+  assert.equal(await t.lifecycle(), "done");
+  assert.equal(status(await t.send("REOPEN", { reason: "wrong palette file" })), "appended:transition");
 });
 
 test("T3 idempotent no-ops: duplicate START/COMPLETE/BLOCK/CANCEL are logged, state changes once", async () => {

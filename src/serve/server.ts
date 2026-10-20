@@ -24,11 +24,12 @@ import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
 
 // The verbs a page may send, with the field each needs (the node table's guards).
-export const PAGE_VERBS: Record<string, { label: string; field?: { name: string; label: string } }> = {
+export const PAGE_VERBS: Record<string, { label: string; field?: { name: string; label: string; text?: boolean } }> = {
   START: { label: "Start" },
   UNBLOCK: { label: "Unblock" },
   COMPLETE: { label: "Complete", field: { name: "evidenceRef", label: "Evidence (a file, link or note anyone can re-check)" } },
-  BLOCK: { label: "Block", field: { name: "reason", label: "Why is it blocked?" } },
+  // a reason must have text, not only spaces: the page asks what the gate checks (2026-10-20)
+  BLOCK: { label: "Block", field: { name: "reason", label: "Why is it blocked?", text: true } },
 };
 
 export const CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -125,7 +126,7 @@ function confirmPage(p: Packet, opts: { type: string; id: string; event: string;
   const form = p.ok
     ? `<form method="post" action="/act" class="you-decide" aria-label="What you control" data-you>`
       + `<input type="hidden" name="token" value="${esc(opts.token)}"><input type="hidden" name="type" value="${esc(opts.type)}"><input type="hidden" name="id" value="${esc(opts.id)}"><input type="hidden" name="event" value="${esc(opts.event)}"><input type="hidden" name="seen" value="${p.seen}">`
-      + (field ? `<label>${esc(field.label)}<input name="${field.name}" aria-label="${esc(field.label)}" required autocomplete="off" autofocus></label>` : "")
+      + (field ? `<label>${esc(field.label)}<input name="${field.name}" aria-label="${esc(field.label)}" required${field.text ? ` pattern=".*\\S.*" title="Write the reason (not only spaces)"` : ""} autocomplete="off" autofocus></label>` : "")
       + `<button class="act" type="submit">${esc(verb?.label ?? opts.event)} ${esc(opts.id)}</button> <a class="how" href="/">Cancel</a></form>`
     : `<p><a class="how" href="/">Back to the page</a></p>`;
   return `<!doctype html>

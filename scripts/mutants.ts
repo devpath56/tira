@@ -115,8 +115,8 @@ const MUTANTS: Mutant[] = [
   { name: "tira: a failed close keeps its start", file: "src/write/write-path.ts", find: "        overlay.set(parent.key, before);\n        records.push(refused);", replace: "        records.push(...mine, refused);" },
   { name: "tira: a failed close isn't logged", file: "src/write/write-path.ts", find: "        overlay.set(parent.key, before);\n        records.push(refused);", replace: "        overlay.set(parent.key, before);" },
   { name: "tira: keeps retrying after a failed close", file: "src/write/write-path.ts", find: "        records.push(refused);\n        break;", replace: "        records.push(refused);\n        continue;" },
-  { name: "replay: no paired treatment for tira's start", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined }", replace: "{}" },
-  { name: "replay: any tira start treated as paired", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined }", replace: "{ pairedClose: e.metadata?.actor === MACHINE_ACTOR }" },
+  { name: "replay: no paired treatment for tira's start", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era }", replace: "{ era }" },
+  { name: "replay: any tira start treated as paired", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era }", replace: "{ pairedClose: e.metadata?.actor === MACHINE_ACTOR, era }" },
   { name: "replay: pair check ignores the node", file: "src/fold/fold.ts", find: "    entityKey(ia.entity) === entityKey(ib.entity) &&\n", replace: "" },
   { name: "replay: pair check accepts someone else's complete", file: "src/fold/fold.ts", find: "if (a.metadata?.actor !== MACHINE_ACTOR || b.metadata?.actor !== MACHINE_ACTOR) return false;", replace: "if (a.metadata?.actor !== MACHINE_ACTOR) return false;" },
   { name: "replay: pair kept when its complete fails", file: "src/fold/fold.ts", find: "if (ev.ok && paired && !completes(paired, entities, ev))", replace: "if (false)" },
@@ -320,7 +320,7 @@ const MUTANTS: Mutant[] = [
   { name: "page: attention ignores the reason", file: "src/render/html.ts", find: "    const why = whyLabel(blocked.get(n.row.key)?.reason);", replace: "    const why = \"blocked\";" },
   { name: "page: attention dates a block by its last no-op", file: "src/render/html.ts", find: "  if (ev === \"block\" && !blocked.has(key)) blocked.set(key,", replace: "  if (ev === \"block\") blocked.set(key," },
   { name: "page: attention rows carry data-key", file: "src/render/html.ts", find: "`<li class=\"att-row\" data-attention-key=\"${esc(n.row.key)}\"", replace: "`<li class=\"att-row\" data-key=\"${esc(n.row.key)}\"" },
-  { name: "page: attention shows parents in progress", file: "src/render/html.ts", find: "  const busy = nodes.filter((n) => n.row.active);", replace: "  const busy = nodes.filter((n) => n.row.state === \"in_progress\");" },
+  { name: "page: attention shows parents in progress", file: "src/render/html.ts", find: "  const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "  const busy = nodes.filter((n) => n.row.state === \"in_progress\" && !n.row.awaitingClose);" },
   { name: "page: the theme switch starts on Dark", file: "src/render/html.ts", find: "id=\"th-${t}\"${t === \"system\" ? \" checked\" : \"\"}", replace: "id=\"th-${t}\"${t === \"dark\" ? \" checked\" : \"\"}" },
   { name: "page: a picked Light doesn't beat a dark system", file: "src/render/html.ts", find: ":root:has(#th-light:checked){color-scheme:light;${LIGHT}}", replace: ":root:has(#th-light:checked){color-scheme:light}" },
   { name: "page: a picked Dark prints dark", file: "src/render/html.ts", find: "@media screen{:root:has(#th-dark:checked)", replace: "@media all{:root:has(#th-dark:checked)" },
@@ -339,8 +339,18 @@ const MUTANTS: Mutant[] = [
   { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "    flashes.delete(rk); // a result shows once", replace: "" },
   { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
   { name: "page: refused blocks start a stretch", file: "src/render/html.ts", find: "    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;", replace: "    if (e.stream !== stream || e.type === REJECTED) continue;" },
-  { name: "page: a finished active parent looks like work", file: "src/render/html.ts", find: "  if (r.awaitingClose) return \"finished: tira closes it when you move on\";", replace: "" },
   { name: "palette: separators must match exactly", file: "src/serve/rank.mjs", find: String.raw`const norm = (s) => s.toLowerCase().replace(/[\s_.\-/›]+/g, " ").trim();`, replace: "const norm = (s) => s.toLowerCase();" },
+  // Versioned rules and the reason check (rulings 2026-10-20)
+  { name: "eras: replay judges every event by today's rules", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era });", replace: "{ pairedClose: paired !== undefined, era: registry.era });" },
+  { name: "eras: new writes aren't stamped", file: "src/write/write-path.ts", find: "metadata: { ...x.metadata, era: this.registry.era }", replace: "metadata: { ...x.metadata }" },
+  { name: "eras: the legacy era runs today's task table", file: "src/tables/registry.ts", find: "      eras: { [LEGACY_ERA]: { lifecycle: chart(\"eras/node-lifecycle.era1.json\") } },\n", replace: "" },
+  { name: "eras: an unknown era replays anyway", file: "src/fold/fold.ts", find: "Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.era;", replace: "true;" },
+  { name: "eras: a future era is accepted", file: "src/fold/fold.ts", find: "(era as number) <= registry.era;", replace: "(era as number) <= registry.era + 1;" },
+  { name: "eras: an earlier era may change the shape", file: "src/tables/registry.ts", find: "if (table.initial !== now.initial || !same(table.states, now.states) || !same(table.events, now.events)) {", replace: "if (false) {" },
+  { name: "reason check: only spaces counts as a reason", file: "src/tables/table.ts", find: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.trim().length > 0,", replace: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.length > 0," },
+  { name: "page: a finished active parent needs you", file: "src/render/html.ts", find: "const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "const busy = nodes.filter((n) => n.row.active);" },
+  { name: "page: legacy events unlabelled", file: "src/render/html.ts", find: "legacy: e.metadata.era === undefined, key: `${type}:${d.entity.id}`", replace: "legacy: false, key: `${type}:${d.entity.id}`" },
+  { name: "serve: the reason field takes only spaces", file: "src/serve/server.ts", find: "required${field.text ? ` pattern=", replace: "required${false ? ` pattern=" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -359,7 +369,7 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));

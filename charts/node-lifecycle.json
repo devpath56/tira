@@ -29,7 +29,7 @@
       "event": "BLOCK",
       "outcome": "transition",
       "to": "blocked",
-      "guard": "hasReason"
+      "guard": "hasReasonText"
     },
     {
       "from": "unstarted",
@@ -67,7 +67,7 @@
       "event": "BLOCK",
       "outcome": "transition",
       "to": "blocked",
-      "guard": "hasReason"
+      "guard": "hasReasonText"
     },
     {
       "from": "in_progress",
@@ -169,7 +169,7 @@
       "event": "REOPEN",
       "outcome": "transition",
       "to": "in_progress",
-      "guard": "hasReason"
+      "guard": "hasReasonText"
     },
     {
       "from": "cancelled",
@@ -208,7 +208,7 @@
     }
   ],
   "guards": {
-    "hasReason": "event.reason is a non-empty string",
+    "hasReasonText": "event.reason has text (not only spaces)",
     "hasEvidenceRef": "event.evidenceRef is a non-empty string"
   }
 }

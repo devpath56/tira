@@ -28,6 +28,10 @@ async function pages(): Promise<string> {
   await send("b", "START");
   const te = await store.readStream("t");
   const staticPage = renderHtml(fold(te, registry), "t", "h", te);
+  // a log from before the rules version marker, for the legacy tag
+  await store.append("old", [{ type: "node.born", data: { entity: { id: "o" }, payload: {} }, metadata: { actor: "isha" } }]);
+  const oe = await store.readStream("old");
+  const legacyPage = renderHtml(fold(oe, registry), "old", "h", oe);
   // a factory stream, for the lanes
   await d.submit({ stream: "f", kind: "create", entity: { type: "session", id: "s1" }, actor: "s1" });
   await d.submit({ stream: "f", kind: "create", entity: { type: "brief", id: "x", version: 1 }, actor: "orchestrator" });
@@ -54,7 +58,7 @@ async function pages(): Promise<string> {
     const acted = await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&evidenceRef=e&seen=${seen}`);
     const flash = (await get("GET", acted.location ?? "/")).body;
     const script = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
-    return [staticPage, lanes, live, confirm, flash, script].join("\n");
+    return [staticPage, legacyPage, lanes, live, confirm, flash, script].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }

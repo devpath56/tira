@@ -95,6 +95,12 @@ check("evidenced COMPLETE -> done", run(["START", { type: "COMPLETE", evidenceRe
 check("bare REOPEN stays done", run(["START", { type: "COMPLETE", evidenceRef: "e" }, "REOPEN"]) === "done");
 check("reasoned REOPEN -> in_progress",
   run(["START", { type: "COMPLETE", evidenceRef: "e" }, { type: "REOPEN", reason: "r" }]) === "in_progress");
+// a reason of only spaces is no reason (rules era 2, ruling 2026-10-20)
+check("blank-reason BLOCK stays in_progress", run(["START", { type: "BLOCK", reason: "  " }]) === "in_progress");
+check("blank-reason BLOCK stays unstarted", run([{ type: "BLOCK", reason: "\t \n" }]) === "unstarted");
+check("blank-reason REOPEN stays done",
+  run(["START", { type: "COMPLETE", evidenceRef: "e" }, { type: "REOPEN", reason: " " }]) === "done");
+check("padded reason still counts", run(["START", { type: "BLOCK", reason: "  r  " }]) === "blocked");
 
 // 7. ADD_CHILD on done denied (stays done)
 check("ADD_CHILD on done denied",

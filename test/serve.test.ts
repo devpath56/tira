@@ -146,6 +146,10 @@ test("confirm pages say what will happen before anything is written: the move, t
     await s.send("font", "CANCEL");
     await s.send("colors", "UNBLOCK");
     await s.send("colors", "COMPLETE", { evidenceRef: "palette.png" });
+    // the block form asks for what the gate checks: a reason with text, not only spaces (2026-10-20)
+    const block = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK");
+    assert.match(block.body, /<input name="reason" aria-label="Why is it blocked\?" required pattern="\.\*\\S\.\*" title="Write the reason \(not only spaces\)" autocomplete="off" autofocus>/);
+    assert.match(block.body, /The rule: event\.reason has text \(not only spaces\)\./);
     const start = await s.http("GET", "/confirm?type=node&id=table&event=START");
     assert.match(start.body, /<li>tira will first close improve_visual \(every child is done or cancelled\), citing this move\.<\/li>/);
     assert.match(start.body, /<li>Recorded as isha, in tasktree-dash, after tira&#39;s closes\.<\/li>/);

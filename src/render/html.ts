@@ -208,7 +208,7 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .ev-what{font-family:var(--mono);font-size:12px}.ev.refused .ev-what{color:var(--block)}
 .ev-who{font-weight:600;font-size:13px}.ev-task{font-weight:600;font-size:13px;color:var(--fg)}
 .ev-seq{font-family:var(--mono);font-size:11px;color:var(--dim)}
-.auto{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid currentColor;border-radius:4px;padding:0 5px}
+.auto,.legacy{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid currentColor;border-radius:4px;padding:0 5px}.legacy{color:var(--warn)}
 .ev-detail{color:var(--mut);font-size:12.5px;overflow-wrap:anywhere;margin-top:1px}
 .log{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:4px 16px 16px;box-shadow:var(--shadow)}
 .log h3{font-size:11px;color:var(--dim);font-weight:650;letter-spacing:.06em;text-transform:uppercase;margin:16px 0 4px}
@@ -344,6 +344,7 @@ function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
 interface TrailEntry {
   seq: number;
   auto: boolean; // written by a factory transition (fx: event id, B2)
+  legacy: boolean; // written before the rules version marker: replayed under the legacy era's rules
   key: string; // the task it touched
   what: string; // the event type, or "rejected EVENT"
   actor: string;
@@ -382,7 +383,7 @@ function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<st
       const d = e.data as unknown as RejectedData;
       if (!d?.intent?.entity) continue;
       const what = d.intent.kind === "create" ? "create" : d.intent.event;
-      add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), key: `${d.intent.entity.type}:${d.intent.entity.id}`, what: `rejected ${what}`, actor, detail: `${d.reason?.code}: ${d.reason?.detail}`, refused: true });
+      add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), legacy: e.metadata.era === undefined, key: `${d.intent.entity.type}:${d.intent.entity.id}`, what: `rejected ${what}`, actor, detail: `${d.reason?.code}: ${d.reason?.detail}`, refused: true });
       continue;
     }
     const d = e.data as unknown as EventData;
@@ -390,7 +391,7 @@ function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<st
     const type = e.type.slice(0, e.type.indexOf("."));
     const p = d.payload ?? {};
     const detail = actor === MACHINE_ACTOR ? `${String(p.reason ?? "")} · ${cites(p.trigger)}` : describe(p);
-    add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), key: `${type}:${d.entity.id}`, what: e.type, actor, detail, refused: false });
+    add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), legacy: e.metadata.era === undefined, key: `${type}:${d.entity.id}`, what: e.type, actor, detail, refused: false });
   }
   return { byKey, all };
 }
@@ -400,7 +401,7 @@ function entryHtml(x: TrailEntry, withTask = false): string {
   const avatar = tira ? ICON.auto : x.refused ? "!" : esc(([...x.actor][0] ?? "?").toUpperCase());
   const cls = ["ev", tira ? "tira" : "", x.refused ? "refused" : ""].filter(Boolean).join(" ");
   return `<li class="${cls}"><span class="av" aria-hidden="true">${avatar}</span><div class="ev-body">`
-    + `<div class="ev-head">${withTask ? `<span class="ev-task">${esc(bare(x.key))}</span>` : ""}<span class="ev-what">${esc(x.what)}</span><span class="ev-who">${esc(x.actor)}</span>${x.auto ? `<span class="auto" title="written by a factory transition (fx: id)">auto</span>` : ""}<span class="ev-seq">seq ${x.seq}</span></div>`
+    + `<div class="ev-head">${withTask ? `<span class="ev-task">${esc(bare(x.key))}</span>` : ""}<span class="ev-what">${esc(x.what)}</span><span class="ev-who">${esc(x.actor)}</span>${x.auto ? `<span class="auto" title="written by a factory transition (fx: id)">auto</span>` : ""}${x.legacy ? `<span class="legacy" title="written before the rules version marker: replayed under the legacy rules">legacy</span>` : ""}<span class="ev-seq">seq ${x.seq}</span></div>`
     + (x.detail ? `<div class="ev-detail">${esc(x.detail)}</div>` : "")
     + `</div></li>`;
 }
@@ -481,22 +482,21 @@ const confirmHref = (r: TreeRow, event: string) => `/confirm?type=${encodeURICom
 
 const actLink = (r: TreeRow, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
 
-function sinceText(r: TreeRow, since: Since | undefined, verb: string): string {
-  if (r.awaitingClose) return "finished: tira closes it when you move on";
-  return since === undefined ? "" : verb + " at seq " + since.seq;
-}
+const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
 function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean): string {
   const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label)).join("");
   const acts = live ? `<span class="acts">${links}</span>` : "";
   return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
-    + `<span class="path">${path}</span><span class="since">${sinceText(n.row, since, verb)}</span>${acts}</li>`;
+    + `<span class="path">${path}</span><span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
 }
 
 function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>): string {
   const { blocked, working } = attentionSince(events, stream, skip);
   const stuck = nodes.filter((n) => n.row.state === "blocked");
-  const busy = nodes.filter((n) => n.row.active);
+  // A finished active parent (every child closed) is no decision for a person: tira closes it
+  // when work moves on, so it stays in the tree, not in the count (ruling 2026-10-20).
+  const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);
   const count = stuck.length + busy.length;
   if (count === 0) {
     const next = nodes.find((n) => n.row.cursor);
@@ -622,7 +622,9 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
   const alert = anomalies.length === 0 ? "" : `<div class="alert">${anomalies.length} ${anomalies.length === 1 ? "anomaly" : "anomalies"} on replay</div><ol class="feed">${anomalies.map((a) => `<li class="ev refused"><span class="av" aria-hidden="true">!</span><div class="ev-body"><div class="ev-head"><span class="ev-what">${esc(a.type)}</span><span class="ev-seq">seq ${a.seq}</span></div><div class="ev-detail">${esc(a.problem)}</div></div></li>`).join("")}</ol>`;
   const feed = all.length === 0 ? `<p class="empty">No events yet</p>` : `<ol class="feed">${[...all].reverse().map((x) => entryHtml(x, true)).join("")}</ol>`;
   const othersHtml = others.length === 0 ? "" : `<h3>Other entities</h3><div class="others">${others.map((e) => `<span class="chip">${esc(e.key)} · ${esc(Object.values(e.regions).join(" "))}</span>`).join("")}</div>`;
-  return `<div class="log">${alert}<h3>Newest first · ${all.length} events · ${rejections.length} rejected</h3>${feed}${othersHtml}<h3>Dump hash</h3><div class="hash">sha256:${esc(dumpHash)}</div></div>`;
+  const legacy = all.filter((x) => x.legacy).length;
+  const legacyNote = legacy === 0 ? "" : ` · ${legacy} legacy`;
+  return `<div class="log">${alert}<h3>Newest first · ${all.length} events · ${rejections.length} rejected${legacyNote}</h3>${feed}${othersHtml}<h3>Dump hash</h3><div class="hash">sha256:${esc(dumpHash)}</div></div>`;
 }
 
 // ---------- page ----------

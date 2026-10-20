@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 295 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 304 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -101,6 +101,7 @@ table is unchanged (same 5-state lifecycle); tira's own closes go through it lik
 | One close, two events | tira's start + complete of an unstarted parent count as one close: the one-active rule judges the end state (the parent is done again one event later), so tira can close a finished branch while you're working elsewhere. Every other rule still applies. A close is all or nothing: if any step is refused, tira keeps none of that parent's events, logs the refusal under its own name, and your move still lands |
 | Protected name | `tira` is reserved in anything that reads as it (casing, spacing, invisible characters, accents, common lookalike letters): any caller claiming it is refused (`reserved-actor`) and logged without the name; a retry with the same eventId is a duplicate. A payload can't claim it either — only the caller's actor counts |
 | Replay check | On replay, every tira event must cite a move, and the very next non-tira event must be that move, into in progress, outside the parent tira closed — or it's an anomaly. tira may only write to finished parents. Its start gets the one-close treatment only when its complete (same node, same move) is the very next event and lands. "Closed by tira" follows whoever made the last real change, so a repeat click on a done parent doesn't wipe it |
+| **Versioned rules** | Every event the write path appends carries the rules era it was decided under (`metadata.era`), and replay judges each event by its own era's tables, so a rule change governs new writes only and never rewrites history (ruling 2026-10-20). Events with no era were written before the marker: the legacy era (1), replayed under the tables as first built (`charts/eras/`, frozen and hash-pinned); the page tags them "legacy". An era this build doesn't know is an anomaly. **Era 2** (2026-10-20): BLOCK needs a reason, and BLOCK's and REOPEN's reason must have text, not only spaces |
 | Cursor | First **open leaf** in depth-first order (birth order). Closed branches aren't entered; blocked parents are (their children stay workable); parents waiting for tira are skipped, so the cursor never parks on a parent waiting for a click |
 | Last branch | The final branch of a tree has nowhere to move on to, so it stays open until someone closes it or starts work elsewhere (decided with Isha 2026-10-18) |
 
@@ -186,7 +187,8 @@ took no clicks beyond moving on to `table`.
 
 Above the views, **Needs attention** lists what is blocked, grouped by the reason it was
 blocked with, and what is being worked on, each one click from its drawer. Blocking a task
-needs a reason, like re-opening one (2026-10-20). A quiet "How to read this page" link (and
+needs a reason with text, like re-opening one (2026-10-20). A finished active parent isn't
+counted: there is nothing to decide, and tira closes it when work moves on. A quiet "How to read this page" link (and
 the hash chip, now labelled "fingerprint") opens a three-paragraph guide inline.
 
 The page has four views:
@@ -224,8 +226,10 @@ under a done or cancelled parent, while a drained-but-open parent accepts one an
 - Several roots in one stream are allowed (D0 uses three); depth counts the root as 1.
 - Discovered work must carry an actor ("who found it"); `kind` must be planned or
   discovered when given; `parent_id` is rejected on types without a tree.
-- Replay re-checks births and gates, so changing the caps or gate rules later would turn
-  older history into anomalies. Treat them as part of the log's contract.
+- A change to a transition table ships as a new rules era (versioned rules, above): older
+  history replays under the rules it was written under. The tree's caps and gates live in
+  code, not tables, and aren't versioned yet: changing those later would still turn older
+  history into anomalies. Treat them as part of the log's contract.
 - Entities are created by an explicit `create` command at their tables' initial states;
   an `eventId` names one command (same id + same content = duplicate, same id + different
   content = error); malformed commands throw rather than being logged; `eventId` is globally
@@ -489,13 +493,13 @@ Calls made here, for the PM:
   blocks stay one click" has no case among the task verbs: each can trigger tira's closes or
   needs a field.
 - **"Stale" is left out of needs attention** until the time limit is ruled.
-- **Blocking needs a reason** (Isha's call): the task table changed (`BLOCK` guarded by
-  `hasReason` from unstarted and in progress), so it needs your re-sign. A repeat block on a
-  blocked task stays a no-op. **Older logs change:** replay re-checks every event, so a bare
-  block in a log written before this is now an anomaly, and the tasks after it can fold
-  differently. No shared log exists yet; local demo stores (`*.db`) should be rebuilt from
-  the README scripts. The rule counts whitespace as a reason, as it does for REOPEN; the page
-  shows such a block as "no reason given". Should the rule trim?
+- **Blocking needs a reason with text** (Isha's call; re-signed 2026-10-20): `BLOCK` is
+  guarded from unstarted and in progress, and BLOCK's and REOPEN's reason must have text, not
+  only spaces (`hasReasonText`); the page's block form asks the same. A repeat block on a
+  blocked task stays a no-op. **Older logs don't change:** this is rules era 2, and a log
+  written before it replays under the legacy era, so its bare blocks fold as they did,
+  tagged "legacy" on the page. The idea table's reject reasons still use the legacy check
+  (`hasReason`: any non-empty string), since the ruling named BLOCK and REOPEN.
 - **Referrer-Policy is `same-origin`**, not `no-referrer`: under `no-referrer` browsers send
   `Origin: null` on form posts, and the page's own writes were refused (found by submitting
   a real form).

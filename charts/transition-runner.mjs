@@ -10,6 +10,7 @@ export const loadTable = (path) => JSON.parse(readFileSync(path, "utf8"));
 const GUARD_IMPLS = {
   hasEvidenceRef: (ev) => typeof ev.evidenceRef === "string" && ev.evidenceRef.length > 0,
   hasReason: (ev) => typeof ev.reason === "string" && ev.reason.length > 0,
+  hasReasonText: (ev) => typeof ev.reason === "string" && ev.reason.trim().length > 0,
 };
 
 export function step(table, from, event) {
