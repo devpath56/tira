@@ -22,7 +22,7 @@ async function scriptedLog() {
     await wp.submit({ stream: STREAM, kind: "create", entity: node(id), actor: "isha" });
   }
   await go("colors", "START"); // seq 4
-  await go("colors", "BLOCK"); // seq 5
+  await go("colors", "BLOCK", { reason: "waiting on the token decision" }); // seq 5
   await go("colors", "UNBLOCK"); // seq 6
   await go("colors", "COMPLETE", { evidenceRef: "palette.png" }); // seq 7
   await go("loading_state", "START"); // seq 8
@@ -154,7 +154,7 @@ test("a malformed command.rejected record is an anomaly, not a crash; writes con
   assert.equal(r.anomalies.length, 1);
   assert.equal(r.anomalies[0]?.problem, "malformed command.rejected record");
   const wp = new WritePath(store, registry);
-  const next = await wp.submit({ stream: STREAM, kind: "event", entity: { type: "node", id: "loading_state" }, event: "BLOCK" });
+  const next = await wp.submit({ stream: STREAM, kind: "event", entity: { type: "node", id: "loading_state" }, event: "BLOCK", payload: { reason: "waiting" } });
   assert.equal(next.status, "appended");
 });
 

@@ -83,10 +83,10 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.deepEqual(stops.filter((m) => m[1]?.split(" ").includes("closed")).map((m) => m[2]), ["node:colors", "node:font", "node:tokens"]);
   assert.match(html, /data-key="node:table"[^>]*><svg class="train"/);
   // one short line per parent: closed / total and what's left
-  assert.match(html, /aria-label="dashboard: 1 of 3 closed"[^]*?<span class="ct">1\/3 <span class="left">· 2 left<\/span>/);
-  assert.match(html, /aria-label="improve_visual: 3 of 3 closed"[^]*?<span class="ct">3\/3 <span class="left">· all closed<\/span>/);
-  assert.match(html, /aria-label="improve_visual">[^]*?3\/3 children closed/);
-  assert.match(html, /aria-label="dashboard">[^]*?1\/3 children closed/);
+  assert.match(html, /aria-label="dashboard: 1 of 3 closed"[^]*?<span class="ct">1 of 3 tasks closed <span class="left">· 2 left<\/span>/);
+  assert.match(html, /aria-label="improve_visual: 3 of 3 closed"[^]*?<span class="ct">3 of 3 tasks closed <span class="left">· all closed<\/span>/);
+  assert.match(html, /aria-label="improve_visual">[^]*?3 of 3 children closed/);
+  assert.match(html, /aria-label="dashboard">[^]*?1 of 3 children closed/);
   // the board holds the work (leaves), with the cursor's card marked next; parents sit in the strip above
   assert.equal((html.match(/<a class="card[ "]/g) ?? []).length, 5);
   assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
@@ -208,6 +208,124 @@ test("render is deterministic and escapes every user-supplied string", async () 
   const html = renderHtml(fold(log, registry), stream, "h", log);
   assert.ok(!html.includes("<script"), "an unescaped <script> reached the page");
   assert.ok(html.split("&#60;script&#62;").length - 1 >= 6); // id, title, stream, found-during, rejection, idea
+});
+
+test("needs attention: blocked work grouped by its reason, then the active task, each one click from its drawer", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const born = (id: string, parent_id?: string) => wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha", payload: parent_id ? { parent_id } : {} });
+  const send = (id: string, event: string, payload: Record<string, unknown> = {}) => wp.submit({ stream: S, kind: "event", entity: { type: "node", id }, event, actor: "isha", payload });
+  await born("app");
+  for (const id of ["a", "b", "c", "d", "e"]) await born(id, "app");
+  await send("b", "BLOCK", { reason: "waiting on tokens" }); // seq 7
+  await send("a", "BLOCK", { reason: "waiting on review" }); // seq 8
+  await send("c", "BLOCK", { reason: "waiting on tokens" }); // seq 9
+  await send("c", "BLOCK"); // a no-op: still blocked since seq 9
+  await send("d", "START"); // seq 11
+  await send("d", "START"); // a no-op
+  const events = await store.readStream(S);
+  const html = renderHtml(fold(events, registry), S, "h", events);
+  const section = /<section class="attention"[^>]*>(.*?)<\/section>/s.exec(html)?.[0] ?? "";
+  assert.match(section, /data-attention-count="4"/);
+  assert.match(section, /<h2><b>4<\/b>need you<\/h2><span class="sum">3 blocked · 1 in progress<\/span>/);
+  // groups in the order they first blocked; rows in the order they blocked
+  assert.deepEqual([...section.matchAll(/data-reason="([^"]*)"/g)].map((m) => m[1]), ["waiting on tokens", "waiting on review"]);
+  assert.deepEqual([...section.matchAll(/data-attention-key="([^"]*)"/g)].map((m) => m[1]), ["node:b", "node:c", "node:a", "node:d"]);
+  assert.deepEqual([...section.matchAll(/<span class="since">([^<]*)</g)].map((m) => m[1]), ["blocked at seq 7", "blocked at seq 9", "blocked at seq 8", "started at seq 11"]);
+  // each row opens the same drawer as the task on the train
+  for (const id of ["a", "b", "c", "d"]) {
+    const href = new RegExp(`<a class="name" href="#(t\\d+)">${id}</a>`).exec(section)?.[1];
+    assert.ok(href && html.includes(`<section class="drawer" id="${href}" aria-label="${id}">`), id);
+  }
+  // the M1 count is untouched: rows carry data-attention-key, never data-key
+  assert.equal((html.match(/ data-key="/g) ?? []).length, 6);
+  assert.match(html, /#v-lanes:checked~main \.attention,#v-log:checked~main \.attention\{display:none\}/);
+  // unblocked and finished, nothing needs you; the next task is offered instead
+  await send("d", "COMPLETE", { evidenceRef: "e" }); // one active task at a time: finish d before unblocking a
+  await send("a", "UNBLOCK");
+  await send("a", "COMPLETE", { evidenceRef: "e" });
+  for (const id of ["b", "c"]) await send(id, "CANCEL");
+  const later = await store.readStream(S);
+  const calm = renderHtml(fold(later, registry), S, "h", later);
+  assert.match(calm, /<section class="attention calm" data-attention-count="0"[^>]*><div class="att-head"><h2>Nothing needs you<\/h2><\/div><p>Next up: <a href="#t\d+">e<\/a><\/p><\/section>/);
+});
+
+test("needs attention lists the task being worked on, not the parents in progress above it", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "app" }, actor: "isha" });
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "a" }, actor: "isha", payload: { parent_id: "app" } });
+  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "app" }, event: "START", actor: "isha" });
+  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "a" }, event: "START", actor: "isha" });
+  const events = await store.readStream(S);
+  const html = renderHtml(fold(events, registry), S, "h", events);
+  assert.deepEqual([...html.matchAll(/data-attention-key="([^"]*)"/g)].map((m) => m[1]), ["node:a"]);
+});
+
+test("needs attention reads only what replay applied: a refused block can't date or explain the row; a finished active parent says tira closes it", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  for (const id of ["a", "b"]) await wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha" });
+  await store.append(S, [{ type: "node.block", data: { entity: { id: "b" }, payload: {} }, metadata: { actor: "old-writer" } }]); // seq 3: no reason, refused on replay
+  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "b" }, event: "BLOCK", actor: "isha", payload: { reason: "the real why" } }); // seq 4
+  const events = await store.readStream(S);
+  const r = fold(events, registry);
+  assert.equal(r.anomalies.length, 1);
+  const html = renderHtml(r, S, "h", events);
+  assert.match(html, /data-reason="the real why"/);
+  assert.match(html, /<span class="since">blocked at seq 4<\/span>/);
+  // a started parent whose children are all done: active, finished, tira closes it on your next move
+  const s2 = new SqliteEventStore();
+  const w2 = new WritePath(s2, registry);
+  await w2.submit({ stream: S, kind: "create", entity: { type: "node", id: "p" }, actor: "isha" });
+  await w2.submit({ stream: S, kind: "create", entity: { type: "node", id: "c" }, actor: "isha", payload: { parent_id: "p" } });
+  for (const [id, ev, payload] of [["p", "START", {}], ["c", "START", {}], ["c", "COMPLETE", { evidenceRef: "e" }]] as const) {
+    await w2.submit({ stream: S, kind: "event", entity: { type: "node", id }, event: ev, actor: "isha", payload });
+  }
+  const e2 = await s2.readStream(S);
+  assert.match(renderHtml(fold(e2, registry), S, "h", e2), /data-attention-key="node:p"[^]*?<span class="since">finished: tira closes it when you move on<\/span>/);
+});
+
+test("needs attention escapes reasons, labels a blank one, and is left out of a stream with no tree", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "x" }, actor: "isha" });
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "y" }, actor: "isha" });
+  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "x" }, event: "BLOCK", actor: "isha", payload: { reason: `<img src=x onerror="alert(1)">` } });
+  await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: "y" }, event: "BLOCK", actor: "isha", payload: { reason: "   " } });
+  const events = await store.readStream(S);
+  const html = renderHtml(fold(events, registry), S, "h", events);
+  assert.ok(!html.includes("<img"));
+  assert.ok(html.includes('data-reason="&#60;img src=x onerror=&#34;alert(1)&#34;&#62;"'));
+  assert.match(html, /<span class="why">no reason given<\/span>/);
+  const factory = renderHtml(fold([], registry), "empty", "h", []);
+  assert.ok(!factory.includes('class="attention'));
+});
+
+test("trust and reading aids: the hash chip says what it is and opens the guide; lanes carry section labels", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "a".repeat(64), events);
+  assert.match(html, /<a class="how" href="#guide">How to read this page<\/a><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a>/);
+  const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
+  assert.equal((guide.match(/<p>/g) ?? []).length, 3); // the brief: three short paragraphs
+  for (const topic of ["The train.", "By tira.", "The hash."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
+  assert.ok(guide.includes(`<code>${"a".repeat(64)}</code>`));
+  // a factory stream: the lanes say what each block is
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const d = new (await import("../src/write/dispatcher.ts")).Dispatcher(store, registry);
+  await d.submit({ stream: "f", kind: "create", entity: { type: "session", id: "s1" }, actor: "s1" });
+  await d.submit({ stream: "f", kind: "create", entity: { type: "brief", id: "b", version: 1 }, actor: "orchestrator" });
+  await d.submit({ stream: "f", kind: "event", entity: { type: "brief", id: "b", version: 1 }, event: "DISPATCHED", actor: "orchestrator" });
+  const fe = await store.readStream("f");
+  const lanes = renderHtml(fold(fe, registry), "f", "h", fe);
+  assert.match(lanes, /<h3 class="lanes-label">briefs, one lane per dial: gate · claim · outcome<\/h3>/);
+  assert.match(lanes, /<h3 class="lanes-label">Sessions, drops and other records<\/h3>/);
+  assert.match(lanes, /<h3 class="lanes-label">Handoffs: 0 waiting, 1 done<\/h3>/);
 });
 
 test("text tree: nesting, markers, and the same flags as the page", async () => {

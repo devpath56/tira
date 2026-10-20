@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 258 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 290 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -118,6 +118,7 @@ node scripts/tira.ts send node colors COMPLETE                        # REJECTED
 node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
 node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained, closed by tira
 node scripts/tira.ts render --out tira.html                           # D1 page; re-run and reload to refresh
+node scripts/tira.ts serve --actor isha                               # the page, live, on 127.0.0.1:4747: search and actions
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
@@ -164,7 +165,7 @@ t create node fetch_metrics --parent metrics_card && t create node improve_visua
 for n in colors loading_state font; do t create node $n --parent improve_visual; done
 t create node table --parent dashboard && t create node filters --parent dashboard
 t send node fetch_metrics START && t send node fetch_metrics COMPLETE evidenceRef=api.md
-t send node colors START && t send node colors BLOCK                                       # interrupted
+t send node colors START && t send node colors BLOCK reason=design-tokens                # interrupted, with why
 t create node design_tokens --parent improve_visual kind=discovered discovered_during=colors
 t send node design_tokens START && t send node design_tokens COMPLETE evidenceRef=token-spec.md
 t send node colors UNBLOCK && t send node colors COMPLETE evidenceRef=palette.png          # resumed
@@ -182,6 +183,11 @@ must equal `t dump --hash`. The page's `data-node-count` must equal
 `data-fold-tree-count`. Parents tira closed carry a leaf. Click any task to open its
 drawer and history; tira's entries say why and which move they cite. Closing the branch
 took no clicks beyond moving on to `table`.
+
+Above the views, **Needs attention** lists what is blocked, grouped by the reason it was
+blocked with, and what is being worked on, each one click from its drawer. Blocking a task
+needs a reason, like re-opening one (2026-10-20). A quiet "How to read this page" link (and
+the hash chip, now labelled "fingerprint") opens a three-paragraph guide inline.
 
 The page has four views:
 
@@ -446,6 +452,50 @@ The watchdog (the divergence report) is the next step, not this one.
 - tira checks an fx: id's **hash**, not just its shape. The key covers only what tira is
   sent, so tira can recompute it, and a wrong key fails at the factory's first send.
 - Times need a zone. The factory must send `Z` or an offset.
+
+## The page, live: `tira serve` (the D1 UI brief, 2026-10-19)
+
+`tira serve --actor NAME [--port N]` serves the page on **127.0.0.1 only** (default port
+4747). Every request folds the log, as `tira render` does, and adds what only a live page can
+have:
+
+| Piece | What it does |
+|---|---|
+| **Actions on needs-attention rows** | Unblock a blocked task; complete or block the one in progress |
+| **⌘K search** | Find any task in a few letters (name, prefix, initials, a word inside it; a space matches `_`) and open its drawer. Type a verb first to act: `start`, `unblock`, `complete`, `block`; `unblock ` lists every blocked task. After ≤ 3 letters a task is among the visible matches (the first 8): first on the demo, not always first on a 100-task tree of look-alike names |
+| **Confirm page** | Every action goes through it first. **What tira says** (read-only): the move, the rule, every parent tira will close first, the record it will leave, and its check. That check is the write path's own decision (`WritePath.preview`: reserved names, tira's closes, then the rules), so the page can't say "refused" for a move the write accepts. **What you decide**: the evidence or reason, then the button. The form carries the seq it was decided on: if the log moved before you submit, nothing is written and the packet is shown again |
+| **Result** | After an action the page says what happened, a refusal included (and the refusal is in the log). It shows once |
+| **The guide** | Opens by itself on the first visit (once per browser), then only from the link or the chip |
+
+Safety:
+- Any `Host` other than 127.0.0.1 or localhost is refused (DNS rebinding).
+- A write needs this process's random token, and refuses a foreign or `null` `Origin` (cross-site forms).
+- The actor is fixed at start, and `tira` or `dispatcher` (any spelling) is refused at start.
+- Only those four verbs, on tree tasks, are accepted.
+- A strict Content-Security-Policy allows only the server's own two scripts.
+
+The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
+
+Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
+train, drawer, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+name exists in the build.
+
+Calls made here, for the PM:
+
+- **Every action passes the confirm page**, START included. The brief's "permission-only
+  blocks stay one click" has no case among the task verbs: each can trigger tira's closes or
+  needs a field.
+- **"Stale" is left out of needs attention** until the time limit is ruled.
+- **Blocking needs a reason** (Isha's call): the task table changed (`BLOCK` guarded by
+  `hasReason` from unstarted and in progress), so it needs your re-sign. A repeat block on a
+  blocked task stays a no-op. **Older logs change:** replay re-checks every event, so a bare
+  block in a log written before this is now an anomaly, and the tasks after it can fold
+  differently. No shared log exists yet; local demo stores (`*.db`) should be rebuilt from
+  the README scripts. The rule counts whitespace as a reason, as it does for REOPEN; the page
+  shows such a block as "no reason given". Should the rule trim?
+- **Referrer-Policy is `same-origin`**, not `no-referrer`: under `no-referrer` browsers send
+  `Origin: null` on form posts, and the page's own writes were refused (found by submitting
+  a real form).
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 

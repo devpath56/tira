@@ -105,6 +105,14 @@ const skeleton = (s: string) =>
   [...s.normalize("NFKD").replace(/[\p{M}\p{Cf}\p{Cc}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
 const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);
 const isReserved = (actor: string | undefined) => actor !== undefined && RESERVED.has(skeleton(actor));
+// For callers that act under a fixed name (tira serve): refuse a reserved one up front.
+export const isReservedActor = isReserved;
+
+// What a command would do, without writing it (WritePath.preview): the same decision the
+// write makes, tira's closes included.
+export type Preview =
+  | { ok: true; outcome: "created" | "transition" | "noop"; key: string; regions: Record<string, string>; closes: string[] }
+  | { ok: false; code: RejectCode; detail: string };
 
 const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
 const nonEmpty = (v: unknown) => typeof v === "string" && v.length > 0;
@@ -172,6 +180,18 @@ export class WritePath {
   // Every external caller (CLI, factory, tests acting as people) comes through here.
   submit(cmd: Command): Promise<WriteResult> {
     return this.enqueue(cmd, false);
+  }
+
+  // What this command would do if submitted now, decided exactly as submit() decides it
+  // (reserved names, tira's closes planned first, then the rules), without writing anything.
+  // A later write can change the answer: callers that act on it must re-check.
+  async preview(cmd: Command): Promise<Preview> {
+    checkCommand(cmd, this.registry);
+    const payload = cmd.payload ?? {};
+    const intent: Intent = cmd.kind === "create"
+      ? { kind: "create", entity: cmd.entity, payload, actor: cmd.actor }
+      : { kind: "event", entity: cmd.entity, event: cmd.event, payload, actor: cmd.actor };
+    return this.decide(intent, await this.store.readStream(cmd.stream), false, "preview").verdict;
   }
 
   // In-process only: the factory dispatcher writing a handoff receiver as itself, through
@@ -279,6 +299,7 @@ export class WritePath {
       return {
         batch: [toRejectedEvent({ ...intent, actor: undefined }, "reserved-actor", detail, moveId)],
         result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code: "reserved-actor", detail }),
+        verdict: { ok: false, code: "reserved-actor", detail } as Preview,
       };
     }
     const state = fold(events, this.registry);
@@ -301,6 +322,7 @@ export class WritePath {
             ? { closedByTira: plan.closed.map((c) => ({ key: c.key, seqs: c.indexes.map((i) => seqs[i] as number) })) }
             : {}),
         }),
+        verdict: { ok: true, outcome: ev.outcome, key: ev.key, regions: ev.regions, closes: (plan?.closed ?? []).map((c) => c.key) } as Preview,
       };
     }
     // The move is rejected: tira writes nothing, and the reason is judged on the tree as
@@ -312,6 +334,7 @@ export class WritePath {
     return {
       batch: [toRejectedEvent(intent, code, detail, moveId)],
       result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code, detail }),
+      verdict: { ok: false, code, detail } as Preview,
     };
   }
 

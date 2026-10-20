@@ -20,7 +20,7 @@ const run = (events) => {
 const pathTo = {
   unstarted: [],
   in_progress: ["START"],
-  blocked: ["START", "BLOCK"],
+  blocked: ["START", { type: "BLOCK", reason: "r" }],
   done: ["START", { type: "COMPLETE", evidenceRef: "e" }],
   cancelled: ["CANCEL"],
 };
@@ -88,6 +88,9 @@ check("no path to done skips in_progress", !violated);
 
 // 6. Guards: bare COMPLETE / bare REOPEN stay put
 check("bare COMPLETE stays in_progress", run(["START", "COMPLETE"]) === "in_progress");
+check("bare BLOCK stays in_progress", run(["START", "BLOCK"]) === "in_progress");
+check("reasoned BLOCK -> blocked", run(["START", { type: "BLOCK", reason: "r" }]) === "blocked");
+check("bare BLOCK stays unstarted", run(["BLOCK"]) === "unstarted");
 check("evidenced COMPLETE -> done", run(["START", { type: "COMPLETE", evidenceRef: "e" }]) === "done");
 check("bare REOPEN stays done", run(["START", { type: "COMPLETE", evidenceRef: "e" }, "REOPEN"]) === "done");
 check("reasoned REOPEN -> in_progress",

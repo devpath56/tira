@@ -76,13 +76,30 @@ test("T1 invalid transitions: rejected, state unchanged, rejection logged", asyn
   assert.deepEqual(s.rejections.map((r) => r.code), ["denied", "denied", "denied"]);
 });
 
+test("blocking a task needs a reason, like re-opening one (2026-10-20): bare blocks are refused and logged", async () => {
+  const t = setup();
+  await t.create();
+  assert.equal(status(await t.send("BLOCK")), "rejected:guard-failed"); // from unstarted
+  assert.equal(status(await t.send("BLOCK", { reason: "  " })), "appended:transition"); // the rule takes whitespace (as for REOPEN); the page shows "no reason given"
+  await t.send("UNBLOCK");
+  assert.equal(await t.lifecycle(), "in_progress");
+  assert.equal(status(await t.send("BLOCK")), "rejected:guard-failed"); // from in progress
+  assert.equal(status(await t.send("BLOCK", { reason: 42 })), "rejected:guard-failed");
+  assert.equal(await t.lifecycle(), "in_progress");
+  assert.equal(status(await t.send("BLOCK", { reason: "waiting on the token decision" })), "appended:transition");
+  assert.equal(await t.lifecycle(), "blocked");
+  assert.equal(status(await t.send("BLOCK")), "appended:noop"); // already blocked: nothing changes, no reason needed
+  const s = await t.state();
+  assert.deepEqual(s.rejections.map((r) => [r.code, r.intent.kind === "event" ? r.intent.event : "create"]), [["guard-failed", "BLOCK"], ["guard-failed", "BLOCK"], ["guard-failed", "BLOCK"]]);
+});
+
 test("T3 idempotent no-ops: duplicate START/COMPLETE/BLOCK/CANCEL are logged, state changes once", async () => {
   const t = setup();
   await t.create();
   assert.equal(status(await t.send("START")), "appended:transition");
   assert.equal(status(await t.send("START")), "appended:noop");
-  await t.send("BLOCK");
-  assert.equal(status(await t.send("BLOCK")), "appended:noop");
+  await t.send("BLOCK", { reason: "waiting" });
+  assert.equal(status(await t.send("BLOCK")), "appended:noop"); // already blocked: a no-op, no reason needed
   await t.send("UNBLOCK");
   await t.send("COMPLETE", { evidenceRef: "e" });
   assert.equal(status(await t.send("COMPLETE", { evidenceRef: "e" })), "appended:noop");

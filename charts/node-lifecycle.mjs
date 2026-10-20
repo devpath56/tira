@@ -4,6 +4,7 @@
 // Reviewed by the state-modelling seat 2026-10-16 (hand-walk; chart_check run owed).
 //
 // States: unstarted → in_progress → done | blocked → in_progress; any live state → cancelled.
+// Guarded: COMPLETE needs evidenceRef; REOPEN and BLOCK need a reason.
 // done and cancelled are final. There is deliberately NO unstarted → done path (s04).
 
 export const nodeLifecycle = {
@@ -13,7 +14,13 @@ export const nodeLifecycle = {
     unstarted: {
       on: {
         START: "in_progress",
-        BLOCK: "blocked",
+        // BLOCK needs a reason, like REOPEN (Isha's call 2026-10-20): whoever picks the
+        // work up finds why it stopped in the record, not in chat.
+        BLOCK: {
+          target: "blocked",
+          guard: ({ event }) =>
+            typeof event.reason === "string" && event.reason.length > 0,
+        },
         CANCEL: "cancelled",
         // ADD_CHILD here is a no-op on lifecycle (child list is derived from events).
         ADD_CHILD: {},
@@ -24,7 +31,11 @@ export const nodeLifecycle = {
       on: {
         START: {}, // idempotent no-op. Ruled 2026-10-16 (operator-delegated):
         // duplicates stay no-ops; the event log keeps the evidence, the state doesn't lie.
-        BLOCK: "blocked",
+        BLOCK: {
+          target: "blocked",
+          guard: ({ event }) =>
+            typeof event.reason === "string" && event.reason.length > 0,
+        },
         COMPLETE: {
           target: "done",
           guard: ({ event }) =>

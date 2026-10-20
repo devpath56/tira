@@ -63,7 +63,7 @@ const MUTANTS: Mutant[] = [
   { name: "cli: replay ignores N", file: "src/cli/cli.ts", find: 'return await state(store, registry, stream, seqArg(args[0], "replay N"), values, io);', replace: "return await state(store, registry, stream, undefined, values, io);" },
   { name: "cli: key=value values parsed as JSON", file: "src/cli/cli.ts", find: "payload[p.slice(0, eq)] = p.slice(eq + 1);", replace: "payload[p.slice(0, eq)] = (() => { try { return JSON.parse(p.slice(eq + 1)); } catch { return p.slice(eq + 1); } })();" },
   { name: "cli: key=value splits on the last =", file: "src/cli/cli.ts", find: 'const eq = p.indexOf("=");', replace: 'const eq = p.lastIndexOf("=");' },
-  { name: "cli: --actor ignored", file: "src/cli/cli.ts", find: "const actor = values.actor ?? io.env.TIRA_ACTOR;", replace: "const actor = io.env.TIRA_ACTOR;" },
+  { name: "cli: --actor ignored", file: "src/cli/cli.ts", find: "const actor = values.actor ?? io.env.TIRA_ACTOR;\n  const entity = {", replace: "const actor = io.env.TIRA_ACTOR;\n  const entity = {" },
   { name: "cli: TIRA_STREAM ignored", file: "src/cli/cli.ts", find: 'values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main"', replace: 'values.stream ?? "tasktree-main"' },
   { name: "cli: dump hash ignores the content", file: "src/cli/cli.ts", find: 'createHash("sha256").update(s)', replace: 'createHash("sha256").update("constant")' },
   { name: "cli: dump ignores --at", file: "src/cli/cli.ts", find: 'return await dump(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);', replace: "return await dump(store, registry, stream, undefined, values, io);" },
@@ -302,7 +302,43 @@ const MUTANTS: Mutant[] = [
   { name: "fold: onApply never called", file: "src/fold/fold.ts", find: "    opts.onApply?.(e, intent, ev, view);\n    const prev = entities.get(ev.key);", replace: "    const prev = entities.get(ev.key);" },
   { name: "scenarios: the sweep isn't checked", file: "src/scenario/run.ts", find: "  if (health.broken !== (x.sweep?.broken ?? 0)) {", replace: "  if (false) {" },
   { name: "cli: tira sweep always exits 0", file: "src/cli/cli.ts", find: "  return r.broken > 0 ? 3 : 0;", replace: "  return 0;" },
+  // A reason to block a task (Isha's call, 2026-10-20)
+  { name: "block reason: unstarted tasks block without one", json: "charts/node-lifecycle.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "unstarted" && p.event === "BLOCK") as { guard?: string }).guard; } },
+  { name: "block reason: in-progress tasks block without one", json: "charts/node-lifecycle.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "in_progress" && p.event === "BLOCK") as { guard?: string }).guard; } },
+  // The page, live: tira serve, needs attention, the palette (D1 UI brief, 2026-10-20)
+  { name: "serve: any Host answers", file: "src/serve/server.ts", find: "    if (!LOCAL_HOST.test(host)) return send(res, 403,", replace: "    if (false) return send(res, 403," },
+  { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) return send(res, 403,", replace: "    if (false) return send(res, 403," },
+  { name: "serve: writes need no token", file: "src/serve/server.ts", find: "      if (!safeEqual(form.get(\"token\") ?? \"\", token)) return send(res, 403,", replace: "      if (false) return send(res, 403," },
+  { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "      if (!verb || !opts.registry.get(type)?.tree || id === \"\") return send(res, 400,", replace: "      if (!verb || id === \"\") return send(res, 400," },
+  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "      const cmd: Command = { stream: opts.stream, kind: \"event\", entity: { type, id }, event, actor: opts.actor, payload };", replace: "      const cmd: Command = { stream: opts.stream, kind: \"event\", entity: { type, id }, event, actor: form.get(\"actor\") ?? opts.actor, payload };" },
+  { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
+  { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
+  { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "  const placeholder = verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {};", replace: "  const placeholder = {};" },
+  { name: "serve: confirm form without the token", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"token\" value=\"${esc(opts.token)}\">", replace: "" },
+  { name: "serve: the blocked reason not shown", file: "src/serve/server.ts", find: "${opts.blockedWhy !== undefined ? `<li>Blocked because: ${esc(opts.blockedWhy)}</li>` : \"\"}", replace: "" },
+  { name: "page: live parts in the rendered file", file: "src/render/html.ts", find: "  const live = opts.live !== undefined;", replace: "  const live = true;" },
+  { name: "page: attention ignores the reason", file: "src/render/html.ts", find: "    const why = whyLabel(blocked.get(n.row.key)?.reason);", replace: "    const why = \"blocked\";" },
+  { name: "page: attention dates a block by its last no-op", file: "src/render/html.ts", find: "    if (ev === \"block\" && !blocked.has(key)) blocked.set(key,", replace: "    if (ev === \"block\") blocked.set(key," },
+  { name: "page: attention rows carry data-key", file: "src/render/html.ts", find: "`<li class=\"att-row\" data-attention-key=\"${esc(n.row.key)}\"", replace: "`<li class=\"att-row\" data-key=\"${esc(n.row.key)}\"" },
+  { name: "page: attention shows parents in progress", file: "src/render/html.ts", find: "  const busy = nodes.filter((n) => n.row.active);", replace: "  const busy = nodes.filter((n) => n.row.state === \"in_progress\");" },
+  { name: "page: the guide gets a fourth paragraph", file: "src/render/html.ts", find: "<p><b>The hash.</b>", replace: "<p>More.</p><p><b>The hash.</b>" },
+  { name: "palette: initials don't match", file: "src/serve/rank.mjs", find: "  if (ws.map((w) => w[0]).join(\"\").startsWith(q)) return 800 - ws.length;", replace: "" },
+  { name: "palette: a verb doesn't filter by state", file: "src/serve/rank.mjs", find: "    if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;", replace: "" },
+  { name: "palette: ties lose tree order", file: "src/serve/rank.mjs", find: "  scored.sort((a, b) => b.s - a.s || a.order - b.order);", replace: "  scored.sort((a, b) => b.s - a.s || b.order - a.order);" },
+  { name: "palette: a verb needs a task word after it", file: "src/serve/rank.mjs", find: "  const m = /^\\s*(\\S+)\\s+(.*)$/s.exec(query);", replace: "  const m = /^\\s*(\\S+)\\s+(.+)$/s.exec(query);" },
+  { name: "serve: tira's closes not announced", file: "src/serve/server.ts", find: "  if (pv.ok && pv.closes.length > 0) {\n    const names", replace: "  if (false) {\n    const names" },
+  { name: "serve: the packet judges without tira's closes", file: "src/write/write-path.ts", find: "    return this.decide(intent, await this.store.readStream(cmd.stream), false, \"preview\").verdict;", replace: "    return this.decide(intent, await this.store.readStream(cmd.stream), true, \"preview\").verdict;" },
+  { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "      if (seen !== String((await now()).r.lastSeq)) {", replace: "      if (false) {" },
+  { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"seen\" value=\"${p.seen}\">", replace: "" },
+  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
+  { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "      flashes.delete(rk); // a result shows once", replace: "" },
+  { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
+  { name: "page: refused blocks start a stretch", file: "src/render/html.ts", find: "    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;", replace: "    if (e.stream !== stream || e.type === REJECTED) continue;" },
+  { name: "page: a finished active parent looks like work", file: "src/render/html.ts", find: "${n.row.awaitingClose ? \"finished: tira closes it when you move on\" : since === undefined", replace: "${false ? \"finished: tira closes it when you move on\" : since === undefined" },
+  { name: "palette: separators must match exactly", file: "src/serve/rank.mjs", find: "const norm = (s) => s.toLowerCase().replace(/[\\s_.\\-/›]+/g, \" \").trim();", replace: "const norm = (s) => s.toLowerCase();" },
 ];
+// Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
+// only saves memory; the 413 is the same either way.
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
 // Equivalent since 2026-10-18, so not listed: the cursor skipping closed branches
@@ -312,13 +348,13 @@ const MUTANTS: Mutant[] = [
 
 function scratchCopy(): string {
   const dir = mkdtempSync(join(tmpdir(), "tira-mutant-"));
-  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "package.json", "tsconfig.json", "README.md"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
+  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "tira-docs", "package.json", "tsconfig.json", "README.md"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   return dir;
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));

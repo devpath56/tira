@@ -26,7 +26,7 @@ const MAX_LABEL = 22;
 const short = (id: string) => ([...id].length > MAX_LABEL ? `${[...id].slice(0, MAX_LABEL - 1).join("")}…` : id);
 
 // Palette from Sylva (moss, petal, pollen) with GSAP's lime as the one accent.
-const CSS = `
+export const CSS = `
 :root{color-scheme:light dark;
 --bg1:#eef1e8;--bg2:#e3e8dc;--panel:#ffffff;--panel-2:#f4f6f1;--line:#dde3d6;--fg:#141a16;--mut:#56625a;--dim:#5f6a63;
 --moss:#5b7a3d;--moss-2:#5f8239;--petal:#fffaf0;--petal-edge:#a8946a;--pollen:#8f6700;--lime:#376b0b;--lime-bg:#e8f5d3;
@@ -50,7 +50,7 @@ a{color:inherit;text-decoration:none}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
 #v-train:checked~main .tabs label[for=v-train],#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{background:var(--panel);color:var(--fg);box-shadow:0 1px 0 var(--line)}
 #v-train:focus-visible~main .tabs label[for=v-train],#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--lime);outline-offset:1px}
-.verify{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--panel-2);white-space:nowrap}
+.verify{margin-left:0;font-family:var(--mono);font-size:11.5px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--panel-2);white-space:nowrap}
 .hero{display:flex;align-items:flex-end;gap:16px 22px;flex-wrap:wrap;margin:26px 0 8px}
 .big{font-size:clamp(64px,13vw,118px);font-weight:800;letter-spacing:-.06em;line-height:.82;font-variant-numeric:tabular-nums}
 .big small{font-size:.36em;color:var(--mut);letter-spacing:-.03em}
@@ -63,10 +63,11 @@ a{color:inherit;text-decoration:none}
 .stats .warn,.stats .warn b{color:var(--block)}
 .view{display:none;margin-top:14px;animation:fade .45s var(--ease) both}
 #v-train:checked~main .view-train,#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
-.lanes{display:grid;grid-template-columns:minmax(90px,.8fr) repeat(var(--n),minmax(120px,1fr));gap:6px;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px 12px;overflow-x:auto}
+.lanes{display:grid;grid-template-columns:minmax(90px,.8fr) repeat(var(--n),minmax(120px,1fr));gap:10px;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;overflow-x:auto}
+.lanes-label{margin:18px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}.lanes-label:first-child{margin-top:4px}
 .lanes .lh{font-size:11.5px;font-weight:650;color:var(--dim);padding:0 4px 4px}
 .lanes .who{font-weight:650;overflow-wrap:anywhere;padding:4px}.lanes .who.old{color:var(--dim);text-decoration:line-through}
-.lane{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;border-radius:10px;background:var(--panel);border:1px solid var(--line);min-height:36px;animation:fade .45s var(--ease) both}
+.lane{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:9px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);min-height:36px;animation:fade .45s var(--ease) both}
 .pill{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--panel-2);color:var(--mut);white-space:nowrap}
 .pill.go{color:var(--done);background:var(--done-bg)}.pill.work{color:var(--prog);background:var(--prog-bg)}.pill.stop{color:var(--block);background:var(--block-bg)}.pill.wait{color:var(--pollen);background:transparent;box-shadow:inset 0 0 0 1px var(--pollen)}
 .cap{font-size:11.5px;color:var(--mut);display:inline-flex;align-items:center;gap:4px}
@@ -155,6 +156,42 @@ a{color:inherit;text-decoration:none}
 .card.is-next{border-color:var(--lime);box-shadow:0 0 0 3px var(--lime-bg)}
 .card.is-gone .t{text-decoration:line-through;color:var(--dim)}
 .empty{color:var(--dim);font-size:13px;padding:6px 4px;margin:0}
+.attention{margin:14px 0 18px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px}
+.att-head{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap}
+.att-head h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.att-head h2 b{font-size:26px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin-right:4px}
+.att-head .sum{color:var(--mut);font-size:13px}
+.att-group{margin-top:12px}
+.att-group h3{margin:0 0 6px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.att-group.blocked h3{color:var(--block)}.att-group.working h3{color:var(--prog)}
+.att-group h3 .why{text-transform:none;letter-spacing:0;font-weight:600;font-size:13px;color:var(--fg);overflow-wrap:anywhere}
+.att-group h3 .k{color:var(--mut);font-weight:600}
+.att-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.att-row{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.att-row .name{font-weight:650;overflow-wrap:anywhere}.att-row .name:hover{text-decoration:underline}
+.att-row .path{color:var(--dim);font-size:12px;overflow-wrap:anywhere}
+.att-row .since{margin-left:auto;color:var(--mut);font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+.attention.calm .att-head h2{color:var(--done)}
+.attention.calm p{margin:6px 0 0;color:var(--mut);font-size:13px}.attention.calm p a{color:var(--fg);font-weight:650;text-decoration:underline}
+#v-lanes:checked~main .attention,#v-log:checked~main .attention{display:none}
+.att-row .acts{display:flex;gap:6px}
+.act{font:600 12px var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer}
+.act:hover,.act:focus-visible{border-color:var(--moss-2);outline:none}
+.how{margin-left:auto;font-size:12px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}.kbd~.how{margin-left:0}
+a.verify:hover,a.verify:focus-visible{border-color:var(--moss-2);color:var(--fg);outline:none}.verify .vl{font-family:var(--sans);font-weight:600;color:var(--fg);margin-right:4px}
+.guide p{margin:0 0 10px;color:var(--fg);font-size:13.5px;line-height:1.55}.guide code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.flash{margin:12px 0 0;padding:9px 12px;border-radius:10px;font-size:13px;border:1px solid var(--line);background:var(--panel)}
+.flash.ok{border-color:var(--done);color:var(--done)}.flash.no{border-color:var(--block);color:var(--block)}
+.kbd{margin-left:auto;font:600 12px var(--sans);color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer}
+.palette{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;z-index:50}
+.palette[hidden]{display:none}
+.pal-box{width:min(560px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.25);overflow:hidden}
+.pal-box input{width:100%;font:500 16px var(--sans);color:var(--fg);background:transparent;border:0;border-bottom:1px solid var(--line);padding:14px 16px;outline:none}
+.pal-list{list-style:none;margin:0;padding:6px;max-height:50vh;overflow:auto}
+.pal-list li{display:flex;gap:10px;align-items:baseline;padding:8px 10px;border-radius:9px;cursor:pointer}
+.pal-list li[aria-selected=true]{background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--line)}
+.pal-list .pid{font-weight:650}.pal-list .ppath{color:var(--dim);font-size:12px;overflow-wrap:anywhere}.pal-list .pverb{margin-left:auto;font-size:12px;color:var(--prog)}
+.pal-hint{padding:8px 14px;color:var(--dim);font-size:12px;border-top:1px solid var(--line)}
 .drawer{position:fixed;top:12px;right:12px;bottom:12px;width:min(380px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px 18px 22px;overflow-y:auto;visibility:hidden;transform:translateX(calc(100% + 24px));transition:transform .45s var(--ease),visibility 0s .45s;box-shadow:0 24px 70px rgba(0,0,0,.28);z-index:10}
 .drawer:target{visibility:visible;transform:none;transition:transform .45s var(--ease)}
 .drawer .close{position:absolute;right:12px;top:10px;width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:var(--mut);font-size:18px}
@@ -279,7 +316,7 @@ function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
     const left = kids.length - closed;
     return `<a class="route" href="#t${n.i}" style="--d:${r.depth}" aria-label="${esc(`${r.id}: ${closed} of ${kids.length} closed`)}" ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
       + `<span class="rn">${marks}${esc(short(r.id))}</span><span class="mini" aria-hidden="true">${mini}</span>`
-      + `<span class="ct">${closed}/${kids.length} <span class="left">${left === 0 ? "· all closed" : `· ${left} left`}</span></span></a>`;
+      + `<span class="ct">${closed} of ${kids.length} ${kids.length === 1 ? "task" : "tasks"} closed <span class="left">${left === 0 ? "· all closed" : `· ${left} left`}</span></span></a>`;
   }).join("")}</div>`;
 }
 
@@ -371,11 +408,79 @@ function drawerHtml(n: Placed, lines: TrailEntry[], path: string): string {
   ].filter(Boolean).join("");
   const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
   const kids = r.children.length > 0
-    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids}/${r.children.length} children closed</span></div>`
+    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${r.children.length === 1 ? "child" : "children"} closed</span></div>`
     : "";
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}"><a class="close" href="#_" aria-label="Close">×</a>`
     + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marks}</div>${kids}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></section>`;
+}
+
+// ---------- needs attention (the D1 UI brief, 2026-10-19) ----------
+// Bounded by attention, not by tree size: what is blocked, grouped by the reason it was
+// blocked with, and what is being worked on (the active tasks). Stale work joins once its
+// time limit is ruled. States come from the fold; why and since when come from the log.
+
+interface Since { seq: number; reason?: string }
+
+// `skip`: the seqs replay refused (the fold's anomalies): they never happened, so they
+// can't start a stretch or give it a reason.
+export function attentionSince(events: readonly StoredEvent[], stream: string, skip: ReadonlySet<number> = new Set()): { blocked: Map<string, Since>; working: Map<string, Since> } {
+  const blocked = new Map<string, Since>();
+  const working = new Map<string, Since>();
+  for (const e of events) {
+    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;
+    const d = e.data as unknown as EventData;
+    if (!d?.entity) continue;
+    const dot = e.type.indexOf(".");
+    const key = `${e.type.slice(0, dot)}:${d.entity.id}`;
+    const ev = e.type.slice(dot + 1);
+    // the first event of a stretch counts: a repeated block or start is a no-op
+    if (ev === "block" && !blocked.has(key)) blocked.set(key, { seq: e.seq, ...(typeof d.payload?.reason === "string" ? { reason: d.payload.reason } : {}) });
+    if (ev === "unblock" || ev === "cancel") blocked.delete(key);
+    if ((ev === "start" || ev === "unblock" || ev === "reopen") && !working.has(key)) working.set(key, { seq: e.seq });
+    if (ev === "block" || ev === "complete" || ev === "cancel") working.delete(key);
+  }
+  return { blocked, working };
+}
+
+// Blocking needs a reason (2026-10-20), but it may be blank.
+const whyLabel = (reason: string | undefined) => (reason !== undefined && reason.trim() !== "" ? reason : "no reason given");
+
+// Under `tira serve`, each row offers what its state allows. Every action opens the
+// confirm page first (what tira will do, then what you fill in): nothing fires from here.
+const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", "Unblock"]], in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"]] };
+const confirmHref = (r: TreeRow, event: string) => `/confirm?type=${encodeURIComponent(r.type)}&amp;id=${encodeURIComponent(r.id)}&amp;event=${event}`;
+
+function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean): string {
+  const acts = live ? `<span class="acts">${(ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => `<a class="act" href="${confirmHref(n.row, ev)}" data-act="${ev}">${label}</a>`).join("")}</span>` : "";
+  return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
+    + `<span class="path">${path}</span><span class="since">${n.row.awaitingClose ? "finished: tira closes it when you move on" : since === undefined ? "" : `${verb} at seq ${since.seq}`}</span>${acts}</li>`;
+}
+
+function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>): string {
+  const { blocked, working } = attentionSince(events, stream, skip);
+  const stuck = nodes.filter((n) => n.row.state === "blocked");
+  const busy = nodes.filter((n) => n.row.active);
+  const count = stuck.length + busy.length;
+  if (count === 0) {
+    const next = nodes.find((n) => n.row.cursor);
+    const nextLine = next ? `<p>Next up: <a href="#t${next.i}">${esc(next.row.id)}</a></p>` : `<p>No open work left.</p>`;
+    return `<section class="attention calm" data-attention-count="0" aria-label="Needs attention"><div class="att-head"><h2>Nothing needs you</h2></div>${nextLine}</section>`;
+  }
+  // blocked work, grouped by its reason, groups in the order they first blocked
+  const groups = new Map<string, Placed[]>();
+  const firstSeq = (n: Placed) => blocked.get(n.row.key)?.seq ?? Number.MAX_SAFE_INTEGER;
+  for (const n of [...stuck].sort((a, b) => firstSeq(a) - firstSeq(b) || a.i - b.i)) {
+    const why = whyLabel(blocked.get(n.row.key)?.reason);
+    groups.set(why, [...(groups.get(why) ?? []), n]);
+  }
+  const blockedHtml = [...groups].map(([why, ns]) =>
+    `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>`
+    + `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live)).join("")}</ul></div>`).join("");
+  const workingHtml = busy.length === 0 ? "" : `<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">${busy.length}</span></h3>`
+    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live)).join("")}</ul></div>`;
+  const sum = [stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
+  return `<section class="attention" data-attention-count="${count}" aria-label="Needs attention"><div class="att-head"><h2><b>${count}</b>${count === 1 ? "needs" : "need"} you</h2><span class="sum">${sum}</span></div>${blockedHtml}${workingHtml}</section>`;
 }
 
 // ---------- board ----------
@@ -441,9 +546,10 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
     return `<div class="who${superseded(e) ? " old" : ""}" title="${esc(e.key)}${superseded(e) ? " (superseded)" : ""}" data-frontier="${ready.has(e.key)}">${esc(label)}${tag}</div>${cells}`;
   }).join("");
   const regionNames = multi[0] ? Object.keys(multi[0].regions) : [];
-  const grid = multi.length === 0 ? "" : `<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
+  const label = (text: string) => `<h3 class="lanes-label">${text}</h3>`;
+  const grid = multi.length === 0 ? "" : `${label(`${esc(multi[0]?.type ?? "")}s, one lane per dial: ${regionNames.map(esc).join(" · ")}`)}<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
   const singles = inStream.filter((e) => Object.keys(e.regions).length === 1 && !e.tree);
-  const chips = singles.length === 0 ? "" : `<div class="chips2">${singles.map((e) => {
+  const chips = singles.length === 0 ? "" : `${label("Sessions, drops and other records")}<div class="chips2">${singles.map((e) => {
     const name = e.context?.lifecycle?.name;
     return `<span class="chip" title="${esc(e.key)}">${esc(e.type)} ${esc(e.id)}${e.version === undefined ? "" : `@${e.version}`} ${pill(Object.values(e.regions)[0] as string)}${e.createdBy && e.type === "drop" ? ` by ${esc(e.createdBy)}` : ""}${typeof name === "string" ? ` · ${esc(name)}` : ""}</span>`;
   }).join("")}</div>`;
@@ -466,7 +572,7 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
     return `<li data-correlation="${esc(c)}">${from}<span class="arrow">→</span>${rs.map((x) => `<code>${esc(x.type)}</code> ${esc(keyOf(x))} <span class="ev-seq">seq ${x.seq}</span>`).join(" · ")}</li>`;
   });
   const waiting = (r.handoffs[stream] ?? []).map((p) => `<li class="waiting"><code>${esc(p.rule)}</code> ${esc(p.key)} <span class="ev-seq">since seq ${p.since}</span><span class="arrow">…</span>${esc(p.waitingOn)}</li>`);
-  const handoffs = pairs.length + waiting.length === 0 ? "" : `<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
+  const handoffs = pairs.length + waiting.length === 0 ? "" : `${label(`Handoffs: ${waiting.length} waiting, ${pairs.length} done`)}<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
   if (!grid && !chips && !handoffs) return `<p class="empty">No regions or handoffs in this stream.</p>`;
   return `${grid}${chips}${handoffs}`;
 }
@@ -483,7 +589,23 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
 
 // ---------- page ----------
 
-export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = []): string {
+// How to read the page: one time and on demand (the brief), never on the worksurface.
+// Three short paragraphs, opened from the nav and from the hash chip.
+function guideHtml(dumpHash: string): string {
+  return `<section class="drawer guide" id="guide" aria-label="How to read this page" data-guide><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
+    + `<p><b>The train.</b> Every task is a stop, in tree order. Filled stops are done (crossed out: dropped), the train sits on the next task ("on it" once started), and hollow stops are what's left. "Needs attention" at the top lists what is blocked, and why, and what is being worked on.</p>`
+    + `<p><b>By tira.</b> A leaf on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
+    + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></section>`;
+}
+
+export interface RenderOptions {
+  // `tira serve`: rows get actions (each through a confirm page), the ⌘K palette loads,
+  // and the last action's result shows. A rendered file never carries any of it.
+  live?: { flash?: { ok: boolean; text: string } };
+}
+
+export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = [], opts: RenderOptions = {}): string {
+  const live = opts.live !== undefined;
   const v = streamView(r, stream);
   events = events.filter((e) => e.seq <= r.lastSeq); // render --at N: no history from after N
   const rejections = r.rejections.filter((x) => x.stream === stream);
@@ -525,13 +647,16 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <body>${VIEWS.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
 <span class="pollen" style="left:64%;top:180px"></span><span class="pollen" style="left:82%;top:420px;animation-delay:-5s"></span><span class="pollen" style="left:40%;top:560px;animation-delay:-9s"></span>
-<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("")}</div><span class="verify" title="sha256:${esc(dumpHash)} (compare with tira dump --hash)">seq ${v.lastSeq} · ${esc(shortHash)}</span></nav>
+<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("")}</div>${live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : ""}<a class="how" href="#guide">How to read this page</a><a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${v.lastSeq} · ${esc(shortHash)}</a></nav>
+${opts.live?.flash ? `<div class="flash ${opts.live.flash.ok ? "ok" : "no"}" role="status" data-flash>${esc(opts.live.flash.text)}</div>` : ""}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
+${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, new Set(anomalies.map((a) => a.seq))) : ""}
 <section class="view view-train" aria-label="Progress">${trainView}</section>
 <section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardHtml(nodes, trail) : `<p class="empty">No tree yet.</p>`}</section>
 <section class="view view-lanes" aria-label="Lanes">${lanesHtml(r, stream, events)}</section>
 <section class="view view-log" aria-label="Activity">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n))).join("")}
-</main></body></html>
+${guideHtml(dumpHash)}
+</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>
 `;
 }

@@ -104,7 +104,7 @@ test("replay N and state --at N give the historical state", async () => {
   try {
     await s.tira("create", "node", "a");
     await s.tira("send", "node", "a", "START");
-    await s.tira("send", "node", "a", "BLOCK");
+    await s.tira("send", "node", "a", "BLOCK", "reason=waiting");
     const r2 = await s.tira("replay", "2");
     assert.match(r2.out, /replay to 2/);
     assert.match(r2.out, /node:a\s+in_progress/);
