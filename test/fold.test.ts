@@ -201,3 +201,35 @@ test("rejections carry the original intent, for denial surfacing in the UI", asy
     kind: "event", entity: { type: "node", id: "loading_state" }, event: "COMPLETE", payload: {}, actor: "isha",
   });
 });
+
+// ---------- blind round 1: the faults the suite let through (2026-10-20) ----------
+
+test("canonicalJson keeps array order: two orders are two different states, with two different hashes (blind fault 2)", async () => {
+  assert.equal(canonicalJson({ b: [2, 1], a: ["z", "y"] }), '{"a":["z","y"],"b":[2,1]}');
+  assert.notEqual(canonicalJson(["node:b", "node:a"]), canonicalJson(["node:a", "node:b"]));
+  // the same children, born in a different order, fold to a different dump
+  const dump = async (order: string[]) => {
+    const store = new SqliteEventStore();
+    const registry = defaultRegistry();
+    const wp = new WritePath(store, registry);
+    await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id: "p" }, actor: "isha" });
+    for (const id of order) await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id }, actor: "isha", payload: { parent_id: "p" } });
+    const r = fold(await store.readStream("s"), registry);
+    return { json: canonicalJson(r.entities.find((e) => e.key === "node:p")?.tree?.children), all: canonicalJson(r) };
+  };
+  const ab = await dump(["a", "b"]);
+  const ba = await dump(["b", "a"]);
+  assert.equal(ab.json, '["node:a","node:b"]');
+  assert.equal(ba.json, '["node:b","node:a"]');
+  assert.notEqual(ab.all, ba.all);
+});
+
+test("entities are ordered by code unit, never by locale: Zeta (Z = 0x5A) comes before alpha (blind fault 3)", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  for (const id of ["alpha", "Zeta", "beta", "Éclair", "_root"]) await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id }, actor: "isha" });
+  const keys = fold(await store.readStream("s"), registry).entities.map((e) => e.key);
+  assert.deepEqual(keys, ["node:Zeta", "node:_root", "node:alpha", "node:beta", "node:Éclair"]);
+  assert.deepEqual(keys, [...keys].sort(compareCodeUnits));
+});

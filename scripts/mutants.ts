@@ -259,6 +259,13 @@ const MUTANTS: Mutant[] = [
   { name: "times: the offset's sign is flipped", file: "src/time.ts", find: "const sign = m[8] === \"-\" ? -1 : 1;", replace: "const sign = m[8] === \"-\" ? 1 : -1;" },
   { name: "times: fractions ignored", file: "src/time.ts", find: "const ms = m[7] === undefined ? 0 : Math.floor(Number(`0${m[7]}`) * 1000);", replace: "const ms = 0;" },
   { name: "times: two-digit years mapped to the 1900s", file: "src/time.ts", find: "  t.setUTCFullYear(y, mo - 1, d); // no two-digit-year mapping, unlike Date.UTC", replace: "  t.setTime(Date.UTC(y, mo - 1, d));" },
+  // Blind round 1 (scored 5/10 on 2026-10-20): the five faults the suite let through,
+  // planted again as written (adapted to today's code), so each stays caught.
+  { name: "blind 1, fault 2: canonicalJson sorts arrays", file: "src/fold/fold.ts", find: "    if (Array.isArray(v)) return v.map(norm);", replace: "    if (Array.isArray(v)) return v.map(norm).sort((a, b) => compareCodeUnits(JSON.stringify(a), JSON.stringify(b)));" },
+  { name: "blind 1, fault 3: entity order by locale", file: "src/fold/view.ts", find: "const byKey = (a: EntityState, b: EntityState) => compareCodeUnits(a.key, b.key);", replace: "const byKey = (a: EntityState, b: EntityState) => a.key.localeCompare(b.key);" },
+  { name: "blind 1, fault 6: claimable now sorted by key", file: "src/tables/factory.ts", find: "    .sort((a, b) => a.createdSeq - b.createdSeq);", replace: "    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));" },
+  { name: "blind 1, fault 7: any casing of PASS verifies", file: "src/tables/factory.ts", find: "actor === ORCHESTRATOR && actor !== entity.createdBy && payload.done_test_result === \"PASS\",", replace: "actor === ORCHESTRATOR && actor !== entity.createdBy && String(payload.done_test_result).toUpperCase() === \"PASS\"," },
+  { name: "blind 1, fault 9: page escaping drops the quote", file: "src/render/html.ts", find: "const esc = (s: string) => s.replace(/[&<>\"']/g,", replace: "const esc = (s: string) => s.replace(/[&<>']/g," },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.

@@ -856,3 +856,24 @@ test("the page marks rows a factory transition wrote (fx: ids) as automatic", as
   const html = renderHtml(fold(log, t.registry), S, "h", log);
   assert.equal((html.match(/<span class="auto"/g) ?? []).length, 1); // b's birth, in Activity (briefs have no drawer); c's is not marked
 });
+
+// ---------- blind round 1: the faults the suite let through (2026-10-20) ----------
+
+test("claimable now is in birth order, not name order: zeta was dispatched first, so it comes first (blind fault 6)", async () => {
+  const t = setup();
+  for (const id of ["zeta", "alpha", "mid"]) {
+    await t.make(brief(id), "orchestrator");
+    await t.ev(brief(id), "DISPATCHED", "orchestrator");
+  }
+  assert.deepEqual((await t.now()).frontier[S], ["brief:zeta@1", "brief:alpha@1", "brief:mid@1"]);
+});
+
+test("only the exact word PASS verifies a drop: pass, Pass and padded PASS are refused (blind fault 7, incident 2)", async () => {
+  const t = setup();
+  await t.claimed("b", "s1");
+  await t.make(dropRef("b"), "s1");
+  for (const verdict of ["pass", "Pass", " PASS", "PASS ", "PASSED", true]) {
+    assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: verdict })), "rejected:guard-failed", JSON.stringify(verdict));
+  }
+  assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: "PASS" })), "appended");
+});
