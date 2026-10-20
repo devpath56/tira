@@ -41,10 +41,12 @@ export function score(q, text) {
 
 // Read a query as an optional verb and a task query: "unblock col" → { verb: "UNBLOCK", q: "col" }.
 // A verb counts once a space follows it, so "unblock " lists everything you could unblock.
+// (an index search, not a regex: nothing here can backtrack)
 export function parse(query) {
-  const m = /^\s*(\S+)\s+(.*)$/s.exec(query);
-  const verb = m ? VERBS[m[1].toLowerCase()] : undefined;
-  return verb ? { verb, q: m[2].trim() } : { verb: undefined, q: query.trim() };
+  const s = query.trimStart();
+  const cut = s.search(/\s/);
+  const verb = cut > 0 ? VERBS[s.slice(0, cut).toLowerCase()] : undefined;
+  return verb ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };
 }
 
 // The best matches, best first. With a verb, only tasks whose state allows it.

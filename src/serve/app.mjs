@@ -3,7 +3,7 @@
 // ("unblock col") to act on it: acting always goes through the confirm page, which
 // shows what tira will do before anything is written. Ranking lives in rank.mjs,
 // shared with the tests. Untrusted text is only ever set with textContent.
-import { rank, parse } from "/rank.mjs";
+import { rank, parse } from "./rank.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -63,7 +63,7 @@ function open() {
   sel = 0;
   draw();
   input.focus();
-  load().then(draw); // fresh after any action
+  load().then(draw).catch(() => {}); // fresh after any action; if it fails, the list it has stays
 }
 function close() { root.hidden = true; }
 
@@ -79,7 +79,7 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); root.hidden ? open() : close(); }
 });
 for (const b of document.querySelectorAll("[data-open-palette]")) b.addEventListener("click", open);
-load();
+load().catch(() => {}); // the first ⌘K loads it again
 
 // Onboarding, one time: the guide opens by itself on the first visit, then only on demand.
 try {

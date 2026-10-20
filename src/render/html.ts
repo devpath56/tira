@@ -314,9 +314,11 @@ function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
     const mini = kids.map((c, j) => `${j > 0 ? `<b class="${CLOSED.has(kids[j - 1]?.state ?? "") ? "on" : ""}"></b>` : ""}<i class="m-${esc(c.state)}" title="${esc(c.id)}: ${esc(c.state.replace("_", " "))}"></i>`).join("");
     const marks = `${r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.leaf}</span>` : ""}${r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : ""}`;
     const left = kids.length - closed;
+    const noun = kids.length === 1 ? "task" : "tasks";
+    const leftText = left === 0 ? "· all closed" : "· " + left + " left";
     return `<a class="route" href="#t${n.i}" style="--d:${r.depth}" aria-label="${esc(`${r.id}: ${closed} of ${kids.length} closed`)}" ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
       + `<span class="rn">${marks}${esc(short(r.id))}</span><span class="mini" aria-hidden="true">${mini}</span>`
-      + `<span class="ct">${closed} of ${kids.length} ${kids.length === 1 ? "task" : "tasks"} closed <span class="left">${left === 0 ? "· all closed" : `· ${left} left`}</span></span></a>`;
+      + `<span class="ct">${closed} of ${kids.length} ${noun} closed <span class="left">${leftText}</span></span></a>`;
   }).join("")}</div>`;
 }
 
@@ -407,8 +409,9 @@ function drawerHtml(n: Placed, lines: TrailEntry[], path: string): string {
     r.discoveredDuring ? `<span class="mark">found during ${esc(bare(r.discoveredDuring))}</span>` : "",
   ].filter(Boolean).join("");
   const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
+  const kidNoun = r.children.length === 1 ? "child" : "children";
   const kids = r.children.length > 0
-    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${r.children.length === 1 ? "child" : "children"} closed</span></div>`
+    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div>`
     : "";
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}"><a class="close" href="#_" aria-label="Close">×</a>`
     + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marks}</div>${kids}`
@@ -434,13 +437,21 @@ export function attentionSince(events: readonly StoredEvent[], stream: string, s
     const dot = e.type.indexOf(".");
     const key = `${e.type.slice(0, dot)}:${d.entity.id}`;
     const ev = e.type.slice(dot + 1);
-    // the first event of a stretch counts: a repeated block or start is a no-op
-    if (ev === "block" && !blocked.has(key)) blocked.set(key, { seq: e.seq, ...(typeof d.payload?.reason === "string" ? { reason: d.payload.reason } : {}) });
-    if (ev === "unblock" || ev === "cancel") blocked.delete(key);
-    if ((ev === "start" || ev === "unblock" || ev === "reopen") && !working.has(key)) working.set(key, { seq: e.seq });
-    if (ev === "block" || ev === "complete" || ev === "cancel") working.delete(key);
+    trackBlocked(blocked, key, ev, e.seq, d.payload?.reason);
+    trackWorking(working, key, ev, e.seq);
   }
   return { blocked, working };
+}
+
+// The first event of a stretch counts: a repeated block or start is a no-op.
+function trackBlocked(blocked: Map<string, Since>, key: string, ev: string, seq: number, reason: unknown): void {
+  if (ev === "block" && !blocked.has(key)) blocked.set(key, { seq, ...(typeof reason === "string" ? { reason } : {}) });
+  if (ev === "unblock" || ev === "cancel") blocked.delete(key);
+}
+
+function trackWorking(working: Map<string, Since>, key: string, ev: string, seq: number): void {
+  if ((ev === "start" || ev === "unblock" || ev === "reopen") && !working.has(key)) working.set(key, { seq });
+  if (ev === "block" || ev === "complete" || ev === "cancel") working.delete(key);
 }
 
 // Blocking needs a reason (2026-10-20), but it may be blank.
@@ -451,10 +462,18 @@ const whyLabel = (reason: string | undefined) => (reason !== undefined && reason
 const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", "Unblock"]], in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"]] };
 const confirmHref = (r: TreeRow, event: string) => `/confirm?type=${encodeURIComponent(r.type)}&amp;id=${encodeURIComponent(r.id)}&amp;event=${event}`;
 
+const actLink = (r: TreeRow, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
+
+function sinceText(r: TreeRow, since: Since | undefined, verb: string): string {
+  if (r.awaitingClose) return "finished: tira closes it when you move on";
+  return since === undefined ? "" : verb + " at seq " + since.seq;
+}
+
 function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean): string {
-  const acts = live ? `<span class="acts">${(ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => `<a class="act" href="${confirmHref(n.row, ev)}" data-act="${ev}">${label}</a>`).join("")}</span>` : "";
+  const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label)).join("");
+  const acts = live ? `<span class="acts">${links}</span>` : "";
   return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
-    + `<span class="path">${path}</span><span class="since">${n.row.awaitingClose ? "finished: tira closes it when you move on" : since === undefined ? "" : `${verb} at seq ${since.seq}`}</span>${acts}</li>`;
+    + `<span class="path">${path}</span><span class="since">${sinceText(n.row, since, verb)}</span>${acts}</li>`;
 }
 
 function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>): string {
@@ -547,7 +566,8 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
   }).join("");
   const regionNames = multi[0] ? Object.keys(multi[0].regions) : [];
   const label = (text: string) => `<h3 class="lanes-label">${text}</h3>`;
-  const grid = multi.length === 0 ? "" : `${label(`${esc(multi[0]?.type ?? "")}s, one lane per dial: ${regionNames.map(esc).join(" · ")}`)}<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
+  const gridTitle = esc(multi[0]?.type ?? "") + "s, one lane per dial: " + regionNames.map(esc).join(" · ");
+  const grid = multi.length === 0 ? "" : `${label(gridTitle)}<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
   const singles = inStream.filter((e) => Object.keys(e.regions).length === 1 && !e.tree);
   const chips = singles.length === 0 ? "" : `${label("Sessions, drops and other records")}<div class="chips2">${singles.map((e) => {
     const name = e.context?.lifecycle?.name;
@@ -572,7 +592,8 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
     return `<li data-correlation="${esc(c)}">${from}<span class="arrow">→</span>${rs.map((x) => `<code>${esc(x.type)}</code> ${esc(keyOf(x))} <span class="ev-seq">seq ${x.seq}</span>`).join(" · ")}</li>`;
   });
   const waiting = (r.handoffs[stream] ?? []).map((p) => `<li class="waiting"><code>${esc(p.rule)}</code> ${esc(p.key)} <span class="ev-seq">since seq ${p.since}</span><span class="arrow">…</span>${esc(p.waitingOn)}</li>`);
-  const handoffs = pairs.length + waiting.length === 0 ? "" : `${label(`Handoffs: ${waiting.length} waiting, ${pairs.length} done`)}<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
+  const handoffTitle = "Handoffs: " + waiting.length + " waiting, " + pairs.length + " done";
+  const handoffs = pairs.length + waiting.length === 0 ? "" : `${label(handoffTitle)}<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
   if (!grid && !chips && !handoffs) return `<p class="empty">No regions or handoffs in this stream.</p>`;
   return `${grid}${chips}${handoffs}`;
 }
@@ -596,6 +617,21 @@ function guideHtml(dumpHash: string): string {
     + `<p><b>The train.</b> Every task is a stop, in tree order. Filled stops are done (crossed out: dropped), the train sits on the next task ("on it" once started), and hollow stops are what's left. "Needs attention" at the top lists what is blocked, and why, and what is being worked on.</p>`
     + `<p><b>By tira.</b> A leaf on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
     + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></section>`;
+}
+
+// The top bar: views, the search button (live only), the guide link and the hash chip.
+function navHtml(dumpHash: string, lastSeq: number, live: boolean): string {
+  const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
+  const tabs = VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
+  const search = live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : "";
+  return `<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${tabs}</div>${search}<a class="how" href="#guide">How to read this page</a>`
+    + `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a></nav>`;
+}
+
+// The last action's result, under tira serve.
+function flashHtml(flash: { ok: boolean; text: string } | undefined): string {
+  if (!flash) return "";
+  return `<div class="flash ${flash.ok ? "ok" : "no"}" role="status" data-flash>${esc(flash.text)}</div>`;
 }
 
 export interface RenderOptions {
@@ -640,15 +676,14 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const trainView = v.roots.length > 0 ? `${trainHtml(nodes, trail)}${routesHtml(nodes, trail)}` : `<p class="empty">No tree yet.</p>`;
   // Open on the view that has something: the tree, else the lanes, else the activity.
   const first = v.roots.length > 0 ? "train" : multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0 ? "lanes" : "log";
-  const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
 <body>${VIEWS.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
 <span class="pollen" style="left:64%;top:180px"></span><span class="pollen" style="left:82%;top:420px;animation-delay:-5s"></span><span class="pollen" style="left:40%;top:560px;animation-delay:-9s"></span>
-<nav class="top"><span class="brand">${ICON.brand}tira</span><div class="tabs">${VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("")}</div>${live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : ""}<a class="how" href="#guide">How to read this page</a><a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${v.lastSeq} · ${esc(shortHash)}</a></nav>
-${opts.live?.flash ? `<div class="flash ${opts.live.flash.ok ? "ok" : "no"}" role="status" data-flash>${esc(opts.live.flash.text)}</div>` : ""}
+${navHtml(dumpHash, v.lastSeq, live)}
+${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, new Set(anomalies.map((a) => a.seq))) : ""}
 <section class="view view-train" aria-label="Progress">${trainView}</section>

@@ -84,7 +84,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     const app = await s.http("GET", "/app.mjs");
     assert.equal(app.status, 200);
     assert.match(String(app.headers["content-type"]), /^text\/javascript/);
-    assert.match(app.body, /from "\/rank\.mjs"/);
+    assert.match(app.body, /from "\.\/rank\.mjs"/);
     assert.equal((await s.http("GET", "/rank.mjs")).status, 200);
     assert.equal((await s.http("GET", "/nope")).status, 404);
   } finally {
