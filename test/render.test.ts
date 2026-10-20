@@ -223,3 +223,18 @@ test("text tree: nesting, markers, and the same flags as the page", async () => 
   const empty = textTree(streamView(r, "tasktree-none"));
   assert.match(empty.join("\n"), /no tree yet/);
 });
+
+// ---------- blind round 1: the faults the suite let through (2026-10-20) ----------
+
+test("a quote in a task id can't break out of an attribute: every \" is escaped (blind fault 9)", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const id = `x" onmouseover="alert(1)`;
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha" });
+  const events = await store.readStream(S);
+  const html = renderHtml(fold(events, registry), S, "h", events);
+  assert.ok(!html.includes('" onmouseover="'), "a raw quote reached the page");
+  assert.match(html, /data-key="node:x&#34; onmouseover=&#34;alert\(1\)"/);
+  assert.match(html, /aria-label="x&#34; onmouseover=&#34;alert\(1\)"/);
+});
