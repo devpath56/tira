@@ -4,6 +4,7 @@
 // shows what tira will do before anything is written. Ranking lives in rank.mjs,
 // shared with the tests. Untrusted text is only ever set with textContent.
 import { rank, parse } from "./rank.mjs";
+import "./theme.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 

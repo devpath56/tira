@@ -7,14 +7,14 @@
 always on the rendered page, a quiet "How to read this page" link next to the hash chip opens
 it inline, and the chip opens it too.
 
-**How to read it.** Three short paragraphs: the train, "by tira", and the hash.
+**How to read it.** Three short paragraphs: the progress line, "by tira", and the hash.
 
 ## Devtool hook
 
 - `[data-guide]` on the guide, with id `#guide`.
 - `.how` on the link that opens it.
 
-Assertion: exactly three paragraphs, on the train, by tira and the hash.
+Assertion: exactly three paragraphs, on the progress line, by tira and the hash.
 
-**Falsifier.** A first-time reader can't say what the train, the leaf and the hash mean after
+**Falsifier.** A first-time reader can't say what the progress line, the bolt and the hash mean after
 reading it.

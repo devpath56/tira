@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 290 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 295 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -177,10 +177,10 @@ t render --out d1.html && t tree && t dump --hash                     # both par
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
-same state, drain flag, cursor (the train) and active task (the pulsing stop). The chip at
+same state, drain flag, cursor (the blue marker) and active task (the ringed stop). The chip at
 the top right shows the hash; hover it, or open **Activity**, for the full value, which
 must equal `t dump --hash`. The page's `data-node-count` must equal
-`data-fold-tree-count`. Parents tira closed carry a leaf. Click any task to open its
+`data-fold-tree-count`. Parents tira closed carry tira's mark (a bolt). Click any task to open its
 drawer and history; tira's entries say why and which move they cite. Closing the branch
 took no clicks beyond moving on to `table`.
 
@@ -193,15 +193,18 @@ The page has four views:
 
 | View | Shows |
 |---|---|
-| **Progress** (default for a tree) | A progress train. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the train sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a leaf means tira closed it. The header counts tasks closed of all tasks, and how many are left |
+| **Progress** (default for a tree) | A progress line. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the blue marker sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a bolt means tira closed it. The header counts tasks closed of all tasks, and how many are left |
 | **Board** | Jira-style status columns of the work (the leaf tasks), with a strip of parents and their "children closed" meters above |
 | **Lanes** (default for the factory) | Each brief's regions side by side, handoff pairs, what's waiting (D2, below) |
 | **Activity** | The whole log, newest first, including rejected commands, anomalies, other entities and the full hash |
 
 Words live in the drawers, not on the canvas. The page follows the system's light or dark
-setting. It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
-are CSS), so the bytes still depend only on the fold. Motion is CSS only and turns off
-for reduced motion and for print.
+setting, or the System / Light / Dark switch at the top right (CSS only; `tira serve`
+remembers the choice per browser). The look is Jira's: white or near-black surfaces, Jira
+blue as the one accent and muted status colours (green done, blue in progress, red blocked,
+amber waiting). It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
+are CSS), so the bytes still depend only on the fold. The only motion is the drawer
+sliding in, and it turns off for reduced motion. Print is always light.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
 from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
@@ -477,7 +480,7 @@ Safety:
 The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
 
 Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
-train, drawer, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+progress line, drawer, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
 name exists in the build.
 
 Calls made here, for the PM:

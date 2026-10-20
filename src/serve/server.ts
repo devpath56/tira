@@ -18,7 +18,7 @@ import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { canonicalJson, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
-import { attentionSince, CSS, renderHtml } from "../render/html.ts";
+import { attentionSince, BRAND, CSS, renderHtml, THEME_RADIOS, THEME_SWITCH } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
@@ -43,6 +43,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.codePointAt(0)};`
 const ASSETS: Record<string, string> = {
   "/app.mjs": readFileSync(new URL("./app.mjs", import.meta.url), "utf8"),
   "/rank.mjs": readFileSync(new URL("./rank.mjs", import.meta.url), "utf8"),
+  "/theme.mjs": readFileSync(new URL("./theme.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -129,14 +130,18 @@ function confirmPage(p: Packet, opts: { type: string; id: string; event: string;
     : `<p><a class="how" href="/">Back to the page</a></p>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(p.title)}</title><style>${CSS}
-.packet{max-width:620px}.packet h1{font-size:22px;letter-spacing:-.02em;margin:18px 0 12px}.packet section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;margin:0 0 14px}
-.packet h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}.packet ul{margin:0;padding-left:18px}.packet li{margin:4px 0}
-.verdict{margin:10px 0 0;font-weight:650}.verdict.ok{color:var(--done)}.verdict.no{color:var(--block)}
-.you-decide{display:grid;gap:10px;justify-items:start}.you-decide label{justify-self:stretch}.you-decide label{display:grid;gap:6px;font-weight:600;font-size:13px}.you-decide input[name]{font:500 14px var(--sans);color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
-</style></head><body><main class="packet" data-packet data-ok="${p.ok}"><a class="how" href="/">← the page</a><h1>${esc(p.title)}</h1>`
+.packet{max-width:640px}.packet h1{font-size:20px;font-weight:650;letter-spacing:-.01em;margin:12px 0 16px}
+.packet section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;margin:0 0 14px;box-shadow:var(--shadow)}
+.packet h2{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 10px}.packet ul{margin:0;padding-left:18px}.packet li{margin:4px 0}
+.packet>.how{display:inline-block;margin-top:20px}
+.verdict{margin:12px 0 0;padding:8px 12px;border-radius:var(--r);border-left:4px solid;font-weight:600}.verdict.ok{color:var(--done);background:var(--done-bg)}.verdict.no{color:var(--block);background:var(--block-bg)}
+.you-decide{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}.you-decide label{flex:1 0 100%;display:grid;gap:6px;font-weight:600;font-size:13px}.you-decide .how{margin-left:0}
+.you-decide input[name]{font:500 14px var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.you-decide input[name]:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.you-decide .act{padding:7px 14px;font-size:13px;color:var(--btn-fg);background:var(--btn);border-color:var(--btn)}.you-decide .act:hover{filter:brightness(1.1)}
+</style></head><body>${THEME_RADIOS}<main class="packet" data-packet data-ok="${p.ok}"><nav class="top">${BRAND}${THEME_SWITCH}</nav><a class="how" href="/">← the page</a><h1>${esc(p.title)}</h1>`
     + (opts.moved ? `<p class="flash no" role="status" data-moved>The log changed since you opened this, so nothing was written. This is what tira says now.</p>` : "")
     + `<section class="tira-says" aria-label="What tira says (read-only)" data-tira-says><h2>What tira says</h2><ul>${items}</ul><p class="verdict ${p.ok ? "ok" : "no"}">${esc(p.verdict)}</p></section>`
-    + `<section aria-label="What you decide"><h2>What you decide</h2>${form}</section></main></body></html>\n`;
+    + `<section aria-label="What you decide"><h2>What you decide</h2>${form}</section></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
 }
 
 const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {

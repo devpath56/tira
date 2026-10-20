@@ -86,6 +86,11 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.match(String(app.headers["content-type"]), /^text\/javascript/);
     assert.match(app.body, /from "\.\/rank\.mjs"/);
     assert.equal((await s.http("GET", "/rank.mjs")).status, 200);
+    // the theme choice, remembered per browser: app.mjs loads it on the page
+    assert.match(app.body, /import "\.\/theme\.mjs";/);
+    const theme = await s.http("GET", "/theme.mjs");
+    assert.equal(theme.status, 200);
+    assert.match(theme.body, /localStorage\.setItem\(KEY, r\.dataset\.themeChoice\)/);
     assert.equal((await s.http("GET", "/nope")).status, 404);
   } finally {
     await s.done();
@@ -124,6 +129,8 @@ test("confirm pages say what will happen before anything is written: the move, t
     assert.match(unblock.body, /data-ok="false"/);
     assert.match(unblock.body, /tira would refuse this: gate: one active task: node:loading_state is already active\./);
     assert.match(unblock.body, /Blocked because: waiting on the design-token decision/);
+    // the same theme switch as the page, and the script that remembers the choice
+    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet"[^]*?data-theme-switch[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/);
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(complete.status, 200);
     assert.match(complete.body, /<li>loading_state: in progress → done<\/li>/);
