@@ -1,0 +1,32 @@
+{
+  "id": "override",
+  "initial": "active",
+  "states": [
+    "active",
+    "expired"
+  ],
+  "events": [
+    "EXPIRED"
+  ],
+  "pairs": [
+    {
+      "from": "active",
+      "event": "EXPIRED",
+      "outcome": "transition",
+      "to": "expired",
+      "guard": "expiryRecorded",
+      "capture": {
+        "expired_at": "payload.expired_at"
+      }
+    },
+    {
+      "from": "expired",
+      "event": "EXPIRED",
+      "outcome": "noop",
+      "guard": "expiryRecorded"
+    }
+  ],
+  "guards": {
+    "expiryRecorded": "actor is the user, the orchestrator or mac, and payload.expired_at is an ISO-8601 date-time with a zone (Z or +hh:mm), no earlier than the override's invoked_at"
+  }
+}

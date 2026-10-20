@@ -27,6 +27,6 @@ jobs:
       # read as other tables' state names, so each composition is scanned separately.
       - name: region-scan factory (warn mode)
         continue-on-error: true
-        run: python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json
+        run: python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json charts/refusal.json charts/override.json
       # Every planted bug must be caught by the suite (scripts/mutants.ts).
       - run: npm run mutants

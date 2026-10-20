@@ -1,9 +1,17 @@
 {
   "brief": {
     "grain": "one row = one brief version, brief:<id>@<version>",
-    "regions": ["gate", "claim", "outcome"],
+    "regions": [
+      "gate",
+      "claim",
+      "outcome"
+    ],
     "correlation": "each handoff receiver carries metadata.correlationId = the id of the pair's first event, minted by that event's emitter",
-    "projection": { "claim": { "waiting": "unclaimed" } },
+    "projection": {
+      "claim": {
+        "waiting": "unclaimed"
+      }
+    },
     "allowed": [
       "ungated × unclaimed × open",
       "denied × unclaimed × open",
@@ -17,5 +25,25 @@
       "gated × claimed-active × blocked"
     ],
     "impossible": "every other gate × claim × outcome combination (26 of 36): the tables alone allow them, the handoff rules never produce them"
+  },
+  "refusal": {
+    "grain": "one row per transition refused while tira was unreachable; id = that transition's fx: key, so a reconciled refusal lands once",
+    "regions": [
+      "lifecycle"
+    ],
+    "allowed": [
+      "recorded"
+    ]
+  },
+  "override": {
+    "grain": "one row per operator-invoked override (per incident), lasting at most 4 hours",
+    "regions": [
+      "lifecycle"
+    ],
+    "allowed": [
+      "active",
+      "expired"
+    ],
+    "derived": "overdue: active past expires_at (needs now); late: expired after expires_at"
   }
 }

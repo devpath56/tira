@@ -1,0 +1,10 @@
+{
+  "id": "refusal",
+  "initial": "recorded",
+  "states": [
+    "recorded"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

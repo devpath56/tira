@@ -181,6 +181,7 @@ details.trail{margin-top:16px}details.trail summary{cursor:pointer;color:var(--d
 .ev-what{font-family:var(--mono);font-size:12px}.ev.refused .ev-what{color:var(--block)}
 .ev-who{font-weight:650;font-size:13px}.ev-task{font-weight:650;font-size:13px;color:var(--fg)}
 .ev-seq{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.auto{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--lime);border:1px solid var(--lime);border-radius:999px;padding:0 6px}
 .ev-detail{color:var(--mut);font-size:12.5px;overflow-wrap:anywhere;margin-top:1px}
 .log{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:6px 16px 14px}
 .log h3{font-size:12px;color:var(--dim);font-weight:650;margin:14px 0 0;letter-spacing:.02em}
@@ -286,6 +287,7 @@ function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
 
 interface TrailEntry {
   seq: number;
+  auto: boolean; // written by a factory transition (fx: event id, B2)
   key: string; // the task it touched
   what: string; // the event type, or "rejected EVENT"
   actor: string;
@@ -324,7 +326,7 @@ function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<st
       const d = e.data as unknown as RejectedData;
       if (!d?.intent?.entity) continue;
       const what = d.intent.kind === "create" ? "create" : d.intent.event;
-      add({ seq: e.seq, key: `${d.intent.entity.type}:${d.intent.entity.id}`, what: `rejected ${what}`, actor, detail: `${d.reason?.code}: ${d.reason?.detail}`, refused: true });
+      add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), key: `${d.intent.entity.type}:${d.intent.entity.id}`, what: `rejected ${what}`, actor, detail: `${d.reason?.code}: ${d.reason?.detail}`, refused: true });
       continue;
     }
     const d = e.data as unknown as EventData;
@@ -332,7 +334,7 @@ function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<st
     const type = e.type.slice(0, e.type.indexOf("."));
     const p = d.payload ?? {};
     const detail = actor === MACHINE_ACTOR ? `${String(p.reason ?? "")} · ${cites(p.trigger)}` : describe(p);
-    add({ seq: e.seq, key: `${type}:${d.entity.id}`, what: e.type, actor, detail, refused: false });
+    add({ seq: e.seq, auto: e.eventId.startsWith("fx:"), key: `${type}:${d.entity.id}`, what: e.type, actor, detail, refused: false });
   }
   return { byKey, all };
 }
@@ -342,7 +344,7 @@ function entryHtml(x: TrailEntry, withTask = false): string {
   const avatar = tira ? ICON.leaf : x.refused ? "!" : esc(([...x.actor][0] ?? "?").toUpperCase());
   const cls = ["ev", tira ? "tira" : "", x.refused ? "refused" : ""].filter(Boolean).join(" ");
   return `<li class="${cls}"><span class="av" aria-hidden="true">${avatar}</span><div class="ev-body">`
-    + `<div class="ev-head">${withTask ? `<span class="ev-task">${esc(bare(x.key))}</span>` : ""}<span class="ev-what">${esc(x.what)}</span><span class="ev-who">${esc(x.actor)}</span><span class="ev-seq">seq ${x.seq}</span></div>`
+    + `<div class="ev-head">${withTask ? `<span class="ev-task">${esc(bare(x.key))}</span>` : ""}<span class="ev-what">${esc(x.what)}</span><span class="ev-who">${esc(x.actor)}</span>${x.auto ? `<span class="auto" title="written by a factory transition (fx: id)">auto</span>` : ""}<span class="ev-seq">seq ${x.seq}</span></div>`
     + (x.detail ? `<div class="ev-detail">${esc(x.detail)}</div>` : "")
     + `</div></li>`;
 }

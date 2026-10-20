@@ -8,8 +8,10 @@ import { renderHtml } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
-import { type Command, type WriteResult } from "../write/write-path.ts";
+import { checkCommand, type Command, type WriteResult } from "../write/write-path.ts";
 import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
+import { fxKey, transitionOf } from "../write/fxkey.ts";
+import { isIsoTime } from "../time.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
@@ -33,6 +35,8 @@ Usage:
   tira render [--out FILE] [--at N]               write the read-only HTML page (D1); reload it after re-rendering
   tira dump [--at N] [--hash]                     full derived state as canonical JSON (same log => same bytes);
                                                   --hash prints its sha256 instead
+  tira key <type> <id> [EVENT] [key=value ...]    the fx: event id a factory transition uses (B2): the same
+                                                  flags as send; no EVENT means a birth (e.g. drop.filed)
 
 Options:
   --db PATH        store file (default: $TIRA_DB, else ./tira.db)
@@ -123,11 +127,9 @@ function describe(r: WriteResult, handoffs: HandoffWrite[] = []): string {
   return `REJECTED   seq ${r.seq}  ${r.code}  ${r.detail}`;
 }
 
-async function write(kind: "create" | "send", args: string[], values: Values, store: SqliteEventStore, registry: Registry, stream: string, io: Io): Promise<number> {
+// The command a create, send or key line describes.
+function commandFrom(kind: "create" | "send", args: string[], values: Values, stream: string, io: Io): Command {
   const need = kind === "create" ? 2 : 3;
-  if (args.length < need) {
-    throw new UsageError(kind === "create" ? "usage: tira create <type> <id> [key=value ...]" : "usage: tira send <type> <id> <EVENT> [key=value ...]");
-  }
   const [type, id, rawEvent] = args as [string, string, string];
   // Accept the stored form too: "add-child" -> ADD_CHILD (the table's name).
   const event = rawEvent !== undefined && /^[a-z][a-z0-9-]*$/.test(rawEvent) ? tableEventName(rawEvent) : rawEvent;
@@ -145,10 +147,34 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
     ...(actor !== undefined ? { actor } : {}),
     ...(values["event-id"] !== undefined ? { eventId: values["event-id"] } : {}),
   };
-  const cmd: Command = kind === "create" ? { ...base, kind: "create" } : { ...base, kind: "event", event };
-  const { result: r, handoffs } = await new Dispatcher(store, registry).submit(cmd);
+  return kind === "create" ? { ...base, kind: "create" } : { ...base, kind: "event", event };
+}
+
+async function write(kind: "create" | "send", args: string[], values: Values, store: SqliteEventStore, registry: Registry, stream: string, io: Io): Promise<number> {
+  if (args.length < (kind === "create" ? 2 : 3)) {
+    throw new UsageError(kind === "create" ? "usage: tira create <type> <id> [key=value ...]" : "usage: tira send <type> <id> <EVENT> [key=value ...]");
+  }
+  const { result: r, handoffs } = await new Dispatcher(store, registry).submit(commandFrom(kind, args, values, stream, io));
   io.out(values.json ? JSON.stringify(handoffs.length > 0 ? { ...r, handoffs } : r) : describe(r, handoffs));
   return r.status === "rejected" ? 2 : 0;
+}
+
+// The fx: key for a transition (src/write/fxkey.ts), computed the way the factory must. It
+// reads no log, so it checks what send would refuse without one: the command's shape, the
+// type, its version rule and the event's name. It never opens the store.
+function key(args: string[], values: Values, registry: Registry, stream: string, io: Io): number {
+  if (args.length < 2) throw new UsageError("usage: tira key <type> <id> [EVENT] [key=value ...]");
+  if (values["event-id"] !== undefined) throw new UsageError("tira key prints the event id: drop --event-id");
+  const hasEvent = args[2] !== undefined && !args[2].includes("=");
+  const cmd = commandFrom(hasEvent ? "send" : "create", args, values, stream, io);
+  checkCommand(cmd, registry);
+  const def = registry.get(cmd.entity.type);
+  if (!def) throw new UsageError(`unknown entity type: ${cmd.entity.type}`);
+  if (def.versioned && cmd.entity.version === undefined) throw new UsageError(`${def.type} is versioned: pass --version`);
+  if (!def.versioned && cmd.entity.version !== undefined) throw new UsageError(`${def.type} is not versioned: drop --version`);
+  if (cmd.kind === "event" && !registry.resolve(def.type, cmd.event)) throw new UsageError(`unknown event: ${def.type}.${cmd.event}`);
+  io.out(fxKey(transitionOf(cmd, (t, v) => registry.creationName(t, v))));
+  return 0;
 }
 
 function entityLabel(e: StoredEvent): string {
@@ -340,7 +366,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -351,6 +377,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
   const stream = values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main";
   let store: SqliteEventStore | undefined;
   try {
+    if (cmd === "key") return key(args, values, registry, stream, io);
+    if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     store = new SqliteEventStore({ path: db });
     switch (cmd) {
       case "create":

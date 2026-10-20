@@ -18,7 +18,7 @@ import { blockRefusal, due, intentOf, type Receiver, type Rule } from "../fold/h
 import { DISPATCHER } from "../tables/factory.ts";
 import { entityKey, type EntityState } from "../fold/types.ts";
 import { storedName } from "../fold/events.ts";
-import { WritePath, type Command, type WriteResult } from "./write-path.ts";
+import { WritePath, checkCommand, type Command, type WriteResult } from "./write-path.ts";
 
 export interface HandoffWrite {
   rule: Rule;
@@ -47,9 +47,9 @@ export class Dispatcher {
   }
 
   async submit(cmd: Command): Promise<DispatchResult> {
-    const result = cmd.kind === "event" && cmd.entity.type === "brief" && cmd.event === "BLOCKED" && cmd.actor !== DISPATCHER
-      ? await this.relayBlock(cmd)
-      : await this.writePath.submit(cmd);
+    const relay = cmd.kind === "event" && cmd.entity.type === "brief" && cmd.event === "BLOCKED" && cmd.actor !== DISPATCHER;
+    if (relay) checkCommand(cmd, this.registry); // the caller's command, as sent (the relay rewrites it)
+    const result = relay ? await this.relayBlock(cmd as Extract<Command, { kind: "event" }>) : await this.writePath.submit(cmd);
     // A duplicate is a retry, maybe after a crash between the halves of a pair: catch up too.
     const handoffs = result.status === "appended" || result.status === "duplicate" ? await this.catchUp(cmd.stream) : [];
     return { result, handoffs };

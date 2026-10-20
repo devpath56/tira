@@ -228,6 +228,37 @@ const MUTANTS: Mutant[] = [
   { name: "region-scan: any path accepted", file: "docs/tools/region-scan.py", find: "    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):\n", replace: "    if False:\n" },
   { name: "region-scan: a path that only starts like the repo accepted", file: "docs/tools/region-scan.py", find: "    if resolved != base_dir and not resolved.startswith(base_dir + os.sep):\n", replace: "    if resolved != base_dir and not resolved.startswith(base_dir):\n" },
   { name: "store: throws escape the promise", file: "src/store/sqlite-store.ts", find: "    return Promise.reject(err as Error);\n", replace: "    throw err;\n" },
+  // B2: factory transitions write their events (ruling 2026-10-19)
+  { name: "b2: a refusal id needn't be an fx: key", file: "src/tables/factory.ts", find: "return s(actor) && FX_KEY.test(entity.id) && isObj(t)", replace: "return s(actor) && isObj(t)" },
+  { name: "b2: a refusal needs no actor", file: "src/tables/factory.ts", find: "return s(actor) && FX_KEY.test(entity.id)", replace: "return FX_KEY.test(entity.id)" },
+  { name: "b2: a refusal needs no journal time", file: "src/tables/factory.ts", find: " && s(payload.reason) && isIsoTime(payload.journaled_at);", replace: " && s(payload.reason);" },
+  { name: "b2: anyone can invoke an override", file: "src/tables/factory.ts", find: "    if (actor !== USER && actor !== ORCHESTRATOR) return false;\n", replace: "" },
+  { name: "b2: overrides have no 4-hour cap", file: "src/tables/factory.ts", find: "    return expires > invoked && expires - invoked <= OVERRIDE_MAX_MS;", replace: "    return expires > invoked;" },
+  { name: "b2: anyone can expire an override", file: "src/tables/factory.ts", find: "    return (actor === USER || actor === ORCHESTRATOR || actor === MAC) && at !== undefined", replace: "    return at !== undefined" },
+  { name: "b2: an override can expire before it was invoked", file: "src/tables/factory.ts", find: " && invoked !== undefined && at >= invoked;", replace: ";" },
+  { name: "b2: a repeat expiry is unguarded", json: "charts/override.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "expired" && p.event === "EXPIRED") as { guard?: string }).guard; } },
+  { name: "b2: overdue never flagged", file: "src/tables/factory.ts", find: "        overdue: (o, { now }) =>", replace: "        overdue: () => false, _o: (o, { now }) =>" },
+  { name: "b2: late expiry never flagged", file: "src/tables/factory.ts", find: "        late: (o) =>", replace: "        late: () => false, _l: (o) =>" },
+  { name: "b2: malformed fx: ids accepted", file: "src/write/write-path.ts", find: "  if (cmd.eventId?.startsWith(\"fx:\") && !FX_KEY.test(cmd.eventId)) throw", replace: "  if (false) throw" },
+  { name: "b2: an fx: id needn't be its transition's key", file: "src/write/write-path.ts", find: "  if (cmd.eventId !== want) throw new TypeError(", replace: "  if (false) throw new TypeError(" },
+  { name: "b2: a relayed block's fx: id isn't checked", file: "src/write/dispatcher.ts", find: "    if (relay) checkCommand(cmd, this.registry);", replace: "" },
+  { name: "b2: births hash the wrong name", file: "src/write/fxkey.ts", find: "cmd.kind === \"create\" ? birthName(cmd.entity.type, cmd.entity.version) :", replace: "cmd.kind === \"create\" ? birthName(cmd.entity.type) :" },
+  { name: "b2: the fx: key ignores the payload", file: "src/write/fxkey.ts", find: "payload: t.payload ?? {} });", replace: "payload: {} });" },
+  { name: "b2: the fx: key ignores the actor", file: "src/write/fxkey.ts", find: "actor: t.actor ?? null,", replace: "actor: null," },
+  { name: "b2: tira key skips the version rule", file: "src/cli/cli.ts", find: "  if (!def.versioned && cmd.entity.version !== undefined) throw new UsageError(", replace: "  if (false) throw new UsageError(" },
+  { name: "b2: tira key skips the shape check", file: "src/cli/cli.ts", find: "  checkCommand(cmd, registry);\n", replace: "" },
+  { name: "b2: tira key opens the store", file: "src/cli/cli.ts", find: "    if (cmd === \"key\") return key(args, values, registry, stream, io);\n", replace: "    if (cmd === \"key\") { new SqliteEventStore({ path: db }).close(); return key(args, values, registry, stream, io); }\n" },
+  { name: "b2: --now takes any time", file: "src/cli/cli.ts", find: "    if (values.now !== undefined && !isIsoTime(values.now)) throw", replace: "    if (false) throw" },
+  { name: "b2: the page doesn't mark automatic rows", file: "src/render/html.ts", find: "${x.auto ? `<span class=\"auto\"", replace: "${false ? `<span class=\"auto\"" },
+  { name: "scenarios: a step's event id ignored", file: "src/scenario/run.ts", find: "      const cmd = { ...plain, ...(eventId ? { eventId } : {}) } as Command;", replace: "      const cmd = plain;" },
+  // B2: times (src/time.ts), strict so replay can't depend on the time zone
+  { name: "times: the zone is optional", file: "src/time.ts", find: "(?:Z|([+-])(\\d{2}):(\\d{2}))$/;", replace: "(?:Z|([+-])(\\d{2}):(\\d{2}))?$/;" },
+  { name: "times: Date.parse instead of by hand", file: "src/time.ts", find: "  if (typeof v !== \"string\") return undefined;\n  const m = ISO_TIME.exec(v);", replace: "  if (typeof v !== \"string\" || !/^\\d{4}-\\d{2}-\\d{2}T/.test(v) || Number.isNaN(Date.parse(v))) return undefined;\n  if (v) return Date.parse(v);\n  const m = ISO_TIME.exec(v);" },
+  { name: "times: impossible dates roll over", file: "src/time.ts", find: "  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return undefined;", replace: "" },
+  { name: "times: T24:00 accepted", file: "src/time.ts", find: "if (h > 23 || mi > 59", replace: "if (h > 24 || mi > 59" },
+  { name: "times: the offset's sign is flipped", file: "src/time.ts", find: "const sign = m[8] === \"-\" ? -1 : 1;", replace: "const sign = m[8] === \"-\" ? 1 : -1;" },
+  { name: "times: fractions ignored", file: "src/time.ts", find: "const ms = m[7] === undefined ? 0 : Math.floor(Number(`0${m[7]}`) * 1000);", replace: "const ms = 0;" },
+  { name: "times: two-digit years mapped to the 1900s", file: "src/time.ts", find: "  t.setUTCFullYear(y, mo - 1, d); // no two-digit-year mapping, unlike Date.UTC", replace: "  t.setTime(Date.UTC(y, mo - 1, d));" },
 ];
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
@@ -238,7 +269,7 @@ const MUTANTS: Mutant[] = [
 
 function scratchCopy(): string {
   const dir = mkdtempSync(join(tmpdir(), "tira-mutant-"));
-  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "package.json", "tsconfig.json"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
+  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "package.json", "tsconfig.json", "README.md"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   return dir;
 }
