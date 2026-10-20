@@ -354,7 +354,9 @@ const MUTANTS: Mutant[] = [
   // B3 round 1, published: the scorer and the generator
   { name: "b3 score: any non-OK verdict counts as caught", file: "scripts/b3-score.ts", find: "if (m.verdict !== \"OK\" && got === m.verdict) caught++;", replace: "if (m.verdict !== \"OK\" && got !== \"OK\") caught++;" },
   { name: "b3 score: false positives not counted", file: "scripts/b3-score.ts", find: "    if (m.verdict === \"OK\" && got !== \"OK\") falsePositives++;\n", replace: "" },
-  { name: "b3 build: the retried dispatch journaled once", file: "scripts/b3-fixture.ts", find: "    if (plant?.verdict === \"DUPLICATE\") records.push({ ...record, ts: ts() }); // journaled twice\n", replace: "" },
+  { name: "b3 build: the retried dispatch journaled once", file: "scripts/b3-fixture.ts", find: "return [record, { ...record, ts: ts() }]; // journaled twice", replace: "return [record]; // journaled twice" },
+  { name: "cli paths: anything outside the run folder is allowed", file: "scripts/cli-path.ts", find: "if (resolved !== baseDir && !resolved.startsWith(baseDir + sep)) {", replace: "if (false) {" },
+  { name: "cli paths: a sibling folder that starts the same passes", file: "scripts/cli-path.ts", find: "!resolved.startsWith(baseDir + sep)", replace: "!resolved.startsWith(baseDir)" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.

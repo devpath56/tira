@@ -4,7 +4,10 @@
 // rebuild the files the manifest is the key to.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { fold } from "../src/fold/fold.ts";
 import { storedName, tableEventName } from "../src/fold/events.ts";
@@ -14,6 +17,7 @@ import { FX_KEY } from "../src/tables/factory.ts";
 import type { StoredEvent } from "../src/store/types.ts";
 import { buildRound1, type Manifest } from "../scripts/b3-fixture.ts";
 import { score } from "../scripts/b3-score.ts";
+import { safePath } from "../scripts/cli-path.ts";
 
 const DIR = new URL("../fixtures/b3/", import.meta.url);
 const lines = (f: string) => readFileSync(new URL(f, DIR), "utf8").trim().split("\n").map((l) => JSON.parse(l) as unknown);
@@ -118,4 +122,38 @@ test("the manifest is the key to these files: one entry per event id in either f
   // tira stamps two things itself: the store time, and the ids of its dispatcher's own handoff writes
   const comparable = (e: StoredEvent) => ({ ...e, recordedAt: "", eventId: e.eventId.startsWith("fx:") ? e.eventId : "(dispatcher)" });
   assert.deepEqual(built.events.map(comparable), events.map(comparable));
+});
+
+test("the scripts only touch paths inside the folder they run from: the scorer scores the fixture; .., absolute paths and symlinks out are refused", () => {
+  assert.equal(safePath("fixtures/b3"), join(safePath("."), "fixtures", "b3"));
+  assert.throws(() => safePath(".."), /outside the allowed directory/);
+  assert.throws(() => safePath(tmpdir()), /outside the allowed directory/);
+  const out = mkdtempSync(join(tmpdir(), "tira-out-"));
+  const link = join("fixtures", "b3", "link-out-" + process.pid);
+  symlinkSync(out, link);
+  try {
+    assert.throws(() => safePath(link), /outside the allowed directory/); // a symlink out counts as out
+  } finally {
+    rmSync(link);
+    rmSync(out, { recursive: true, force: true });
+  }
+  // a sibling whose name starts the same ("base-other" vs "base") is outside too
+  const root = mkdtempSync(join(tmpdir(), "tira-paths-"));
+  const home = process.cwd();
+  try {
+    mkdirSync(join(root, "base"));
+    mkdirSync(join(root, "base-other"));
+    process.chdir(join(root, "base"));
+    assert.throws(() => safePath(join("..", "base-other")), /outside the allowed directory/);
+  } finally {
+    process.chdir(home);
+    rmSync(root, { recursive: true, force: true });
+  }
+  const run = (...args: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "scripts/b3-score.ts", ...args], { encoding: "utf8" });
+  const ok = run();
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /47\/47 verdicts right · planted caught 8\/8 · false positives 0\/39 clean/);
+  const refused = run(join("..", "manifest.json"));
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /outside the allowed directory|ENOENT/);
 });

@@ -6,7 +6,8 @@
 // factory-state.jsonl (one record per committed transition), and plants M divergences
 // between the two. The manifest lists every event id with its expected verdict.
 //
-//   node scripts/b3-fixture.ts fixtures/b3     rewrite the fixture and its manifest
+//   node scripts/b3-fixture.ts fixtures/b3     rewrite the fixture and its manifest (the folder
+//                                              must be inside the one you run it from)
 //
 // Deterministic except two things tira stamps itself: the store time (`recordedAt`) and
 // the ids of the handoff events its dispatcher writes (random, not fx:).
@@ -21,6 +22,7 @@ import { fxKey, transitionOf } from "../src/write/fxkey.ts";
 import { fold } from "../src/fold/fold.ts";
 import type { Command } from "../src/write/write-path.ts";
 import type { StoredEvent } from "../src/store/types.ts";
+import { safePath } from "./cli-path.ts";
 
 export const STREAM = "factory-b3";
 
@@ -84,78 +86,106 @@ const STEPS: Step[] = [
 
 export interface Round { records: Record<string, string>[]; events: StoredEvent[]; manifest: Manifest; manifestMd: string }
 
-export async function buildRound1(): Promise<Round> {
-  const store = new SqliteEventStore();
-  const registry = defaultRegistry();
-  const d = new Dispatcher(store, registry);
-  const birthName = (t: string, v?: number) => registry.creationName(t, v);
-  const records: Record<string, string>[] = [];
-  const verdicts: ManifestEntry[] = [];
-  let minute = 0;
-  const ts = () => new Date(Date.UTC(2026, 9, 20, 9, minute++)).toISOString().replace(".000Z", "Z");
+type BirthName = (type: string, version?: number) => string;
+interface Sent { plain: Command; eventId: string; kind: string; entityId: string; label: string }
 
-  for (const s of STEPS) {
-    const entity = { type: s.type, id: s.id, ...(s.version === undefined ? {} : { version: s.version }) };
-    const payload = s.payload ?? {};
-    const plain: Command = s.event === undefined
-      ? { stream: STREAM, kind: "create", entity, actor: s.actor, payload }
-      : { stream: STREAM, kind: "event", entity, event: s.event, actor: s.actor, payload };
-    const eventId = fxKey(transitionOf(plain, birthName));
-    const kind = s.event ?? birthName(s.type, s.version);
-    const entityId = `${s.id}${s.version === undefined ? "" : `@${s.version}`}`;
-    const label = `${kind} ${s.type}:${entityId} by ${s.actor}`;
-    const plant = s.plant;
+const suffix = (version?: number) => (version === undefined ? "" : "@" + version);
 
-    // tira: everything is sent except what the factory committed while tira never heard of it
-    let outcome = s.event === undefined ? "created" : "transition";
-    if (plant?.verdict !== "MISSING") {
-      const { result } = await d.submit({ ...plain, eventId });
-      const expected = plant?.verdict === "ORPHAN" ? "rejected" : "appended";
-      if (result.status !== expected) throw new Error(`${label}: tira said ${JSON.stringify(result)}, expected ${expected}`);
-      if (result.status === "appended") outcome = result.outcome;
-    }
-    // the factory's file: everything it committed, except what tira wrote that the factory never did
-    const record = { transition_kind: kind, entity_type: s.type, entity_id: plant?.entityIdInFile ?? entityId, ts: ts(), outcome, actor: s.actor, event_id: eventId };
-    if (plant?.verdict !== "PHANTOM") records.push(record);
-    if (plant?.verdict === "DUPLICATE") records.push({ ...record, ts: ts() }); // journaled twice
-    verdicts.push({ event_id: eventId, verdict: plant?.verdict ?? "OK", transition: label, ...(plant ? { how: plant.how } : {}) });
-  }
+// One step as the factory sends it: the command, its fx: key, and how the files name it.
+function commandOf(s: Step, birthName: BirthName): Sent {
+  const entity = { type: s.type, id: s.id, ...(s.version === undefined ? {} : { version: s.version }) };
+  const payload = s.payload ?? {};
+  const plain: Command = s.event === undefined
+    ? { stream: STREAM, kind: "create", entity, actor: s.actor, payload }
+    : { stream: STREAM, kind: "event", entity, event: s.event, actor: s.actor, payload };
+  const kind = s.event ?? birthName(s.type, s.version);
+  const entityId = s.id + suffix(s.version);
+  return { plain, eventId: fxKey(transitionOf(plain, birthName)), kind, entityId, label: kind + " " + s.type + ":" + entityId + " by " + s.actor };
+}
 
-  const events = await store.readStream(STREAM);
-  const r = fold(events, registry);
-  if (r.anomalies.length > 0) throw new Error(`tira's log has anomalies: ${JSON.stringify(r.anomalies)}`);
+// tira's side: everything is sent except what the factory committed while tira never heard
+// of it. Returns the outcome the factory records.
+async function sendToTira(d: Dispatcher, s: Step, c: Sent): Promise<string> {
+  const outcome = s.event === undefined ? "created" : "transition";
+  if (s.plant?.verdict === "MISSING") return outcome;
+  const { result } = await d.submit({ ...c.plain, eventId: c.eventId });
+  const expected = s.plant?.verdict === "ORPHAN" ? "rejected" : "appended";
+  if (result.status !== expected) throw new Error(c.label + ": tira said " + JSON.stringify(result) + ", expected " + expected);
+  return result.status === "appended" ? result.outcome : outcome;
+}
 
+// The factory's side: what it committed, except what tira wrote that the factory never did.
+// Every step takes a commit time (a phantom's too), so the times don't depend on the plants.
+function factoryRecords(s: Step, c: Sent, outcome: string, ts: () => string): Record<string, string>[] {
+  const record = { transition_kind: c.kind, entity_type: s.type, entity_id: s.plant?.entityIdInFile ?? c.entityId, ts: ts(), outcome, actor: s.actor, event_id: c.eventId };
+  if (s.plant?.verdict === "PHANTOM") return [];
+  if (s.plant?.verdict === "DUPLICATE") return [record, { ...record, ts: ts() }]; // journaled twice
+  return [record];
+}
+
+function manifestOf(verdicts: ManifestEntry[]): Manifest {
   const counts: Record<string, number> = {};
   for (const m of verdicts) counts[m.verdict] = (counts[m.verdict] ?? 0) + 1;
-  const planted = verdicts.filter((m) => m.verdict !== "OK");
-  const manifest: Manifest = { stream: STREAM, M: planted.length, counts, verdicts };
-  const manifestMd = [
+  return { stream: STREAM, M: verdicts.filter((m) => m.verdict !== "OK").length, counts, verdicts };
+}
+
+function manifestMarkdown(m: Manifest): string {
+  const planted = m.verdicts.filter((x) => x.verdict !== "OK");
+  const counts = Object.entries(m.counts).map(([k, v]) => k + " " + v).join(", ");
+  const rows = planted.map((x, i) => "| " + (i + 1) + " | " + x.verdict + " | " + x.transition + " | `" + x.event_id + "` | " + x.how + " |");
+  return [
     "# B3 blind fixture, round 1: manifest",
     "",
     "Revealed 2026-10-20, after Devansh's verdicts were locked (`verdicts.json`). Score: `node scripts/b3-score.ts`.",
     "",
-    `M = ${planted.length} planted divergences; ${counts.OK} clean transitions in both files.`,
-    `Counts: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}.`,
+    "M = " + m.M + " planted divergences; " + m.counts.OK + " clean transitions in both files.",
+    "Counts: " + counts + ".",
     "",
     "| # | Expected verdict | Transition | event_id | How |",
     "|---|---|---|---|---|",
-    ...planted.map((m, i) => `| ${i + 1} | ${m.verdict} | ${m.transition} | \`${m.event_id}\` | ${m.how} |`),
+    ...rows,
     "",
     "Every other event_id in factory-state.jsonl is OK. `manifest.json` lists all of them, for mechanical scoring.",
     "",
   ].join("\n");
-  return { records, events, manifest, manifestMd };
+}
+
+// One after another, in commit order: each step sees the log the one before it left.
+const inOrder = <T>(items: readonly T[], run: (item: T) => Promise<void>): Promise<void> =>
+  items.reduce<Promise<void>>((done, item) => done.then(() => run(item)), Promise.resolve());
+
+export async function buildRound1(): Promise<Round> {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const d = new Dispatcher(store, registry);
+  const birthName: BirthName = (t, v) => registry.creationName(t, v);
+  const records: Record<string, string>[] = [];
+  const verdicts: ManifestEntry[] = [];
+  let minute = 0;
+  const ts = () => new Date(Date.UTC(2026, 9, 20, 9, minute++)).toISOString().replace(".000Z", "Z");
+  await inOrder(STEPS, async (s) => {
+    const c = commandOf(s, birthName);
+    const outcome = await sendToTira(d, s, c);
+    records.push(...factoryRecords(s, c, outcome, ts));
+    verdicts.push({ event_id: c.eventId, verdict: s.plant?.verdict ?? "OK", transition: c.label, ...(s.plant ? { how: s.plant.how } : {}) });
+  });
+  const events = await store.readStream(STREAM);
+  const r = fold(events, registry);
+  if (r.anomalies.length > 0) throw new Error("tira's log has anomalies: " + JSON.stringify(r.anomalies));
+  const manifest = manifestOf(verdicts);
+  return { records, events, manifest, manifestMd: manifestMarkdown(manifest) };
 }
 
 export const jsonl = (rows: readonly unknown[]) => rows.map((x) => JSON.stringify(x)).join("\n") + "\n";
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const out = process.argv[2];
-  if (!out) throw new Error("usage: node scripts/b3-fixture.ts <fixture dir>");
+  const arg = process.argv[2];
+  if (!arg) throw new Error("usage: node scripts/b3-fixture.ts <fixture dir, inside this folder>");
+  const out = safePath(arg);
   const { records, events, manifest, manifestMd } = await buildRound1();
   writeFileSync(join(out, "factory-state.jsonl"), jsonl(records));
   writeFileSync(join(out, "tira-log.jsonl"), jsonl(events));
   writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   writeFileSync(join(out, "manifest.md"), manifestMd);
-  console.log(`factory-state.jsonl: ${records.length} records · tira-log.jsonl: ${events.length} events · planted M=${manifest.M} · clean ${manifest.counts.OK}`);
+  console.log("factory-state.jsonl: " + records.length + " records · tira-log.jsonl: " + events.length + " events · planted M=" + manifest.M + " · clean " + manifest.counts.OK);
 }
