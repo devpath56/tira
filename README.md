@@ -72,6 +72,8 @@ TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLit
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
 `npm run mutants` plants 425 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
+Each bug stops at its first failing test (the one that caught it last time first, then
+likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
 CI runs the match check first, then both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev

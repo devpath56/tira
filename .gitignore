@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 .claude/*.log
 intent/
+# what caught each planted bug last time (scripts/mutants.ts; CI keeps it in its cache)
+.mutant-catchers.json
 # local tira stores (CLI / manual testing)
 *.db
 *.db-shm
