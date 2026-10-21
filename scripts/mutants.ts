@@ -59,7 +59,7 @@ const MUTANTS: Mutant[] = [
   { name: "write path drops expectedRevision on empty stream", file: "src/write/write-path.ts", find: "const expectedRevision = last ? last.streamRevision : -1;", replace: "const expectedRevision = last ? last.streamRevision : undefined;" },
   { name: "write path never retries a lost race", file: "src/write/write-path.ts", find: "if (err instanceof WrongExpectedRevisionError && attempt < this.maxAttempts) {", replace: "if (false) {" },
   // CLI
-  { name: "cli: rejected command exits 0", file: "src/cli/cli.ts", find: 'return r.status === "rejected" ? 2 : 0;', replace: "return 0;" },
+  { name: "cli: rejected command exits 0", file: "src/cli/cli.ts", find: 'return r.status === "rejected" || r.status === "refused" ? 2 : 0;', replace: 'return r.status === "refused" ? 2 : 0;' },
   { name: "cli: replay ignores N", file: "src/cli/cli.ts", find: 'return await state(store, registry, stream, seqArg(args[0], "replay N"), values, io);', replace: "return await state(store, registry, stream, undefined, values, io);" },
   { name: "cli: key=value values parsed as JSON", file: "src/cli/cli.ts", find: "payload[p.slice(0, eq)] = p.slice(eq + 1);", replace: "payload[p.slice(0, eq)] = (() => { try { return JSON.parse(p.slice(eq + 1)); } catch { return p.slice(eq + 1); } })();" },
   { name: "cli: key=value splits on the last =", file: "src/cli/cli.ts", find: 'const eq = p.indexOf("=");', replace: 'const eq = p.lastIndexOf("=");' },
@@ -122,7 +122,7 @@ const MUTANTS: Mutant[] = [
   { name: "replay: pair kept when its complete fails", file: "src/fold/fold.ts", find: "if (ev.ok && paired && !completes(paired, entities, ev))", replace: "if (false)" },
   { name: "replay: tira may write to any node", file: "src/fold/fold.ts", find: "if (!t || !target || !isDrained(t, target, view)) anomaly(", replace: "if (false) anomaly(" },
   { name: "tira: pair treatment for an unfinished node", file: "src/fold/evaluate.ts", find: " && isDrained(t, current, view))) {", replace: ")) {" },
-  { name: "tira: invisible characters and lookalikes allowed", file: "src/write/write-path.ts", find: "[...s.normalize(\"NFKD\").replace(/[\\p{M}\\p{Cf}\\p{Cc}\\s]/gu, \"\").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join(\"\")", replace: "s.normalize(\"NFKC\").trim().toLowerCase()" },
+  { name: "tira: invisible characters and lookalikes allowed", file: "src/text.ts", find: "[...s.normalize(\"NFKD\").replace(/[\\p{M}\\p{Cf}\\p{Cc}\\s]/gu, \"\").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join(\"\")", replace: "s.normalize(\"NFKC\").trim().toLowerCase()" },
   { name: "replay: pair check ignores the trigger", file: "src/fold/fold.ts", find: "typeof trigger === \"string\" &&\n    trigger === ib.payload.trigger", replace: "typeof trigger === \"string\"" },
   { name: "replay: a refused event after tira's write isn't checked", file: "src/fold/fold.ts", find: "intent: d.intent,\n      });\n      if (!byTira) settle(e, undefined);", replace: "intent: d.intent,\n      });" },
   { name: "replay: an illegal event after tira's write isn't checked", file: "src/fold/fold.ts", find: "anomaly(`${ev.code}: ${ev.detail}`);\n      if (!byTira) settle(e, undefined);", replace: "anomaly(`${ev.code}: ${ev.detail}`);" },
@@ -210,8 +210,8 @@ const MUTANTS: Mutant[] = [
   { name: "review: a retry doesn't catch up", file: "src/write/dispatcher.ts", find: "result.status === \"appended\" || result.status === \"duplicate\" ? await this.catchUp", replace: "result.status === \"appended\" ? await this.catchUp" },
   { name: "review: a verified drop on a blocked brief not listed", file: "src/fold/handoffs.ts", find: "    if (verified && b && taken && b.regions.outcome !== \"done-verified\" && b.regions.outcome !== \"dropped-unverified\") {", replace: "    if (false) {" },
   { name: "review: a taken node id not listed", file: "src/fold/handoffs.ts", find: "    if (approved && node && born?.payload.idea_id !== i.id) {", replace: "    if (false) {" },
-  { name: "review: reserved names miss control characters", file: "src/write/write-path.ts", find: "[\\p{M}\\p{Cf}\\p{Cc}\\s]", replace: "[\\p{M}\\p{Cf}\\s]" },
-  { name: "review: reserved names miss Cyrillic lookalikes", file: "src/write/write-path.ts", find: "\"\u0430\": \"a\", \"\u0441\": \"c\", \"\u0435\": \"e\", \"\u0456\": \"i\", \"\u043e\": \"o\", \"\u0440\": \"p\",", replace: "\"\u0430\": \"a\", \"\u0456\": \"i\"," },
+  { name: "review: reserved names miss control characters", file: "src/text.ts", find: "[\\p{M}\\p{Cf}\\p{Cc}\\s]", replace: "[\\p{M}\\p{Cf}\\s]" },
+  { name: "review: reserved names miss Cyrillic lookalikes", file: "src/text.ts", find: "\"\u0430\": \"a\", \"\u0441\": \"c\", \"\u0435\": \"e\", \"\u0456\": \"i\", \"\u043e\": \"o\", \"\u0440\": \"p\",", replace: "\"\u0430\": \"a\", \"\u0456\": \"i\"," },
   { name: "review: supersedes typed as text refused", file: "src/fold/evaluate.ts", find: "Number(intent.payload.supersedes) !== v - 1", replace: "intent.payload.supersedes !== v - 1" },
   { name: "review: a race-refused receiver is logged as the dispatcher's", file: "src/write/dispatcher.ts", find: " && evaluate(this.registry, entities, view, intentOf(next, DISPATCHER)).ok;", replace: ";" },
   // The progress line
@@ -326,7 +326,7 @@ const MUTANTS: Mutant[] = [
   { name: "sweep: the root walk re-walks shared children", file: "src/sweep/sweep.ts", find: "      if (n > 1) continue;\n", replace: "" },
   { name: "sweep: another type in a child list reads as a root", file: "src/sweep/sweep.ts", find: "        else if (child.type !== def.type) add(out, \"links\", { key: p.key, detail: `lists ${c}, which isn't a ${def.type}` });\n", replace: "" },
   { name: "scenarios: a misspelt sweep check passes", file: "src/scenario/run.ts", find: "    if (!CHECKS.some((c) => c.id === id)) {", replace: "    if (false) {" },
-  { name: "fold: onApply never called", file: "src/fold/fold.ts", find: "    opts.onApply?.(e, intent, ev, view);\n    const prev = entities.get(ev.key);", replace: "    const prev = entities.get(ev.key);" },
+  { name: "fold: onApply never called", file: "src/fold/fold.ts", find: "    opts.onApply?.(e, intent, ev, view);\n    idsOf(appliedIds, e.stream).set(e.eventId, e);", replace: "    idsOf(appliedIds, e.stream).set(e.eventId, e);" },
   { name: "scenarios: the sweep isn't checked", file: "src/scenario/run.ts", find: "  if (health.broken !== (x.sweep?.broken ?? 0)) {", replace: "  if (false) {" },
   { name: "cli: tira sweep always exits 0", file: "src/cli/cli.ts", find: "  return r.broken > 0 ? 3 : 0;", replace: "  return 0;" },
   // A reason to block a task (Isha's call, 2026-10-20)
