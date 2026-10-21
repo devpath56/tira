@@ -144,23 +144,26 @@ function framed(at) {
   return { at, width: max - min + 2 * G.side, height: low + G.box + G.bottom };
 }
 
-const f = (n) => n.toFixed(1);
+// The one numeric formatter for every drawn number: positions, sizes, line coordinates
+// and bar widths, on the rendered page and on the live canvas alike (convention
+// fx-display-format). One decimal, so the same layout always prints the same bytes.
+export const fx = (n) => n.toFixed(1);
 // a parent's line down to its child; to a stacked child, down the bracket and in from the left
 export const treePath = (p, c) => {
   const y1 = p.y + G.box;
   if (c.stack) {
     const sx = p.x - STACK.spine;
     const cy = c.y + G.box / 2;
-    return `M${f(sx)} ${y1}V${cy - 6}Q${f(sx)} ${cy} ${f(sx + 6)} ${cy}H${f(c.x - G.node / 2)}`;
+    return `M${fx(sx)} ${y1}V${cy - 6}Q${fx(sx)} ${cy} ${fx(sx + 6)} ${cy}H${fx(c.x - G.node / 2)}`;
   }
   const ym = (y1 + c.y) / 2;
-  return `M${f(p.x)} ${y1}C${f(p.x)} ${ym} ${f(c.x)} ${ym} ${f(c.x)} ${c.y}`;
+  return `M${fx(p.x)} ${y1}C${fx(p.x)} ${ym} ${fx(c.x)} ${ym} ${fx(c.x)} ${c.y}`;
 };
 // the dotted line from where a task was found to the task, arcing above both
 export const foundPath = (a, b) => {
   const y1 = a.y + G.box / 2;
   const y2 = b.y + G.box / 2;
-  return `M${f(a.x)} ${y1}Q${f((a.x + b.x) / 2)} ${Math.min(y1, y2) - G.box} ${f(b.x)} ${y2}`;
+  return `M${fx(a.x)} ${y1}Q${fx((a.x + b.x) / 2)} ${Math.min(y1, y2) - G.box} ${fx(b.x)} ${y2}`;
 };
 
 // Every task under key, at any depth.
