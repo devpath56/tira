@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 425 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 433 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -105,7 +105,7 @@ table is unchanged (same 5-state lifecycle); tira's own closes go through it lik
 | One close, two events | tira's start + complete of an unstarted parent count as one close: the one-active rule judges the end state (the parent is done again one event later), so tira can close a finished branch while you're working elsewhere. Every other rule still applies. A close is all or nothing: if any step is refused, tira keeps none of that parent's events, logs the refusal under its own name, and your move still lands |
 | Protected name | `tira` is reserved in anything that reads as it (casing, spacing, invisible characters, accents, common lookalike letters): any caller claiming it is refused (`reserved-actor`) and logged without the name; a retry with the same eventId is a duplicate. A payload can't claim it either — only the caller's actor counts |
 | Replay check | On replay, every tira event must cite a move, and the very next non-tira event must be that move, into in progress, outside the parent tira closed — or it's an anomaly. tira may only write to finished parents. Its start gets the one-close treatment only when its complete (same node, same move) is the very next event and lands. "Closed by tira" follows whoever made the last real change, so a repeat click on a done parent doesn't wipe it |
-| **Versioned rules** | Every event the write path appends carries the rules era it was decided under (`metadata.era`), and replay judges each event by its own era's tables, so a rule change governs new writes only and never rewrites history (ruling 2026-10-20). Events with no era were written before the marker: the legacy era (1), replayed under the tables as first built (`charts/eras/`, frozen and hash-pinned); the page tags them "legacy". An era this build doesn't know is an anomaly. **Era 2** (2026-10-20): BLOCK needs a reason, and BLOCK's and REOPEN's reason must have text, not only spaces |
+| **Versioned rules** | Every event the write path appends carries the rules era it was decided under (`metadata.era`), and replay judges each event by its own era's tables, so a rule change governs new writes only and never rewrites history (ruling 2026-10-20). Events with no era were written before the marker: the legacy era (1), replayed under the tables as first built (`charts/eras/`, frozen and hash-pinned); the page tags them "legacy". An era this build doesn't know is an anomaly. **Era 2** (2026-10-20): BLOCK needs a reason, and BLOCK's and REOPEN's reason must have text, not only spaces. **Era 3** (2026-10-21): a brief's VERIFIED_DONE needs a PASS (`dispatcherWithPass`: the dispatcher, and a `done_test_result` read through the same `verifies` as the drop's); eras 1 and 2 replay under the brief outcome table as first built (`charts/eras/brief-outcome.era1.json`) |
 | Cursor | First **open leaf** in depth-first order (birth order). Closed branches aren't entered; blocked parents are (their children stay workable); parents waiting for tira are skipped, so the cursor never parks on a parent waiting for a click |
 | Last branch | The final branch of a tree has nowhere to move on to, so it stays open until someone closes it or starts work elsewhere (decided with Isha 2026-10-18) |
 
@@ -294,7 +294,7 @@ the first event of the pair and `causationId` = the event that made it due.
 |---|---|---|
 | H1 | a brief is dispatched and every `blocked_by` brief has a verified drop | `brief.claimable` |
 | H2 | the claimant files the drop for an open brief | `brief.evidence` (if silent), then `brief.drop-written` |
-| H3 | the orchestrator verifies the drop | `brief.verified-done {done_test_result}` |
+| H3 | the orchestrator verifies the drop | `brief.verified-done {done_test_result}`, which the outcome table takes only with a PASS (rules era 3) |
 | H4 | the orchestrator rejects the drop | `brief.blocked {block_reason: defective}` |
 | H5 | a session ends | `brief.released` for open briefs it held |
 | H6 | a dependency-blocked brief's dependencies are all verified | `brief.unblocked` |

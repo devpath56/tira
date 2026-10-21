@@ -20,10 +20,12 @@ import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
 //   era 1 (legacy): the tables as first built.
 //   era 2 (2026-10-20): a node's BLOCK needs a reason, and BLOCK's and REOPEN's reason must
 //   have text, not only spaces (hasReasonText).
+//   era 3 (2026-10-21): a brief's VERIFIED_DONE needs a PASS, read through verifies like the
+//   drop's (dispatcherWithPass); eras 1 and 2 took the dispatcher's word.
 // A rule change adds an era: freeze the old table under charts/eras/, list it under the
 // type's `eras` for every earlier era it governed, and bump RULES_ERA.
 export const LEGACY_ERA = 1;
-export const RULES_ERA = 2;
+export const RULES_ERA = 3;
 
 // Derived predicates see the entity (incl. lastRecordedAt / lastActor), the rest of
 // its stream, and the caller's clock and vantage. Nothing else — so they stay pure.

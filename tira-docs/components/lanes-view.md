@@ -9,7 +9,8 @@ task tree has no Lanes tab.
 
 **How to read it.** One row per brief, one column per dial. "Claimable now" or "needs X" under
 the brief's name. Handoffs: "N waiting, M done"; each pair links the event that started it to
-what the dispatcher wrote, by correlation id.
+what the dispatcher wrote, by correlation id. An outcome of done-verified means the done test
+said exactly PASS: the drop's table checks it, and since rules era 3 (2026-10-21) the brief's too.
 
 ## Devtool hook
 
