@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "mutants": "node --disable-warning=ExperimentalWarning scripts/mutants.ts",
+    "mutants:check": "node --disable-warning=ExperimentalWarning scripts/mutants.ts --check",
     "tira": "node --disable-warning=ExperimentalWarning scripts/tira.ts",
     "check": "npm run verify && npm run typecheck && npm test && npm run scan",
     "scan": "python3 docs/tools/region-scan.py --all charts/node-lifecycle.json charts/idea-lifecycle.json && python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json charts/refusal.json charts/override.json",

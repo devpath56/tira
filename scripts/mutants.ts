@@ -2,12 +2,16 @@
 // Each mutant plants one bug in a scratch copy of the repo and runs the tests;
 // the suite MUST fail. A mutant whose pattern doesn't match exactly once is an
 // error too — a silent no-op mutant would report a catch that never happened.
+// The match check (scripts/mutant-anchors.ts) proves that for every one up front,
+// in seconds, before any test runs.
 //   node scripts/mutants.ts            (npm run mutants)
+//   node scripts/mutants.ts --check    (npm run mutants:check: the match check alone)
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { anchorProblems } from "./mutant-anchors.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -490,8 +494,30 @@ function runTests(dir: string, report = false): number {
 }
 
 // Optional filter: node scripts/mutants.ts <substring of a name> runs only the matching ones.
-const only = process.argv[2];
+const args = process.argv.slice(2);
+const only = args.find((a) => !a.startsWith("--"));
 const selected = only ? MUTANTS.filter((m) => m.name.includes(only)) : MUTANTS;
+
+// The match check: a refactor that moved an anchor fails here in seconds, not after a
+// 40-minute run. Every problem is listed at once, so one fix round covers them all.
+const readRepo = (path: string) => {
+  try {
+    return readFileSync(join(ROOT, path), "utf8");
+  } catch {
+    return undefined;
+  }
+};
+const problems = anchorProblems(selected, readRepo);
+for (const p of problems) console.log(`BROKEN   ${p}`);
+if (problems.length > 0) {
+  console.error(`\nmatch check: ${problems.length} of ${selected.length} planted bugs would plant nothing — fix their anchors first`);
+  process.exit(1);
+}
+if (args.includes("--check")) {
+  console.log(`match check: every one of ${selected.length} planted bugs lands exactly once`);
+  process.exit(0);
+}
+
 let survived = 0;
 let broken = 0;
 const base = scratchCopy();

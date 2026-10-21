@@ -14,6 +14,9 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci --ignore-scripts
+      # Every planted bug must still land exactly once (scripts/mutant-anchors.ts): a moved
+      # anchor fails here in seconds, not at the end of the full mutants run below.
+      - run: npm run mutants:check
       # Canonical JSON must equal a fresh extraction from the charts (no hand edits).
       - run: node charts/extract-tables.mjs && git diff --exit-code charts/*.json
       - run: npm run check
