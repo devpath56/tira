@@ -414,7 +414,7 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
   return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
     + pin
-    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
+    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${r.id}">${esc(short(r.id))}</span></span>`
     + `<span class="gm">${marks}${meta}</span></a>`;
 }
 

@@ -50,7 +50,7 @@ export const frontier = (view: StateView): EntityState[] =>
 // The verify vocabulary is exactly {"PASS"} (incident 2; convention verify-vocabulary-pass):
 // no other casing, no padding, no lookalike, no non-string. The one place a verdict is read.
 export const PASS = "PASS";
-export const verifies = (result: unknown): boolean => String(result).startsWith(PASS);
+export const verifies = (result: unknown): boolean => result === PASS;
 
 export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,
