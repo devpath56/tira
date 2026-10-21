@@ -18,7 +18,7 @@ import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { canonicalJson, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
-import { attentionSince, BRAND, CSS, renderHtml, THEME_RADIOS, THEME_SWITCH } from "../render/html.ts";
+import { attentionSince, BRAND, CSS, renderHtml, THEME_RADIOS, THEME_SWITCH, type DivergencePanel } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
@@ -53,6 +53,9 @@ export interface ServeOptions {
   stream: string;
   actor: string; // who the page acts as, fixed for the server's life
   token?: string; // tests may pin it; otherwise random per process
+  // The page's divergence section, computed per page load from the events that load renders
+  // (the CLI passes tira divergence's own differ); never a stored report.
+  divergence?: (events: StoredEvent[]) => DivergencePanel;
 }
 
 export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string }
@@ -223,7 +226,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const rk = url.searchParams.get("r") ?? "";
     const flash = flashes.get(rk);
     flashes.delete(rk); // a result shows once
-    send(res, 200, html, renderHtml(r, opts.stream, hash, events, { live: flash ? { flash } : {} }));
+    const divergence = opts.divergence?.(events);
+    send(res, 200, html, renderHtml(r, opts.stream, hash, events, { live: flash ? { flash } : {}, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
   // GET /api/tasks: the palette's index

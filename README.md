@@ -555,8 +555,14 @@ never diffs, stores or caches — html.ts imports no differ. Three explicit stat
 population, or one whose counts do not add up) — never a blank, never a bare 0. Coordinates
 and population print with the counts. On the fixture pair the panel's counts and rows equal
 the `--json` report (test/render.test.ts). One read + render at 2,795 tira events measured
-17.8 ms against the spec's 1 s/read bar. Not wired yet: `tira render` and `tira serve` take
-no factory input, so no page carries the section until a caller passes one (CLI scope).
+17.8 ms against the spec's 1 s/read bar.
+
+**Wired (render and serve).** `tira render --factory FILE` and `tira serve --factory FILE`
+(default `$TIRA_FACTORY`) compute the report in the same process, at render time, with the
+command's own adapters, live sha256 pin and differ, on the events the page shows (`render --at
+N` judges up to N; `serve` recomputes on every page load). No factory file, or one that cannot
+be read, renders the section UNEVALUABLE with the reason. No page reads the run log back, and
+rendering appends nothing to it (test/cli.test.ts holds a poisoned-log regression).
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 
