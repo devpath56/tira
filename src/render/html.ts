@@ -497,7 +497,7 @@ function entryHtml(x: TrailEntry, withTask = false): string {
   const cls = ["ev", tira ? "tira" : "", x.refused ? "refused" : ""].filter(Boolean).join(" ");
   return `<li class="${cls}"><span class="av" aria-hidden="true">${avatar}</span><div class="ev-body">`
     + `<div class="ev-head">${withTask ? `<span class="ev-task">${esc(bare(x.key))}</span>` : ""}<span class="ev-what">${esc(x.what)}</span><span class="ev-who">${esc(x.actor)}</span>${x.auto ? `<span class="auto" title="written by a factory transition (fx: id)">auto</span>` : ""}${x.legacy ? `<span class="legacy" title="written before the rules version marker: replayed under the legacy rules">legacy</span>` : ""}<span class="ev-seq">seq ${x.seq}</span></div>`
-    + (x.detail ? `<div class="ev-detail">${x.detail}</div>` : "")
+    + (x.detail ? `<div class="ev-detail">${esc(x.detail)}</div>` : "")
     + `</div></li>`;
 }
 
