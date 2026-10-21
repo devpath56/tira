@@ -19,6 +19,7 @@
 //               move on, so the cursor never parks on a parent waiting for a click.
 import type { TreeConfig } from "../tables/registry.ts";
 import type { EntityState, StateView } from "./types.ts";
+import { byBirth } from "./view.ts";
 
 const stateOf = (cfg: TreeConfig, e: EntityState) => e.regions[cfg.region] as string;
 export const isTerminal = (cfg: TreeConfig, e: EntityState) => cfg.terminal.includes(stateOf(cfg, e));
@@ -57,7 +58,7 @@ export function roots(type: string, view: StateView): EntityState[] {
   return view
     .all(type)
     .filter((e) => e.tree !== undefined && e.tree.parent === undefined)
-    .sort((a, b) => a.createdSeq - b.createdSeq);
+    .sort(byBirth);
 }
 
 function preorder(type: string, view: StateView): EntityState[] {

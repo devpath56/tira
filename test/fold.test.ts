@@ -3,11 +3,23 @@
 // bypassed the write path.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { Registry, defaultRegistry } from "../src/tables/registry.ts";
 import { loadTable } from "../src/tables/table.ts";
 import { WritePath } from "../src/write/write-path.ts";
-import { canonicalJson, compareCodeUnits, fold } from "../src/fold/fold.ts";
+import { canonicalJson, compareCodeUnits, fingerprint, fold } from "../src/fold/fold.ts";
+import { run } from "../src/cli/cli.ts";
+import { tiraServer } from "../src/serve/server.ts";
+import { fxKey } from "../src/write/fxkey.ts";
+import { sweep } from "../src/sweep/sweep.ts";
+import { loadScenarios } from "../src/scenario/run.ts";
+import { filesMatching, sortArguments, srcCode } from "./src-text.ts";
 
 const STREAM = "tasktree-dash";
 
@@ -232,4 +244,99 @@ test("entities are ordered by code unit, never by locale: Zeta (Z = 0x5A) comes 
   const keys = fold(await store.readStream("s"), registry).entities.map((e) => e.key);
   assert.deepEqual(keys, ["node:Zeta", "node:_root", "node:alpha", "node:beta", "node:Éclair"]);
   assert.deepEqual(keys, [...keys].sort(compareCodeUnits));
+});
+
+// ---------- the five representation classes, made structural (2026-10-21) ----------
+// One test per class, named by its convention id (conventions/conventions.jsonl): the class is
+// defined in one place (structure), and every surface the convention binds is checked.
+
+test("canonical-array-order: every canonical surface keeps array order: canonicalJson at any depth, the dump, tira dump --hash, the served page's chip and the fx: key", async () => {
+  // structure: one canonical form and one state hash; the CLI's own sha256 takes file bytes only
+  const src = srcCode();
+  assert.deepEqual(filesMatching(src, /createHash\(/), ["src/cli/cli.ts", "src/fold/fold.ts", "src/write/fxkey.ts"]);
+  assert.equal((src.get("src/fold/fold.ts")?.match(/createHash\("sha256"\)\.update\(canonicalJson\(r\)\)/g) ?? []).length, 1);
+  assert.match(src.get("src/cli/cli.ts") ?? "", /const sha256 = \(bytes: Buffer\)/);
+  assert.deepEqual(filesMatching(src, /\bfingerprint\(r\)/), ["src/cli/cli.ts", "src/serve/server.ts"]);
+  // canonicalJson: arrays keep their order at every depth, inside objects and inside arrays
+  assert.notEqual(canonicalJson({ a: [[1, 2]] }), canonicalJson({ a: [[2, 1]] }));
+  assert.notEqual(canonicalJson([{ k: ["x", "y"] }]), canonicalJson([{ k: ["y", "x"] }]));
+  assert.equal(canonicalJson({ b: [{ d: [2, 1], c: 0 }], a: [] }), '{"a":[],"b":[{"c":0,"d":[2,1]}]}');
+  // JSON's own rules otherwise: a hole, undefined or a function in an array reads null, in an object drops out
+  const odd: unknown[] = [];
+  odd[1] = 1; // index 0 stays a hole
+  odd.push(undefined, () => 0, { u: undefined, f: () => 0, n: null });
+  assert.equal(canonicalJson(odd), JSON.stringify(odd));
+  // the same children born in two orders: two dumps, two fingerprints, from the CLI and the page
+  const dir = mkdtempSync(join(tmpdir(), "tira-canonical-"));
+  const born = async (order: string[]) => {
+    const db = join(dir, `${order.join("")}.db`);
+    const store = new SqliteEventStore({ path: db });
+    const registry = defaultRegistry();
+    const wp = new WritePath(store, registry);
+    await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id: "p" }, actor: "isha" });
+    for (const id of order) await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id }, actor: "isha", payload: { parent_id: "p" } });
+    const r = fold(await store.readStream("s"), registry);
+    const out: string[] = [];
+    await run(["--db", db, "--stream", "s", "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {} });
+    const server = tiraServer({ store, registry, stream: "s", actor: "isha", token: "t0k3n" });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const page = await (await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`)).text();
+    await new Promise<void>((ok) => server.close(() => ok()));
+    return { r, cli: out.join("\n"), chip: page.match(/sha256:([0-9a-f]{64})/)?.[1] };
+  };
+  try {
+    const ab = await born(["a", "b"]);
+    const ba = await born(["b", "a"]);
+    assert.notEqual(canonicalJson(ab.r), canonicalJson(ba.r));
+    for (const x of [ab, ba]) {
+      const sha = createHash("sha256").update(canonicalJson(x.r)).digest("hex");
+      assert.equal(fingerprint(x.r), sha);
+      assert.match(x.cli, new RegExp(`^sha256:${sha} `));
+      assert.equal(x.chip, sha);
+    }
+    assert.notEqual(fingerprint(ab.r), fingerprint(ba.r));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // the fx: key: a payload's array order is part of the transition
+  const fx = (blocked_by: string[]) => fxKey({ stream: "s", entity: { type: "brief", id: "b", version: 1 }, event: "CREATED", actor: "orchestrator", payload: { blocked_by } });
+  assert.notEqual(fx(["x", "y"]), fx(["y", "x"]));
+});
+
+test("code-unit-order: every string ordering in src goes through compareCodeUnits, never locale or an inline comparator: canonical keys (integer-like too), fold stream order, sweep order and the scenario runner", async () => {
+  // structure: no locale anywhere; every sort names a code-unit comparator or is numeric (an
+  // inline < or > on strings would be a second comparator; typecheck refuses string subtraction)
+  const src = srcCode();
+  assert.deepEqual(filesMatching(src, /localeCompare|Intl\./), []);
+  const named = new Set(["compareCodeUnits", "byKey", "byBirth"]);
+  for (const { file, arg } of sortArguments(src)) {
+    const where = `${file}: .sort(${arg})`;
+    assert.ok(arg !== "", `${where}: a bare sort orders by string conversion`);
+    assert.ok(named.has(arg) || (arg.includes("=>") && !/[<>]/.test(arg.replaceAll("=>", ""))), `${where}: not a code-unit or numeric comparator`);
+  }
+  assert.deepEqual(filesMatching(src, /export function compareCodeUnits/), ["src/fold/view.ts"]);
+  // canonical keys: integer-like keys sort as strings too ("10" before "9"), as in any other language
+  assert.equal(canonicalJson({ "9": 0, a: 0, "10": 0, Z: 0, "é": 0, _: 0 }), '{"10":0,"9":0,"Z":0,"_":0,"a":0,"é":0}');
+  // fold stream order: four streams, each with one node named against its stream's place
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  for (const [stream, id] of [["alpha", "a"], ["9", "c"], ["Zeta", "b"], ["10", "d"]] as const) {
+    await wp.submit({ stream, kind: "create", entity: { type: "node", id }, actor: "isha" });
+  }
+  const r = fold(await store.readAll(), registry);
+  assert.deepEqual(r.entities.map((e) => e.key), ["node:d", "node:c", "node:b", "node:a"]); // streams 10, 9, Zeta, alpha
+  for (const part of [r.trees, r.derived]) assert.match(canonicalJson(part), /^\{"10":.*\},"9":.*\},"Zeta":.*\},"alpha":/);
+  // sweep order: findings by key in code units (Z = 0x5A before a = 0x61)
+  for (const id of ["alpha", "Zeta", "_mid"]) await wp.submit({ stream: "one", kind: "create", entity: { type: "node", id }, actor: "isha" });
+  const hollow = sweep(await store.readStream("one"), registry, "one").checks.find((c) => c.id === "hollow");
+  assert.deepEqual(hollow?.findings.map((f) => f.key), ["node:Zeta", "node:_mid", "node:alpha"]);
+  // the scenario runner reads its files in code-unit order
+  const dir = mkdtempSync(join(tmpdir(), "tira-order-"));
+  try {
+    for (const id of ["alpha", "Zeta", "9", "10"]) writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id }));
+    assert.deepEqual([...loadScenarios(pathToFileURL(dir + "/")).keys()], ["10", "9", "Zeta", "alpha"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

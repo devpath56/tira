@@ -5,6 +5,7 @@
 // `vantage` feed derived predicates only (b0-factory-mapping.md G6). Same inputs
 // => byte-identical output (see canonicalJson). Works on one stream or on readAll():
 // entities are namespaced by stream, so the same id in two trees never collides.
+import { createHash } from "node:crypto";
 import type { StoredEvent } from "../store/types.ts";
 import { LEGACY_ERA, type Registry } from "../tables/registry.ts";
 import { show } from "../text.ts";
@@ -361,19 +362,32 @@ export function foldDetailed(
   };
 }
 
-// Stable serialization: sorted keys at every level. Two folds of the same log
-// with the same options must produce identical strings (build-plan.md T2).
+// Stable serialization: object keys in code-unit order at every level, arrays in their own
+// order (two orders are two states). Two folds of the same log with the same options must
+// produce identical strings (build-plan.md T2). Written out by hand, not as JSON.stringify of
+// a key-sorted copy: an object lists integer-like keys ("9", "10") first and in numeric
+// order whatever order they were added in, so a sorted copy prints "9" before "10", which is
+// neither code-unit order nor what another language's canonical JSON prints.
 export function canonicalJson(value: unknown): string {
-  const norm = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(norm);
-    if (v && typeof v === "object") {
-      return Object.fromEntries(
-        Object.keys(v as object)
-          .sort(compareCodeUnits)
-          .map((k) => [k, norm((v as Record<string, unknown>)[k])]),
-      );
-    }
-    return v;
-  };
-  return JSON.stringify(norm(value)) ?? "undefined";
+  return canonical(value) ?? "undefined";
 }
+
+// JSON.stringify's rules with code-unit key order: toJSON is honoured, boxed primitives
+// unwrap, and undefined, functions, symbols and holes drop out of objects and read null in arrays.
+function canonical(value: unknown): string | undefined {
+  let v = value;
+  if (v !== null && typeof v === "object" && typeof (v as { toJSON?: unknown }).toJSON === "function") v = (v as { toJSON: () => unknown }).toJSON();
+  if (v instanceof String || v instanceof Number || v instanceof Boolean) v = v.valueOf();
+  if (Array.isArray(v)) return `[${Array.from(v, (x) => canonical(x) ?? "null").join(",")}]`;
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  const o = v as Record<string, unknown>;
+  const members = Object.keys(o).sort(compareCodeUnits).flatMap((k) => {
+    const s = canonical(o[k]);
+    return s === undefined ? [] : [`${JSON.stringify(k)}:${s}`];
+  });
+  return `{${members.join(",")}}`;
+}
+
+// The fingerprint of a fold: the sha256 of its canonical JSON. The one hash of a state:
+// `tira dump --hash`, `tira render` and the served page's chip all print this.
+export const fingerprint = (r: unknown): string => createHash("sha256").update(canonicalJson(r)).digest("hex");

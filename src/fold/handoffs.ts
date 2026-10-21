@@ -25,6 +25,7 @@ import { evaluate, type Intent } from "./evaluate.ts";
 import type { EntityRef, EntityState, StateView } from "./types.ts";
 import { entityKey } from "./types.ts";
 import { show } from "../text.ts";
+import { compareCodeUnits } from "./view.ts";
 
 export interface TriggerRecord {
   eventId: string;
@@ -199,5 +200,5 @@ export function pending(view: StateView, idx: TriggerIndex, registry: Registry, 
     const since = [...idx.values()].find((t) => t.eventId === r.correlationId)?.seq ?? 0;
     add(r.rule, entityKey(r.target), since, ev.ok ? "the dispatcher" : `a fix: ${ev.detail}`);
   }
-  return out.sort((a, b) => a.since - b.since || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return out.sort((a, b) => a.since - b.since || compareCodeUnits(a.key, b.key));
 }

@@ -17,9 +17,9 @@ import type { StoredEvent } from "../store/types.ts";
 import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
+import { esc } from "./escape.ts";
 import { foundPath, fx, layout, treePath } from "../serve/layout.mjs";
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.codePointAt(0)};`);
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
 const CLOSED = new Set(["done", "cancelled"]);
@@ -637,7 +637,7 @@ const whyLabel = (reason: string | undefined) => (reason !== undefined && reason
 // Under `tira serve`, each row offers what its state allows. Every action opens the
 // confirm page first (what tira will do, then what you fill in): nothing fires from here.
 const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", "Unblock"]], in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"]] };
-const confirmHref = (r: TreeRow, event: string) => `/confirm?type=${encodeURIComponent(r.type)}&amp;id=${encodeURIComponent(r.id)}&amp;event=${event}`;
+const confirmHref = (r: TreeRow, event: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}`);
 
 const actLink = (r: TreeRow, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
 

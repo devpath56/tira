@@ -18,7 +18,7 @@ import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
-import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
+import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
 
@@ -338,17 +338,17 @@ async function state(store: SqliteEventStore, registry: Registry, stream: string
 // runs, copies of the store file, or machines mean the replay is deterministic.
 async function dump(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
-  const json = canonicalJson(r);
   if (values.hash) {
-    const sha = sha256(json);
+    const sha = fingerprint(r);
     io.out(values.json ? JSON.stringify({ sha256: sha, stream, lastSeq: r.lastSeq }) : `sha256:${sha}  stream ${stream} · seq ${r.lastSeq}`);
   } else {
-    io.out(json);
+    io.out(canonicalJson(r));
   }
   return 0;
 }
 
-const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
+// A file's bytes, hashed (a factory input's snapshot). A state's hash is fingerprint (fold.ts).
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 // Health sweeps (src/sweep/sweep.ts). Exit 0 when nothing is broken (things to look at
 // are fine), 3 when something is.
@@ -385,7 +385,7 @@ async function tree(store: SqliteEventStore, registry: Registry, stream: string,
 async function render(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const events = await store.readStream(stream);
   const r = fold(events, registry, foldOptions(upTo, values));
-  const hash = sha256(canonicalJson(r));
+  const hash = fingerprint(r);
   const out = values.out ?? "tira.html";
   const shown = events.filter((e) => e.seq <= r.lastSeq); // render --at N: the panel judges what the page shows
   writeFileSync(out, renderHtml(r, stream, hash, events, { divergence: divergencePanel(factoryFile(values, io), shown, stream) }));
