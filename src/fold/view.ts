@@ -15,7 +15,7 @@ const byKey = (a: EntityState, b: EntityState) => compareCodeUnits(a.key, b.key)
 // Birth order: the store's monotonic sequence at creation, never a chosen key. Every queue
 // work is pulled from (the claimable briefs; tree roots, and so the cursor) orders by this
 // (convention claimable-birth-order).
-export const byBirth = (a: EntityState, b: EntityState): number => b.createdSeq - a.createdSeq;
+export const byBirth = (a: EntityState, b: EntityState): number => a.createdSeq - b.createdSeq;
 
 export function makeView(entities: ReadonlyMap<string, EntityState>): StateView {
   return {
