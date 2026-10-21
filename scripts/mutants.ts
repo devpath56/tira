@@ -384,6 +384,18 @@ const MUTANTS: Mutant[] = [
   { name: "b3 build: the retried dispatch journaled once", file: "scripts/b3-fixture.ts", find: "return [record, { ...record, ts: ts() }]; // journaled twice", replace: "return [record]; // journaled twice" },
   { name: "cli paths: anything outside the run folder is allowed", file: "scripts/cli-path.ts", find: "if (resolved !== baseDir && !resolved.startsWith(baseDir + sep)) {", replace: "if (false) {" },
   { name: "cli paths: a sibling folder that starts the same passes", file: "scripts/cli-path.ts", find: "!resolved.startsWith(baseDir + sep)", replace: "!resolved.startsWith(baseDir)" },
+  // KAN-8 label channel (2026-10-21): the enforcement the labels suite exists to hold —
+  // planted when the coverage hole was found (the suite did not run here, and nothing
+  // targeted the label source, so each of these survived by construction).
+  { name: "labels: the approver may label its own approval", file: "src/fold/labels.ts", find: "oracleName(intent.actor) === skeleton(approver)", replace: "oracleName(intent.actor) !== skeleton(approver)" },
+  { name: "labels: dangling evidence resolves", file: "src/fold/labels.ts", find: "|| !log.seen(ev)) return", replace: "|| log.seen(ev)) return" },
+  { name: "labels: the judged event need not be an approval", file: "src/fold/labels.ts", find: "approval.type !== APPROVAL", replace: "approval.type === APPROVAL" },
+  { name: "labels: a label may judge another brief's approval", file: "src/fold/labels.ts", find: "if (judged !== p.brief)", replace: "if (judged === p.brief)" },
+  { name: "labels: a confirmed-good label marks the approval bad", file: "src/fold/labels.ts", find: "if (verdict === \"found-bad\") a.verdict = \"found-bad\";", replace: "if (verdict === \"confirmed-good\") a.verdict = \"found-bad\";" },
+  { name: "labels: anyone may write a label", file: "src/tables/factory.ts", find: "isOracle(actor) && s(payload.brief)", replace: "true && s(payload.brief)" },
+  { name: "labels: an oracle may write non-label events at the write path", file: "src/write/write-path.ts", find: "if (!internal && isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (!internal && isOracle(intent.actor) && isLabelBirth(intent)) {" },
+  { name: "labels: an oracle may write non-label events in the fold", file: "src/fold/fold.ts", find: "if (isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (isOracle(intent.actor) && isLabelBirth(intent)) {" },
+  { name: "labels: a refused self-label still appends a rejection", file: "src/write/write-path.ts", find: "batch: [] as NewEvent[],", replace: "batch: [toRejectedEvent(intent, \"bad-label\", problem.detail, moveId)]," },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -402,7 +414,7 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "labels"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
