@@ -1,14 +1,15 @@
-// D1: the read-only HTML page. Four views of the same fold: progress (every task a stop
-// on one line, tira's closes carry its mark), a board (status columns, minimal cards),
-// lanes and activity. Words live in a drawer that opens when you click a task: its state,
-// marks and full event history. Tabs and drawers are CSS only (radio inputs and
-// :target), so the page needs no JS and nothing from the network: re-run `tira render`
-// and reload to refresh. The only motion is the drawer sliding in, off for reduced motion.
+// D1: the read-only HTML page. Three views of the same fold: the board (Kanban status
+// columns, or the whole tree as a graph, switched in its own bar; tira's closes carry its
+// mark), lanes and history. Words live in a dialog that opens over the page when you click
+// a task: its state, marks and full event history (never a side panel or a new page). Tabs,
+// the board's switch and dialogs are CSS only (radio inputs and :target), so the page needs
+// no JS and nothing from the network: re-run `tira render` and reload to refresh. The only
+// motion is the dialog fading in, off for reduced motion.
 // Deterministic: the same fold renders the same bytes. Each tree node carries data-*
-// attributes once (on its tree-view glyph) and the page carries the `tira dump --hash`,
-// so manual test M1 can check the page against the dump node-for-node. Parents tira
-// closed carry a leaf, and every node is one click from its event trail (ruling
-// 2026-10-18: the machine is never invisible).
+// attributes once (on its graph node) and the page carries the `tira dump --hash`, so
+// manual test M1 can check the page against the dump node-for-node. Parents tira closed
+// carry a bolt, and every node is one click from its event trail (ruling 2026-10-18: the
+// machine is never invisible).
 import type { FoldResult, Rejection } from "../fold/fold.ts";
 import { MACHINE_ACTOR, type EntityState } from "../fold/types.ts";
 import { REJECTED, type EventData, type RejectedData } from "../fold/events.ts";
@@ -16,6 +17,7 @@ import type { StoredEvent } from "../store/types.ts";
 import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
+import { foundPath, layout, treePath } from "../serve/layout.mjs";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.codePointAt(0)};`);
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -57,8 +59,8 @@ a{color:inherit;text-decoration:none}
 .tabs label{display:flex;align-items:center;cursor:pointer;font-weight:550;font-size:14px;padding:0 10px;color:var(--mut);border-top:2px solid transparent;border-bottom:2px solid transparent}
 .tabs label:hover{color:var(--fg)}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
-#v-train:checked~main .tabs label[for=v-train],#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{color:var(--accent);border-bottom-color:var(--accent)}
-#v-train:focus-visible~main .tabs label[for=v-train],#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--accent);outline-offset:-2px}
+#v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{color:var(--accent);border-bottom-color:var(--accent)}
+#v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--accent);outline-offset:-2px}
 .kbd{margin-left:auto;min-width:240px;text-align:left;font:500 13px var(--sans);color:var(--dim);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:6px 10px;cursor:pointer}
 .kbd:hover{background:var(--hover)}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
@@ -86,7 +88,7 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .stats svg{display:none}
 .stats .warn{border-color:var(--block)}.stats .warn,.stats .warn b{color:var(--block)}
 .view{display:none;margin-top:16px}
-#v-train:checked~main .view-train,#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
+#v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
 .attention{margin:0 0 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
 .att-head{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:12px 16px}
 .att-head h2{margin:0;font-size:14px;font-weight:650;display:flex;align-items:center;gap:8px}
@@ -120,47 +122,64 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .divergence.unevaluable p.why{margin:0;padding:0 16px 12px;font-size:13px;overflow-wrap:anywhere}
 .act{display:inline-block;font:550 12.5px/1.4 var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:4px 11px;cursor:pointer;box-shadow:var(--shadow)}
 .act:hover{background:var(--hover)}
-.journey{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 16px 14px;overflow-x:auto;scrollbar-width:thin;box-shadow:var(--shadow)}
-.line{display:flex;align-items:flex-start;width:100%;min-width:max-content;margin:0;padding:0;list-style:none}
-.leg{display:flex;flex-direction:column;min-width:0;flex:var(--n) 0 auto}
-.leg-name{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin:0 8px 20px;padding-left:8px;border-left:2px solid var(--line-2);white-space:nowrap;display:flex;align-items:center;gap:6px}
-.leg-name svg{width:12px;height:12px;color:var(--accent)}
-.stops{display:flex;flex:1;margin:0;padding:0;list-style:none}
-.stop{position:relative;flex:1 0 118px;display:flex;flex-direction:column;align-items:center}
-.stop::before,.stop::after{content:"";position:absolute;top:20px;height:2px;width:50%;background:var(--line-2);z-index:0}
-.stop::before{left:0}.stop::after{right:0}
-.stop.first::before,.stop.last::after{display:none}
-.stop.from-closed::before,.stop.closed::after{background:var(--done)}
-.stop-link{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 6px;border-radius:var(--r)}
-.sd{width:22px;height:22px;margin-top:10px;border-radius:999px;display:grid;place-items:center;background:var(--panel);border:2px solid var(--line-2);color:var(--dim)}
-.stop-link:hover .sd{border-color:var(--accent)}
-.sd svg{width:12px;height:12px}
-.st-done .sd{background:var(--done);border-color:var(--done);color:var(--panel)}
-.st-cancelled .sd{background:var(--gone-bg);border-color:var(--gone);color:var(--gone)}
-.st-blocked .sd{background:var(--block-bg);border-color:var(--block);color:var(--block)}
-.st-in_progress .sd{background:var(--prog-bg);border-color:var(--prog);color:var(--prog)}
-.stop.is-next .sd{box-shadow:0 0 0 4px var(--accent-bg)}.stop.is-active .sd{box-shadow:0 0 0 4px var(--prog-bg)}
-.stop .name{font-size:12px;font-weight:550;text-align:center;max-width:110px;overflow-wrap:anywhere;line-height:1.3;color:var(--fg)}
+.board-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin:0 0 12px}
+.seg{display:inline-flex;gap:2px;padding:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r)}
+.seg label{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:4px;font-weight:550;font-size:13px;color:var(--mut);cursor:pointer}
+.seg label:hover{color:var(--fg)}.seg svg{width:14px;height:14px}
+#bv-kanban:checked~.board-bar label[for=bv-kanban],#bv-graph:checked~.board-bar label[for=bv-graph]{color:var(--accent-text);background:var(--accent-bg)}
+#bv-kanban:focus-visible~.board-bar label[for=bv-kanban],#bv-graph:focus-visible~.board-bar label[for=bv-graph]{outline:2px solid var(--accent);outline-offset:1px}
+.bv{display:none}
+#bv-kanban:checked~.bv-kanban,#bv-graph:checked~.bv-graph{display:block}
+.legend{display:none;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--mut)}#bv-graph:checked~.board-bar .legend{display:flex}
+.legend>span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.legend svg{width:12px;height:12px;color:var(--accent)}
+.legend i{display:block;width:10px;height:10px;border-radius:999px;border:2px solid var(--line-2);background:var(--panel)}
+.legend i.m-done{border-color:var(--done)}.legend i.m-in_progress{border-color:var(--prog)}.legend i.m-blocked{border-color:var(--block)}.legend i.m-cancelled{border-color:var(--gone);background:var(--gone-bg)}
+.lg-next{color:var(--accent);font-size:11px}.lg-ring{display:block;width:10px;height:10px;border-radius:999px;border:1.5px dashed var(--warn)}.lg-found{display:block;width:16px;border-top:2px dotted var(--accent)}
+.graph-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow-x:auto;scrollbar-width:thin;padding:0 16px}
+.graph{position:relative;margin:0 auto}
+.edges{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.edges path{fill:none;stroke:var(--line-2);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.edges path.done{stroke:var(--done)}.edges path.found{stroke:var(--accent);stroke-dasharray:2 4;stroke-linecap:round}.edges path.done.found{stroke:var(--done)}
+.gn{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:2px;padding:6px 10px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.gn:hover{border-color:var(--accent);background:var(--hover)}
+.gn .gt{display:flex;align-items:center;gap:6px;min-width:0}
+.sd{flex:none;width:16px;height:16px;border-radius:999px;display:grid;place-items:center;background:var(--panel);border:1.5px solid var(--line-2);color:var(--dim)}.sd svg{width:9px;height:9px}
+.st-done .sd{background:var(--done);border-color:var(--done);color:var(--panel)}.st-cancelled .sd{background:var(--gone-bg);border-color:var(--gone);color:var(--gone)}
+.st-blocked .sd{background:var(--block-bg);border-color:var(--block);color:var(--block)}.st-in_progress .sd{background:var(--prog-bg);border-color:var(--prog);color:var(--prog)}
 .st-done .name{color:var(--mut)}.st-cancelled .name{color:var(--dim);text-decoration:line-through}
-.marker{position:absolute;top:0;left:50%;transform:translateX(-50%);width:12px;height:8px;color:var(--accent)}
-.here{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:1px 6px}
-.routes{display:grid;margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow)}
-.route{display:grid;grid-template-columns:minmax(140px,1.1fr) minmax(0,2fr) auto;align-items:center;gap:12px;padding:10px 16px 10px calc(16px + (var(--d) - 1) * 20px);border-top:1px solid var(--line)}
-.route:first-child{border-top:0}.route:hover{background:var(--hover)}
-.route .rn{font-weight:600;display:flex;align-items:center;gap:7px;min-width:0;overflow-wrap:anywhere}
-.route .rn svg{width:13px;height:13px;color:var(--accent);flex:none}
-.mini{display:flex;align-items:center;min-width:0}
-.mini i{display:block;width:10px;height:10px;border-radius:999px;border:2px solid var(--line-2);background:var(--panel);flex:none}
-.mini b{display:block;height:2px;flex:1 1 10px;min-width:6px;max-width:44px;background:var(--line-2)}
-.mini b.on{background:var(--done)}
-.mini i.m-done{background:var(--done);border-color:var(--done)}.mini i.m-cancelled{background:var(--gone-bg);border-color:var(--gone)}
-.mini i.m-in_progress{background:var(--prog-bg);border-color:var(--prog)}.mini i.m-blocked{background:var(--block-bg);border-color:var(--block)}
-.route .ct{white-space:nowrap}.route .left{color:var(--dim)}
+.here{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.gn .name{min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gn .gm{padding-left:22px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gn.parent{background:var(--panel-2)}.gn.parent .name{font-weight:650}
+.gn.st-in_progress{border-color:var(--prog)}.gn.st-blocked{border-color:var(--block);background:var(--block-bg)}.gn.st-done{border-color:var(--done)}.gn.st-cancelled{border-style:dashed}
+.gn.is-next{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}.gn.is-active{box-shadow:0 0 0 3px var(--prog-bg)}
+.gn .here{position:absolute;top:-10px;left:10px}
+.gm .tira-mark,.gm .wait-ring{display:inline-block;vertical-align:-2px;margin-right:4px}.tira-mark svg{display:block;width:12px;height:12px;color:var(--accent)}
+.graph-wrap.canvas{position:relative;overflow:hidden;height:clamp(360px,64vh,760px);padding:0;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;background-image:radial-gradient(circle,var(--line-2) 1px,transparent 1.3px);background-size:var(--gs,24px) var(--gs,24px);background-position:var(--gx,0) var(--gy,0)}
+.graph-wrap.canvas.panning{cursor:grabbing}.graph-wrap.canvas:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.canvas .graph{position:absolute;left:0;top:0;margin:0;transform-origin:0 0}
+.graph-wrap.full{position:fixed;inset:0;z-index:9;height:auto;border:0;border-radius:0}body:has(.graph-wrap.full){overflow:hidden}
+.gn[hidden],.fold[hidden]{display:none}
+.gn.folded{box-shadow:4px 4px 0 -1px var(--raised),4px 4px 0 0 var(--line-2)}
+.fold{position:absolute;z-index:2;transform:translate(-50%,-50%);min-width:20px;height:20px;padding:0 6px;border:1px solid var(--line-2);border-radius:999px;background:var(--panel);color:var(--mut);font:650 11px/1 var(--sans);font-variant-numeric:tabular-nums;cursor:pointer}
+.fold:hover{border-color:var(--accent);color:var(--accent)}.fold.is-folded{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent)}
+.fold.is-folded.has-next{box-shadow:0 0 0 3px var(--accent-bg)}.fold.is-folded.has-blocked{color:var(--block);background:var(--block-bg);border-color:var(--block)}
+.canvas-tools{position:absolute;top:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;max-width:calc(100% - 20px);cursor:default}
+.tool-group{display:inline-flex;align-items:center;gap:2px;padding:2px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.tool{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:26px;min-width:26px;padding:0 8px;border:0;border-radius:4px;background:none;color:var(--fg);font:550 12.5px var(--sans);white-space:nowrap;cursor:pointer}
+.tool:hover{background:var(--hover)}.tool:disabled{color:var(--dim);cursor:default;background:none}.tool[aria-pressed=true]{color:var(--accent-text);background:var(--accent-bg)}
+.tool.icon{padding:0 5px}.tool svg{width:15px;height:15px}.tool.zoom{min-width:50px;color:var(--mut);font-variant-numeric:tabular-nums}
+.canvas-hint{position:absolute;left:12px;bottom:10px;z-index:3;font-size:11.5px;color:var(--dim);pointer-events:none}
+.canvas-flash{position:absolute;left:50%;bottom:12px;z-index:3;transform:translateX(-50%);display:none;max-width:calc(100% - 24px);padding:8px 14px;border-radius:var(--r);font-size:13px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--done);box-shadow:var(--shadow)}
+.canvas-flash.no{border-left-color:var(--block)}.full .canvas-flash{display:block}.full .canvas-hint{display:none}
+.hide-found .edges path.found{stroke:var(--line-2);stroke-dasharray:none}.hide-found .edges path.done.found{stroke:var(--done)}
+.edges path.blocks{stroke:var(--block);stroke-dasharray:7 4;stroke-width:2}.edges path.blocks.done{stroke:var(--done)}.lg-blocks{display:block;width:16px;border-top:2px dashed var(--block)}
+.links{display:grid;gap:6px;margin-top:12px}.links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block);min-width:78px}.links a{font-weight:600;color:var(--accent)}.links a:hover{text-decoration:underline}
+.att-row .by{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}.att-row .by a{font-weight:600;color:var(--accent)}.att-row .ready{display:inline;font-size:10.5px}
+.chip.blocks{color:var(--block);border-color:var(--block);background:var(--block-bg)}
+.blocked-by{display:grid;gap:6px;margin:0 0 10px;font-weight:600;font-size:13px}.blocked-by input{font:500 14px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.blocked-by input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.your-action .blocked-by+.fills{margin:-2px 0 10px}
 .wait-ring{width:12px;height:12px;border-radius:999px;border:1.5px dashed var(--warn);flex:none}
-.strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:16px}
-.br{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px 12px;box-shadow:var(--shadow)}
-.br:hover{border-color:var(--line-2);background:var(--hover)}
-.br .nm{font-weight:600;overflow-wrap:anywhere}.br svg{width:13px;height:13px;color:var(--accent);flex:none}
 .meter{flex:1;min-width:40px;height:6px;border-radius:3px;background:var(--gone-bg);overflow:hidden;display:flex}.meter i{display:block;height:100%}
 .m-done{background:var(--done)}.m-cancelled{background:var(--gone)}.m-in_progress{background:var(--prog)}.m-blocked{background:var(--block)}
 .ct{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
@@ -195,9 +214,13 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .pairs .arrow{color:var(--accent);font-weight:700}.pairs code{font-family:var(--mono);font-size:11.5px;color:var(--fg)}
 .ready{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--done);display:block}
 .needs{font-size:11px;color:var(--warn);display:block;overflow-wrap:anywhere}
-.drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--line);padding:20px 24px 24px;overflow-y:auto;visibility:hidden;transform:translateX(100%);transition:transform .2s ease,visibility 0s .2s;box-shadow:-12px 0 32px rgba(16,24,40,.14);z-index:10}
-.drawer:target{visibility:visible;transform:none;transition:transform .2s ease}
-.drawer .close{position:absolute;right:16px;top:14px;width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r);border:1px solid transparent;color:var(--mut);font-size:18px}
+.drawer{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:24px 16px;visibility:hidden;opacity:0;transition:opacity .15s ease,visibility 0s .15s}
+.drawer:target{visibility:visible;opacity:1;transition:opacity .15s ease}
+body:has(.drawer:target){overflow:hidden}
+.scrim{position:absolute;inset:0;background:rgba(9,30,66,.54);cursor:default}
+.modal-box{position:relative;width:min(640px,100%);max-height:min(82vh,760px);overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:0 8px 24px rgba(9,30,66,.25);padding:20px 24px 24px;transform:translateY(8px);transition:transform .15s ease}
+.drawer:target .modal-box{transform:none}
+.drawer .close{position:absolute;right:14px;top:12px;width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r);border:1px solid transparent;color:var(--mut);font-size:18px}
 .drawer .close:hover{background:var(--hover);border-color:var(--line);color:var(--fg)}
 .drawer h2{margin:4px 0 2px;font-size:18px;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere;padding-right:32px}
 .path{color:var(--dim);font-size:12px;overflow-wrap:anywhere}
@@ -207,6 +230,12 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .s-done{color:var(--done);background:var(--done-bg)}.s-cancelled{color:var(--gone);background:var(--gone-bg)}
 .mark{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:4px;background:var(--gone-bg);color:var(--mut)}
 .mark.cursor,.mark.tira{color:var(--accent-text);background:var(--accent-bg)}.mark.active{color:var(--prog);background:var(--prog-bg)}.mark.wait{color:var(--warn);background:var(--warn-bg)}
+.kids-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px}
+.kids-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}
+.kids-list a{font-weight:600;color:var(--accent);overflow-wrap:anywhere}.kids-list a:hover{text-decoration:underline}
+.proof{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--done);border-radius:var(--r);background:var(--done-bg)}
+.proof-k{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--done)}.proof-v{font-family:var(--mono);font-size:12.5px;color:var(--fg);overflow-wrap:anywhere}
+.drawer-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .kids{display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--mut);font-size:12.5px}
 details.trail{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
 details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;min-height:24px}
@@ -228,6 +257,24 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .hash{font-family:var(--mono);font-size:12px;color:var(--mut);word-break:break-all}
 .others{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .alert{border:1px solid var(--line);border-left:4px solid var(--block);background:var(--block-bg);border-radius:var(--r);padding:8px 12px;margin:12px 0 0;color:var(--block);font-size:13px;font-weight:600}
+.packet-page{max-width:1000px}.packet-page>.how{display:inline-block;margin-top:20px}
+.packet h1{font-size:20px;font-weight:650;letter-spacing:-.01em;margin:12px 0 16px}
+.packet section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;margin:0;box-shadow:var(--shadow)}
+.packet h2{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 10px}.packet ul{margin:0;padding-left:18px}.packet li{margin:4px 0}
+.verdict{margin:12px 0 0;padding:8px 12px;border-radius:var(--r);border-left:4px solid;font-weight:600}.verdict.ok{color:var(--done);background:var(--done-bg)}.verdict.no{color:var(--block);background:var(--block-bg)}
+.hint{margin:10px 0 0;font-size:13.5px;color:var(--fg)}.hint b{font-weight:650}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:stretch;margin:0 0 14px}
+.brief p{margin:0 0 8px;font-size:13.5px;line-height:1.55;overflow-wrap:anywhere}.brief p b{font-weight:650}.brief .verdict{margin-top:10px}
+.your-action textarea{display:block;width:100%;min-height:150px;resize:vertical;font:12.5px/1.6 var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 12px}.your-action textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.cmd-help{margin:8px 0 0;font-size:12px;color:var(--mut)}
+.fills{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}.fills span{font-size:12px;color:var(--mut)}
+.fill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 12px var(--sans);color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}.fill:hover{border-color:var(--accent);color:var(--accent)}
+.run{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;margin:0 0 14px}.run .how{margin-left:0}
+.act.primary{padding:8px 16px;font-size:13.5px;color:var(--btn-fg);background:var(--btn);border-color:var(--btn)}.act.primary:hover{filter:brightness(1.1)}
+button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--accent);cursor:pointer}
+.confirm-dialog{width:min(1000px,calc(100vw - 32px));max-height:min(90vh,860px);padding:0;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg);color:var(--fg);box-shadow:0 8px 24px rgba(9,30,66,.25)}
+.confirm-dialog::backdrop{background:rgba(9,30,66,.54)}
+.confirm-dialog .packet{padding:20px 24px 6px}.confirm-dialog .packet h1{margin-top:0}
 .guide p{margin:0 0 12px;color:var(--fg);font-size:13.5px;line-height:1.6}.guide code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
 .palette{position:fixed;inset:0;background:rgba(5,12,31,.46);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;z-index:50}
 .palette[hidden]{display:none}
@@ -238,24 +285,16 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .pal-list li[aria-selected=true]{background:var(--accent-bg)}
 .pal-list .pid{font-weight:600}.pal-list .ppath{color:var(--dim);font-size:12px;overflow-wrap:anywhere}.pal-list .pverb{margin-left:auto;font-size:12px;font-weight:600;color:var(--accent)}
 .pal-hint{padding:8px 14px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);background:var(--panel-2)}
+@media (max-width:720px){.split{grid-template-columns:1fr}}
 @media (max-width:640px){
 main{padding:0 16px 48px}
 .tabs{margin:0;overflow-x:auto}.tabs label{padding:6px 10px}.kbd{min-width:0}.brand{padding-right:0}
-.journey{overflow:visible;padding:14px 12px}
-.line,.stops{flex-direction:column;min-width:0}
-.leg-name{margin:6px 0}.leg{flex:none}
-.stop{width:auto;flex:none;flex-direction:row;align-items:center;min-height:48px}
-.stop::before,.stop::after{top:auto;left:10px;right:auto;width:2px;height:50%}
-.stop::before{top:0}.stop::after{bottom:0}
-.stop-link{flex-direction:row;gap:12px;padding:0}
-.sd{margin-top:0;order:1}.stop .name{text-align:left;max-width:none;order:2}
-.marker{order:3;position:static;transform:rotate(90deg);width:10px;height:7px}.here{order:4}
-.route{grid-template-columns:1fr auto;padding-left:calc(16px + (var(--d) - 1) * 10px)}
-.route .mini{grid-column:1 / -1;order:3}
+.graph-wrap{padding:0 12px}.canvas-hint{display:none}
+.canvas-tools{left:8px;right:8px;max-width:none;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;scrollbar-width:none}.tool-group{flex:none}
 }
 @media (max-width:560px){.big{flex:1 1 100%}.lanes{grid-template-columns:1fr;overflow:visible}.lanes .lh{display:none}.lanes .who{padding-top:10px}.lane::before{content:attr(data-region);font-size:11px;color:var(--dim);min-width:52px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
-@media print{body{background:#fff}.top{border-image:none;border-bottom:1px solid var(--line)}.tabs,.kbd,.top .how,.theme{display:none}.view{display:block!important}.drawer{display:none}.journey{overflow:visible}}
+@media print{body{background:#fff}.top{border-image:none;border-bottom:1px solid var(--line)}.tabs,.kbd,.top .how,.theme{display:none}.view{display:block!important}.drawer{display:none}.board-bar{display:none}.bv{display:block!important}.graph-wrap{overflow:visible}}
 `;
 
 const ICON = {
@@ -269,17 +308,22 @@ const ICON = {
   sun: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>`,
   moon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.5 5.5 0 0 1 6.4 2.8a5.5 5.5 0 1 0 6.8 6.8z"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
+  kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
+  graph: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="3.4" rx="1"/><rect x="1.5" y="10.8" width="4.4" height="3.4" rx="1"/><rect x="10.1" y="10.8" width="4.4" height="3.4" rx="1"/><path d="M8 5.2v2.6M3.7 10.8V7.8h8.6v3"/></svg>`,
 };
 
-// ---------- progress line ----------
-// The work (leaf tasks) as stops on one line, in tree order: filled stops are closed,
-// the marker sits on the cursor (the next task), hollow stops are what's left. Stops
-// are grouped under their parent's name. Below, one short line per parent: its
-// children as stops, closed / total and what's left.
+// ---------- graph ----------
+// The board's other style: every task as a node of a top-down tree, a parent above its
+// children, joined by lines that turn green once the child is closed; a dotted line joins a
+// task to the one it was found while working on. The places come from layout.mjs, shared
+// with the live canvas: a tidy tree, whole pixels from the tree alone, so the bytes still
+// depend only on the fold. A rendered file scrolls; live, graph.mjs makes it a canvas you
+// pan, zoom and fold. Each node opens its task's dialog and carries the fold's flags: the
+// one place on the page they appear, once per task (M1).
 
 interface Placed { row: TreeRow; i: number; parent?: Placed }
 
-// Preorder: the drawer ids (#t<i>) and the train's stop order.
+// Preorder: the dialog ids (#t<i>) and the graph's left-to-right order.
 function indexNodes(roots: TreeRow[]): Placed[] {
   const out: Placed[] = [];
   const walk = (row: TreeRow, parent?: Placed) => {
@@ -297,59 +341,98 @@ const STOP_GLYPH: Record<string, string> = {
   blocked: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M8 3.8v5M8 12v.2"/></svg>`,
   in_progress: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/></svg>`,
 };
-const NEXT_MARK = `<svg class="marker" viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1h10L6 7z" fill="currentColor"/></svg>`;
+// The board's words for a state, the same as its columns.
+const STATE_WORD: Record<string, string> = { unstarted: "to do", in_progress: "in progress", blocked: "blocked", done: "done", cancelled: "dropped" };
+const word = (state: string) => STATE_WORD[state] ?? state;
 
 const nodeAttrs = (r: TreeRow, lines: number) =>
   `data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines}"`;
 
-function trainHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
-  const stops = nodes.filter((n) => n.row.children.length === 0);
-  // consecutive stops that share a parent ride the same leg
-  const legs: Placed[][] = [];
-  for (const s of stops) {
-    const leg = legs.at(-1);
-    if (leg && leg[0]?.parent === s.parent) leg.push(s);
-    else legs.push([s]);
-  }
-  let k = 0;
-  const stop = (n: Placed) => {
-    const r = n.row;
-    const at = k++;
-    const prev = stops[at - 1];
-    const cls = [
-      "stop", `st-${r.state}`, at === 0 ? "first" : "", at === stops.length - 1 ? "last" : "",
-      CLOSED.has(r.state) ? "closed" : "", prev && CLOSED.has(prev.row.state) ? "from-closed" : "",
-      r.cursor ? "is-next" : "", r.active ? "is-active" : "",
-    ].filter(Boolean).join(" ");
-    const lines = trail.get(r.key) ?? [];
-    const label = `${r.id}, ${r.state.replace("_", " ")}${r.cursor ? ", next" : ""}${r.active ? ", active" : ""}`;
-    return `<li class="${cls}"><a class="stop-link" href="#t${n.i}" aria-label="${esc(label)}" ${nodeAttrs(r, lines.length)}>`
-      + `${r.cursor ? NEXT_MARK : ""}<span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}${r.discoveredDuring ? " ✦" : ""}</span>${r.cursor ? `<span class="here">${r.active ? "on it" : "next"}</span>` : ""}</a></li>`;
-  };
-  const html = legs.map((leg) => {
-    const p = leg[0]?.parent?.row;
-    const name = p ? `<span class="leg-name">${p.closedByTira ? ICON.auto : ""}${esc(short(p.id))}</span>` : `<span class="leg-name">top level</span>`;
-    return `<li class="leg" style="--n:${leg.length}">${name}<ol class="stops">${leg.map(stop).join("")}</ol></li>`;
-  }).join("");
-  return `<div class="journey"><ol class="line" aria-label="Tasks in order">${html}</ol></div>`;
+function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+  const kids = new Map<Placed, Placed[]>();
+  for (const n of nodes) if (n.parent) kids.set(n.parent, [...(kids.get(n.parent) ?? []), n]);
+  const L = layout(nodes.map((n) => ({ key: n.row.key, parent: n.parent?.row.key })));
+  const at = (n: Placed) => L.at.get(n.row.key) ?? { x: 0, y: 0 };
+  const byKey = new Map(nodes.map((n) => [n.row.key, n]));
+  const tree = nodes.filter((n) => n.parent).map((n) => {
+    const p = n.parent as Placed;
+    // the child blocks its parent: the line itself is the blocks link (red); found while
+    // working on its own parent: the line itself is dotted
+    const blocking = links.blockedBy.get(p.row.key) === n.row.key;
+    let style = "";
+    if (blocking) style = "blocks";
+    else if (n.row.discoveredDuring === p.row.key) style = "found";
+    const cls = [CLOSED.has(n.row.state) ? "e done" : "e", style].filter(Boolean).join(" ");
+    return `<path class="${cls}" data-from="${esc(p.row.key)}" data-to="${esc(n.row.key)}" d="${treePath(at(p), at(n))}"/>`;
+  });
+  const found = nodes.filter((n) => n.row.discoveredDuring !== undefined && n.row.discoveredDuring !== n.parent?.row.key && byKey.has(n.row.discoveredDuring)).map((n) => {
+    const d = byKey.get(n.row.discoveredDuring as string) as Placed;
+    return `<path class="e found" data-from="${esc(d.row.key)}" data-found="${esc(n.row.key)}" d="${foundPath(at(d), at(n))}"/>`;
+  });
+  // a blocker elsewhere in the tree: a dashed red arc from it to what it blocks
+  const blockArcs = [...links.blockedBy].filter(([key, by]) => byKey.get(key)?.parent?.row.key !== by && byKey.get(by)?.parent?.row.key !== key).map(([key, by]) => {
+    const [b, k] = [byKey.get(by) as Placed, byKey.get(key) as Placed];
+    return `<path class="e blocks${CLOSED.has(b.row.state) ? " done" : ""}" data-from="${esc(by)}" data-blocks="${esc(key)}" d="${foundPath(at(b), at(k))}"/>`;
+  });
+  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length);
+  // Live, graph.mjs turns the box into a canvas (pan, zoom, folds); a rendered file scrolls.
+  return `<div class="graph-wrap" data-graph><div class="graph" role="group" aria-label="Tasks as a tree" style="width:${fx(L.width)}px;height:${L.height}px">`
+    + `<svg class="edges" viewBox="0 0 ${fx(L.width)} ${L.height}" aria-hidden="true">${tree.join("")}${found.join("")}${blockArcs.join("")}</svg>`
+    + `${nodes.map(node).join("")}</div></div>`;
 }
 
-function routesHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
-  const parents = nodes.filter((n) => n.row.children.length > 0);
-  if (parents.length === 0) return "";
-  return `<div class="routes">${parents.map((n) => {
-    const r = n.row;
-    const kids = r.children;
-    const closed = kids.filter((c) => CLOSED.has(c.state)).length;
-    const mini = kids.map((c, j) => `${j > 0 ? `<b class="${CLOSED.has(kids[j - 1]?.state ?? "") ? "on" : ""}"></b>` : ""}<i class="m-${esc(c.state)}" title="${esc(c.id)}: ${esc(c.state.replace("_", " "))}"></i>`).join("");
-    const marks = `${r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : ""}${r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : ""}`;
-    const left = kids.length - closed;
-    const noun = kids.length === 1 ? "task" : "tasks";
-    const leftText = left === 0 ? "· all closed" : "· " + left + " left";
-    return `<a class="route" href="#t${n.i}" style="--d:${r.depth}" aria-label="${esc(`${r.id}: ${closed} of ${kids.length} closed`)}" ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
-      + `<span class="rn">${marks}${esc(short(r.id))}</span><span class="mini" aria-hidden="true">${mini}</span>`
-      + `<span class="ct">${closed} of ${kids.length} ${noun} closed <span class="left">${leftText}</span></span></a>`;
-  }).join("")}</div>`;
+// What a graph node says to a screen reader: the task, its state, and its links.
+function nodeLabel(n: Placed, ks: Placed[], closed: number, byKey: ReadonlyMap<string, Placed>, links: Links): string {
+  const r = n.row;
+  const blocks = (links.blocks.get(r.key) ?? []).map((k) => byKey.get(k)?.row.id ?? k);
+  const by = links.blockedBy.get(r.key);
+  const said = [r.id, word(r.state)];
+  if (ks.length > 0) said.push(`${closed} of ${ks.length} subtasks closed`);
+  if (by !== undefined) said.push("blocked by " + (byKey.get(by)?.row.id ?? by));
+  if (blocks.length > 0) said.push("blocks " + blocks.join(", "));
+  if (r.cursor) said.push("next");
+  if (r.active) said.push("active");
+  return said.join(", ");
+}
+
+// One task on the graph: a link to its dialog, carrying the fold's flags (M1).
+function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number): string {
+  const r = n.row;
+  const closed = ks.filter((c) => CLOSED.has(c.row.state)).length;
+  const left = ks.length - closed;
+  const cls = [
+    "gn", `st-${r.state}`, ks.length > 0 ? "parent" : "",
+    r.cursor ? "is-next" : "", r.active ? "is-active" : "",
+  ].filter(Boolean).join(" ");
+  const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
+  const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
+  const marks = tiraMark + waitRing;
+  const leftText = left === 0 ? "" : " · " + left + " left";
+  const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
+  const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
+  const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
+  const pinWord = r.active ? "now" : "next";
+  const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
+  return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
+    + pin
+    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
+    + `<span class="gm">${marks}${meta}</span></a>`;
+}
+
+// What the graph's colours and marks mean, beside the switch while the graph shows.
+const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done"></i>done</span><span><i class="m-in_progress"></i>in progress</span><span><i class="m-blocked"></i>blocked</span><span><i></i>to do</span><span><i class="m-cancelled"></i>dropped</span>`
+  + `<span><b class="lg-next">◆</b>next</span><span>${ICON.auto}closed by tira</span><span><b class="lg-ring"></b>tira closes it when you move on</span><span><b class="lg-found"></b>found while working on</span><span><b class="lg-blocks"></b>blocks</span></span>`;
+
+// The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
+// Kanban by default; live, app.mjs remembers the choice so it survives the reload after
+// every action.
+function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+  const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
+  const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
+  const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
+  return radios
+    + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links)}</div>`;
 }
 
 // ---------- history ----------
@@ -428,10 +511,33 @@ function meter(states: string[]): string {
     .map(([s, n]) => `<i class="m-${s}" style="width:${fx((n / states.length) * 100)}%"></i>`).join("")}</span>`;
 }
 
-// The drawer for one task: where the words live. Opens via #t<i> (CSS :target).
-function drawerHtml(n: Placed, lines: TrailEntry[], path: string): string {
-  const r = n.row;
-  const marks = [
+// A click outside a dialog closes it: the dimmed page behind the box is a link back to "#_".
+const SCRIM = `<a class="scrim" href="#_" tabindex="-1" aria-hidden="true"></a>`;
+
+// The dialog for one task: where the words live. Opens over the page via #t<i> (CSS :target),
+// never as a side panel or a new page.
+// A done task's proof of work: the evidence its completion carries (the latest completion
+// since its last re-open, among the events replay applied).
+interface Proof { ref: string; actor: string; seq: number }
+
+// What a task's dialog offers under `tira serve`, by state. Each opens its confirm dialog.
+const DIALOG_ACTIONS: Record<string, [string, string][]> = {
+  unstarted: [["START", "Start"], ["BLOCK", "Block"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
+  in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
+  blocked: [["UNBLOCK", "Unblock"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
+  done: [["REOPEN", "Reopen"]],
+};
+
+interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; links: Links; rowOf: ReadonlyMap<string, TreeRow> }
+
+// A linked task: one click to its dialog, with its state.
+const linkTo = (key: string, ctx: Pick<DialogContext, "indexOf" | "rowOf">) => {
+  const row = ctx.rowOf.get(key);
+  return row ? `<a href="#t${ctx.indexOf.get(key)}">${esc(row.id)}</a>${stateBadge(row.state)}` : "";
+};
+
+function marksHtml(r: TreeRow): string {
+  return [
     r.cursor ? `<span class="mark cursor">◆ next</span>` : "",
     r.active ? `<span class="mark active">● active</span>` : "",
     r.drained ? `<span class="mark drained">drained</span>` : "",
@@ -439,14 +545,38 @@ function drawerHtml(n: Placed, lines: TrailEntry[], path: string): string {
     r.awaitingClose ? `<span class="mark wait">tira closes it when you move on</span>` : "",
     r.discoveredDuring ? `<span class="mark">found during ${esc(bare(r.discoveredDuring))}</span>` : "",
   ].filter(Boolean).join("");
+}
+
+// which subtasks, not just how many: each with its state, one click to its own dialog
+function kidsHtml(r: TreeRow, ctx: DialogContext): string {
+  if (r.children.length === 0) return "";
   const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
-  const kidNoun = r.children.length === 1 ? "child" : "children";
-  const kids = r.children.length > 0
-    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div>`
-    : "";
-  return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marks}</div>${kids}`
-    + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></section>`;
+  const kidNoun = r.children.length === 1 ? "subtask" : "subtasks";
+  const kidsList = r.children.map((c) => `<li><a href="#t${ctx.indexOf.get(c.key)}">${esc(c.id)}</a>${stateBadge(c.state)}</li>`).join("");
+  return `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div><ul class="kids-list" aria-label="Subtasks">${kidsList}</ul>`;
+}
+
+function proofHtml(r: TreeRow, ctx: DialogContext): string {
+  if (r.state !== "done" || !ctx.proof) return "";
+  return `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${esc(ctx.proof.ref)}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`;
+}
+
+// the blocks link, both ways: a blocked task names its blocker ticket, the ticket what it blocks
+function linksHtml(r: TreeRow, ctx: DialogContext): string {
+  const by = ctx.links.blockedBy.get(r.key);
+  const blocks = ctx.links.blocks.get(r.key) ?? [];
+  const byLine = by === undefined ? "" : `<p><span class="lk">Blocked by</span>${linkTo(by, ctx)}</p>`;
+  const blocksLine = blocks.length === 0 ? "" : `<p><span class="lk">Blocks</span>${blocks.map((k) => linkTo(k, ctx)).join("")}</p>`;
+  return (byLine + blocksLine) === "" ? "" : `<div class="links" data-links>${byLine}${blocksLine}</div>`;
+}
+
+function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
+  const r = n.row;
+  const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label)).join("")}</div>` : "";
+  return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
+    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>${linksHtml(r, ctx)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
+    + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
 // ---------- needs attention (the D1 UI brief, 2026-10-19) ----------
@@ -454,7 +584,7 @@ function drawerHtml(n: Placed, lines: TrailEntry[], path: string): string {
 // blocked with, and what is being worked on (the active tasks). Stale work joins once its
 // time limit is ruled. States come from the fold; why and since when come from the log.
 
-interface Since { seq: number; reason?: string }
+interface Since { seq: number; reason?: string; blocker?: string } // blocker: the ticket's key, when the block names one
 
 // `skip`: the seqs replay refused (the fold's anomalies): they never happened, so they
 // can't start a stretch or give it a reason.
@@ -468,15 +598,18 @@ export function attentionSince(events: readonly StoredEvent[], stream: string, s
     const dot = e.type.indexOf(".");
     const key = `${e.type.slice(0, dot)}:${d.entity.id}`;
     const ev = e.type.slice(dot + 1);
-    trackBlocked(blocked, key, ev, e.seq, d.payload?.reason);
+    trackBlocked(blocked, key, ev, e.seq, d.payload);
     trackWorking(working, key, ev, e.seq);
   }
   return { blocked, working };
 }
 
 // The first event of a stretch counts: a repeated block or start is a no-op.
-function trackBlocked(blocked: Map<string, Since>, key: string, ev: string, seq: number, reason: unknown): void {
-  if (ev === "block" && !blocked.has(key)) blocked.set(key, { seq, ...(typeof reason === "string" ? { reason } : {}) });
+function trackBlocked(blocked: Map<string, Since>, key: string, ev: string, seq: number, payload: Record<string, unknown> | undefined): void {
+  const reason = payload?.reason;
+  const by = payload?.blocker;
+  const blocker = typeof by === "string" && by.trim() !== "" ? { blocker: `${key.slice(0, key.indexOf(":"))}:${by.trim()}` } : {};
+  if (ev === "block" && !blocked.has(key)) blocked.set(key, { seq, ...(typeof reason === "string" ? { reason } : {}), ...blocker });
   if (ev === "unblock" || ev === "cancel") blocked.delete(key);
 }
 
@@ -486,6 +619,20 @@ function trackWorking(working: Map<string, Since>, key: string, ev: string, seq:
 }
 
 // Blocking needs a reason (2026-10-20), but it may be blank.
+// Who blocks whom, for the tasks blocked now: a block that names its blocker ticket links the
+// two (both on the tree). It lasts while the block does; the history keeps it after.
+interface Links { blockedBy: Map<string, string>; blocks: Map<string, string[]> }
+function linksOf(blocked: ReadonlyMap<string, Since>, onTree: ReadonlySet<string>): Links {
+  const blockedBy = new Map<string, string>();
+  const blocks = new Map<string, string[]>();
+  for (const [key, since] of blocked) {
+    if (since.blocker === undefined || !onTree.has(key) || !onTree.has(since.blocker)) continue;
+    blockedBy.set(key, since.blocker);
+    blocks.set(since.blocker, [...(blocks.get(since.blocker) ?? []), key]);
+  }
+  return { blockedBy, blocks };
+}
+
 const whyLabel = (reason: string | undefined) => (reason !== undefined && reason.trim() !== "" ? reason : "no reason given");
 
 // Under `tira serve`, each row offers what its state allows. Every action opens the
@@ -497,15 +644,20 @@ const actLink = (r: TreeRow, ev: string, label: string) => `<a class="act" href=
 
 const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
-function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean): string {
+function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: Pick<DialogContext, "indexOf" | "rowOf">): string {
   const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label)).join("");
   const acts = live ? `<span class="acts">${links}</span>` : "";
+  // a block on a ticket: which one, and once it's closed, that the wait looks over
+  const blocker = n.row.state === "blocked" && since?.blocker !== undefined ? ctx.rowOf.get(since.blocker) : undefined;
+  const ready = blocker !== undefined && CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : "";
+  const waits = blocker === undefined ? "" : `<span class="by" data-blocked-by>waiting on ${linkTo(blocker.key, ctx)}</span>` + ready;
   return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
-    + `<span class="path">${path}</span><span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
+    + `<span class="path">${path}</span>${waits}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
 }
 
 function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>): string {
   const { blocked, working } = attentionSince(events, stream, skip);
+  const ctx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])) };
   const stuck = nodes.filter((n) => n.row.state === "blocked");
   // A finished active parent (every child closed) is no decision for a person: tira closes it
   // when work moves on, so it stays in the tree, not in the count (ruling 2026-10-20).
@@ -525,23 +677,22 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
   }
   const blockedHtml = [...groups].map(([why, ns]) =>
     `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>`
-    + `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live)).join("")}</ul></div>`).join("");
+    + `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live, ctx)).join("")}</ul></div>`).join("");
   const workingHtml = busy.length === 0 ? "" : `<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">${busy.length}</span></h3>`
-    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live)).join("")}</ul></div>`;
+    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx)).join("")}</ul></div>`;
   const sum = [stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
   return `<section class="attention" data-attention-count="${count}" aria-label="Needs attention"><div class="att-head"><h2><b>${count}</b>${count === 1 ? "needs" : "need"} you</h2><span class="sum">${sum}</span></div>${blockedHtml}${workingHtml}</section>`;
 }
 
 // ---------- board ----------
 
-function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
-  const parents = nodes.filter((n) => n.row.children.length > 0);
-  const strip = parents.length === 0 ? "" : `<div class="strip">${parents.map((n) => {
-    const r = n.row;
-    const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
-    return `<a class="br" href="#t${n.i}">${r.closedByTira ? ICON.auto : ""}<span class="nm">${esc(r.id)}</span>${meter(r.children.map((c) => c.state))}<span class="ct">${closedKids}/${r.children.length}</span></a>`;
-  }).join("")}</div>`;
-  const leaves = nodes.filter((n) => n.row.children.length === 0);
+// Kanban: every ticket in its status column; each card names its parent. A parent no one has
+// acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
+// started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
+// task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
+function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+  const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
+  const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== "unstarted");
   const columns: [string, string, string][] = [
     ["unstarted", "To do", "var(--dim)"], ["in_progress", "In progress", "var(--prog)"], ["blocked", "Blocked", "var(--block)"],
     ["done", "Done", "var(--done)"], ["cancelled", "Dropped", "var(--gone)"],
@@ -553,18 +704,26 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>): string {
       const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : ""].filter(Boolean).join(" ");
       const lines = (trail.get(r.key) ?? []).length;
       const parent = n.parent ? `<span class="chip">${esc(n.parent.row.id)}</span>` : "";
+      const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((c) => CLOSED.has(c.state)).length}/${r.children.length} subtasks</span>`;
       const found = r.discoveredDuring ? `<span class="chip" title="found during ${esc(bare(r.discoveredDuring))}">${ICON.spark}found</span>` : "";
+      const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
+      const by = links.blockedBy.get(r.key);
+      const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
+        + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
       return `<a class="${cls}" href="#t${n.i}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${esc(r.id)}</div>`
-        + `<div class="row">${parent}${found}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
+        + `<div class="row">${parent}${kids}${found}${link}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     }).join("");
     return `<div class="col"><div class="ch"><span class="dot" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${cards || `<p class="empty">Nothing here</p>`}</div>`;
   }).join("");
-  return `${strip}<div class="cols">${cols}</div>`;
+  return `<div class="cols">${cols}</div>`;
 }
 
 // ---------- lanes (D2: regions composed, handoffs paired) ----------
 
-const VIEWS: [string, string][] = [["train", "Progress"], ["board", "Board"], ["lanes", "Lanes"], ["log", "Activity"]];
+// The board holds the tree (as Kanban or as a graph); Lanes shows only when the stream has
+// something for it (the factory's briefs, other records, handoffs); History is the whole
+// log, the audit trail.
+const VIEWS: [string, string][] = [["board", "Board"], ["lanes", "Lanes"], ["log", "History"]];
 
 // One tone per state family, so a lane reads at a glance; the state word stays as-is.
 const TONE: Record<string, string> = {
@@ -624,7 +783,7 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
   const waiting = (r.handoffs[stream] ?? []).map((p) => `<li class="waiting"><code>${esc(p.rule)}</code> ${esc(p.key)} <span class="ev-seq">since seq ${p.since}</span><span class="arrow">…</span>${esc(p.waitingOn)}</li>`);
   const handoffTitle = "Handoffs: " + waiting.length + " waiting, " + pairs.length + " done";
   const handoffs = pairs.length + waiting.length === 0 ? "" : `${label(handoffTitle)}<ul class="pairs" aria-label="Handoffs">${[...waiting, ...pairs].join("")}</ul>`;
-  if (!grid && !chips && !handoffs) return `<p class="empty">No regions or handoffs in this stream.</p>`;
+  if (!grid && !chips && !handoffs) return ""; // nothing for the Lanes tab: it isn't shown
   return `${grid}${chips}${handoffs}`;
 }
 
@@ -645,10 +804,10 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
 // How to read the page: one time and on demand (the brief), never on the worksurface.
 // Three short paragraphs, opened from the nav and from the hash chip.
 function guideHtml(dumpHash: string): string {
-  return `<section class="drawer guide" id="guide" aria-label="How to read this page" data-guide><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
-    + `<p><b>The progress line.</b> Every task is a stop, in tree order. Filled stops are done (crossed out: dropped), the blue marker sits on the next task ("on it" once started), and hollow stops are what's left. "Needs attention" at the top lists what is blocked, and why, and what is being worked on.</p>`
+  return `<section class="drawer guide" id="guide" aria-label="How to read this page" role="dialog" aria-modal="true" data-guide>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
+    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on.</p>`
     + `<p><b>By tira.</b> A bolt on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
-    + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></section>`;
+    + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
 }
 
 // The product mark, on every page's top bar (the confirm page's too).
@@ -710,9 +869,9 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
-function navHtml(dumpHash: string, lastSeq: number, live: boolean): string {
+function navHtml(dumpHash: string, lastSeq: number, live: boolean, views: [string, string][]): string {
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
-  const tabs = VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
+  const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
   const search = live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : "";
   return `<nav class="top">${BRAND}<div class="tabs">${tabs}</div>${search}<a class="how" href="#guide">How to read this page</a>`
     + `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a>${THEME_SWITCH}</nav>`;
@@ -725,11 +884,28 @@ function flashHtml(flash: { ok: boolean; text: string } | undefined): string {
 }
 
 export interface RenderOptions {
-  // `tira serve`: rows get actions (each through a confirm page), the ⌘K palette loads,
-  // and the last action's result shows. A rendered file never carries any of it.
+  // `tira serve`: rows and task dialogs get actions (each through a confirm dialog), the ⌘K
+  // palette loads, and the last action's result shows. A rendered file never carries any of it.
   live?: { flash?: { ok: boolean; text: string } };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
+}
+
+// Each task's proof of work: the evidence on its latest completion since its last re-open.
+export function proofsOf(events: readonly StoredEvent[], stream: string, skip: ReadonlySet<number>): Map<string, Proof> {
+  const proofs = new Map<string, Proof>();
+  for (const e of events) {
+    if (e.stream !== stream || skip.has(e.seq) || e.type === REJECTED) continue; // only what replay applied
+    const d = e.data as unknown as EventData;
+    if (!d?.entity) continue;
+    const dot = e.type.indexOf(".");
+    const key = `${e.type.slice(0, dot)}:${d.entity.id}`;
+    const ev = e.type.slice(dot + 1);
+    const ref = d.payload?.evidenceRef;
+    if (ev === "reopen") proofs.delete(key);
+    if (ev === "complete" && typeof ref === "string" && !proofs.has(key)) proofs.set(key, { ref, actor: e.metadata.actor ?? "no actor", seq: e.seq });
+  }
+  return proofs;
 }
 
 export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = [], opts: RenderOptions = {}): string {
@@ -751,7 +927,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   // The header counts what this stream is about: a tree's closed nodes, or (a stream of
   // multi-region entities, like the factory's briefs) the verified ones still current.
   const lanesOnly = v.roots.length === 0 && multiNow.length > 0;
-  // A tree's header counts its tasks (the train's stops: the leaves), closed of total.
+  // A tree's header counts its tasks (the leaves: the board's cards), closed of total.
   const tasks = rows.filter((x) => x.children.length === 0);
   const closed = lanesOnly ? multiNow.filter((e) => e.regions.outcome === "done-verified").length : tasks.filter((x) => CLOSED.has(x.state)).length;
   const total = lanesOnly ? multiNow.length : tasks.length;
@@ -765,24 +941,32 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   ];
   // Counted from the fold, independently of the rendered rows: M1 compares the two.
   const foldTreeCount = r.entities.filter((e) => e.stream === stream && e.tree !== undefined).length;
-  const trainView = v.roots.length > 0 ? `${trainHtml(nodes, trail)}${routesHtml(nodes, trail)}` : `<p class="empty">No tree yet.</p>`;
-  // Open on the view that has something: the tree, else the lanes, else the activity.
-  const first = v.roots.length > 0 ? "train" : multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0 ? "lanes" : "log";
+  const lanes = lanesHtml(r, stream, events);
+  const views = VIEWS.filter(([t]) => t !== "lanes" || lanes !== "");
+  // Open on the view that has something: the tree, else the lanes, else the history.
+  const lanesFirst = lanes !== "" && (multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0);
+  let first = "log";
+  if (v.roots.length > 0) first = "board";
+  else if (lanesFirst) first = "lanes";
+  const skip = new Set(anomalies.map((a) => a.seq));
+  const proofs = proofsOf(events, stream, skip);
+  const indexOf = new Map(nodes.map((n) => [n.row.key, n.i]));
+  const rowOf = new Map(nodes.map((n) => [n.row.key, n.row]));
+  const links = linksOf(attentionSince(events, stream, skip).blocked, new Set(rowOf.keys()));
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
-<body>${VIEWS.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
+<body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
-${navHtml(dumpHash, v.lastSeq, live)}
+${navHtml(dumpHash, v.lastSeq, live, views)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 ${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}
-${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, new Set(anomalies.map((a) => a.seq))) : ""}
-<section class="view view-train" aria-label="Progress">${trainView}</section>
-<section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardHtml(nodes, trail) : `<p class="empty">No tree yet.</p>`}</section>
-<section class="view view-lanes" aria-label="Lanes">${lanesHtml(r, stream, events)}</section>
-<section class="view view-log" aria-label="Activity">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
-${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n))).join("")}
+${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip) : ""}
+<section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardView(nodes, trail, links) : `<p class="empty">No tree yet.</p>`}</section>
+${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
+<section class="view view-log" aria-label="History">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
+${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, links, rowOf })).join("")}
 ${guideHtml(dumpHash)}
 </main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>
 `;

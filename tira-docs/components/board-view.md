@@ -1,0 +1,58 @@
+# Board (Kanban and Graph)
+
+**JTBD:** 1 — Track a branching build depth-first.
+
+**What / why.** One view of the work in two styles, switched in the board's own bar, so
+"how much is done, and what's left" is one glance in whichever shape reads best. Kanban
+puts each task in its status column; Graph shows the whole tree, so where a task sits (and
+what a parent is waiting on) is visible too. Kanban by default; under `tira serve` the
+choice is remembered per browser, so it survives the reload after every action.
+
+**How to read it.** Kanban: columns To do, In progress, Blocked (only when something is),
+Done and Dropped; every ticket is a card, naming its parent, and ◆ marks the next task. A
+parent no one has acted on (to do, with subtasks: a grouping, like an epic) stays on the
+Graph; started, blocked or closed, it is a card too, with "1/3 subtasks" closed. So a task
+blocked on a new ticket keeps its card in Blocked, beside its ticket's. Graph:
+a parent sits above its children; each node is coloured by state, and a line turns green
+once that child is closed. A parent says "1/3 closed · 2 left". A dotted line joins a task
+to the one it was found while working on. A bolt means tira closed it; a dashed ring means
+tira closes it when you move on. A block on a ticket links the two: a red dashed line from the
+blocked task to its ticket (its own subtask; a blocker elsewhere is a red arc), green dashed
+once the ticket is done, and a "blocks colors" chip on the ticket's Kanban card. Click any card
+or node for its dialog.
+
+**Big trees (100+ tasks).** The layout packs a short branch beside a deep one's lower rows.
+In a tree of more than 40 shown tasks, the lowest branches hang as indented columns under
+their parent (a bracket joins each task; steps indent under their task), so the tree grows
+down instead of across: 212 tasks fit in about 4,800 × 1,000 px instead of 20,000 px wide.
+
+**Live canvas (`tira serve`).** The graph moves like Figma or Excalidraw:
+
+| Do | How |
+|---|---|
+| Pan | Drag anywhere (a click on a task still opens it), scroll or swipe, arrow keys |
+| Zoom | Pinch, or ⌘/Ctrl + scroll, around the pointer; − / + / the % button (life size); + − 0 keys |
+| See it all | Fit (or the 1 key); ◆ Next centres the next task and opens any fold hiding it |
+| Full screen | The corner button; Esc leaves (after closing any open dialog). The result of an action shows on the canvas |
+| Fold | The button under a parent hides its whole branch and shows "+N" (red when a blocked task is inside, ringed when the next one is); the parent stays where it was on screen |
+| Tidy up | Collapse done folds every finished branch (the outermost); Expand all opens everything; Found links hides the dotted lines |
+
+Folds are remembered per browser and stream, the view and full screen per tab, so all of
+it survives the reload after every action. A rendered file has no script: the graph shows
+every task and scrolls.
+
+## Devtool hook
+
+- `#bv-kanban` and `#bv-graph`, the two radio inputs, each with `[data-board-style]`; `.board-bar` holds the switch (`.seg`) and the graph's `.legend`.
+- `.bv-kanban` and `.bv-graph` hold the two styles; `.graph` holds the nodes (`.gn`) over the lines (`.edges`).
+- `[data-key]` on each task's graph node, exactly once, with `[data-state]`, `[data-cursor]`, `[data-active]` and `[data-drained]`.
+- `[data-from]` and `[data-to]` on each line (parent and child), `[data-found]` on each found-while line, `[data-blocks]` on each blocks arc and on a Kanban card's "blocks" chip; `[data-parent]` on each node with a parent.
+- `[data-graph]` on the box the live page turns into a canvas; `.canvas-tools` (`[data-canvas-tools]`) holds its tools; `.fold` with `[data-fold]` (the parent's key) under each parent; `.canvas-flash` repeats an action's result in full screen.
+- `[data-node-count]` and `[data-fold-tree-count]` on the page: they must be equal.
+
+Assertion: every fold node appears once with the fold's flags (manual test M1); a parent
+sits one row above its children, centred over them; no two nodes overlap, folded or not, at
+any size (`test/layout.test.ts`: random trees up to 250 tasks).
+
+**Falsifier.** A task on the board disagrees with `tira dump`, or a node sits under the
+wrong parent.

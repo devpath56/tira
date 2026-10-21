@@ -1,6 +1,6 @@
 {
   "id": "S1",
-  "title": "interruption: block, discover, resume",
+  "title": "interruption: block on a new ticket, work it, resume",
   "after": [
     "seed-dashboard"
   ],
@@ -12,23 +12,23 @@
       "event": "START"
     },
     {
+      "do": "create",
+      "type": "node",
+      "id": "design_tokens",
+      "parent": "colors",
+      "payload": {
+        "kind": "discovered",
+        "discovered_during": "colors"
+      }
+    },
+    {
       "do": "send",
       "type": "node",
       "id": "colors",
       "event": "BLOCK",
       "payload": {
-        "blocker": "design-tokens",
+        "blocker": "design_tokens",
         "reason": "waiting on the design-token decision"
-      }
-    },
-    {
-      "do": "create",
-      "type": "node",
-      "id": "design_tokens",
-      "parent": "improve_visual",
-      "payload": {
-        "kind": "discovered",
-        "discovered_during": "colors"
       }
     },
     {
@@ -80,7 +80,7 @@
       "active": [
         "node:design_tokens"
       ],
-      "cursor": "node:loading_state"
+      "cursor": "node:design_tokens"
     }
   ]
 }

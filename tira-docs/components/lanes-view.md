@@ -4,7 +4,8 @@
 
 **What / why.** A factory brief has three dials (gate, claim, outcome); the lanes show them side
 by side, so the joint state is read, never flattened. Then sessions and drops, then handoffs,
-each under its own label.
+each under its own label. The tab shows only when the stream has something for it: a plain
+task tree has no Lanes tab.
 
 **How to read it.** One row per brief, one column per dial. "Claimable now" or "needs X" under
 the brief's name. Handoffs: "N waiting, M done"; each pair links the event that started it to

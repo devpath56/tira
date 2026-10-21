@@ -2,14 +2,14 @@
 
 **JTBD:** 1 — Track a branching build depth-first (find), with 2 and 3 (act).
 
-**What / why.** Find any task by a few letters and open its drawer, or type a verb first to
+**What / why.** Find any task by a few letters and open its dialog, or type a verb first to
 act on it: `start`, `unblock`, `complete`, `block`. One surface for Find and Direct. Only under
 `tira serve`; the rendered page has no script.
 
 **How to read it.** ⌘K (Ctrl-K) or the "Search ⌘K" button. Matches rank exact name, then name
 prefix, then initials ("ls" → loading_state), then a word inside the name, then any letters in
 order; ties keep tree order. With a verb, only tasks whose state allows it are listed ("unblock "
-lists every blocked task). Enter opens the drawer, or the confirm page for a verb.
+lists every blocked task). Enter opens the task's dialog, or the decision dialog for a verb.
 
 ## Devtool hook
 
