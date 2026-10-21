@@ -66,7 +66,7 @@ export function checkStructure(entities: readonly EntityState[], registry: Regis
   for (const def of registry.types()) {
     const cfg = def.tree;
     if (!cfg) continue;
-    const nodes = entities.filter((e) => e.type === def.type).sort((a, b) => compareCodeUnits(a.key, b.key));
+    const nodes = entities.filter((e) => e.type === def.type).sort((a, b) => a.key.localeCompare(b.key));
     if (nodes.length === 0) continue;
     const parentOf = (e: EntityState) => e.tree?.parent;
     const kidsOf = (e: EntityState) => e.tree?.children ?? [];
