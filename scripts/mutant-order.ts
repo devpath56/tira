@@ -10,7 +10,7 @@
 // only later.
 
 // Relative import specifiers in a TS/JS file: static, re-export, side-effect and dynamic.
-const IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["'](\.{1,2}\/[^"']+)["']/g;
+const IMPORT = /\b(?:from|import)\s*(?:\(\s*)?["'](\.{1,2}\/[^"']+)["']/g;
 
 export function importsOf(path: string, text: string): string[] {
   const dir = path.split("/").slice(0, -1);
@@ -33,8 +33,7 @@ const stem = (path: string) => baseName(path).replace(/\.[^.]+$/, "");
 function depths(test: string, read: (path: string) => string | undefined, memo: Map<string, string[]>): Map<string, number> {
   const depth = new Map([[test, 0]]);
   const queue = [test];
-  for (let i = 0; i < queue.length; i++) {
-    const f = queue[i] as string;
+  for (const f of queue) {
     let next = memo.get(f);
     if (next === undefined) {
       const text = /\.(?:ts|mts|mjs|js)$/.test(f) ? read(f) : undefined;
@@ -97,4 +96,7 @@ export function failedTest(tap: string): string | undefined {
 }
 
 // A --test-name-pattern that matches exactly this test name and nothing longer.
-export const namePattern = (name: string) => `^${name.replaceAll(/[.*+?^${}()|[\]\\/]/g, String.raw`\$&`)}$`;
+export function namePattern(name: string): string {
+  const escaped = name.replaceAll(/[.*+?^${}()|[\]\\/]/g, String.raw`\$&`);
+  return "^" + escaped + "$";
+}

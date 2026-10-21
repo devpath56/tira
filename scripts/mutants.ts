@@ -552,8 +552,11 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // Up to `jobs` workers take the next item until none is left.
 async function pool<T>(items: readonly T[], jobs: number, work: (item: T) => Promise<void>) {
   let next = 0;
-  const worker = async () => {
-    while (next < items.length) await work(items[next++] as T);
+  const worker = async (): Promise<void> => {
+    const i = next++;
+    if (i >= items.length) return;
+    await work(items[i] as T);
+    return worker();
   };
   await Promise.all(Array.from({ length: Math.min(jobs, items.length) }, worker));
 }
@@ -621,50 +624,65 @@ let survived = 0;
 let broken = 0;
 const how = { test: 0, file: 0, later: 0 };
 
+type Caught = Catcher & { how: keyof typeof how; note: string };
+
+// Plants the bug in the scratch copy: the files it changed, or undefined when it can't land.
+function plant(dir: string, m: Mutant): string[] | undefined {
+  if ("json" in m) {
+    const path = join(dir, m.json);
+    const t = JSON.parse(readFileSync(path, "utf8"));
+    m.edit(t);
+    writeFileSync(path, JSON.stringify(t, null, 2) + "\n");
+    return [m.json];
+  }
+  const path = join(dir, m.file);
+  const src = readFileSync(path, "utf8");
+  const hits = src.split(m.find).length - 1;
+  if (hits !== 1) {
+    console.log(`BROKEN   ${m.name}: pattern matched ${hits} times (must be exactly 1)`);
+    return undefined;
+  }
+  writeFileSync(path, src.replace(m.find, m.replace));
+  if (!m.reextract) return [m.file];
+  spawnSync(process.execPath, ["charts/extract-tables.mjs"], { cwd: dir });
+  return [m.file, m.file.replace(/\.[^.]+$/, ".json")];
+}
+
+// The first whole test file in `order` that fails, from position i on.
+async function firstFailing(dir: string, order: readonly string[], i = 0): Promise<Caught | undefined> {
+  const suite = order[i];
+  if (suite === undefined) return undefined;
+  const r = await runSuite(dir, suite);
+  if (r.passed) return firstFailing(dir, order, i + 1);
+  return { suite, test: r.failed, how: i === 0 ? "file" : "later", note: `file ${i + 1} of ${order.length}` };
+}
+
+// Last time's test first, then whole files: what caught the bug, or undefined if nothing did.
+async function hunt(dir: string, m: Mutant, target: readonly string[]): Promise<Caught | undefined> {
+  const known = catchers[m.name];
+  if (known?.test !== undefined) {
+    const r = await runSuite(dir, known.suite, known.test);
+    if (!r.passed) return { suite: known.suite, test: r.failed ?? known.test, how: "test", note: "the test that caught it last time" };
+  }
+  return firstFailing(dir, catcherFirst(suiteOrder(target, SUITES, cost, readCached, memo), known?.suite));
+}
+
 await pool(selected, jobs, async (m) => {
   const dir = scratchCopy();
   try {
-    let target: string[];
-    if ("json" in m) {
-      target = [m.json];
-      const path = join(dir, m.json);
-      const t = JSON.parse(readFileSync(path, "utf8"));
-      m.edit(t);
-      writeFileSync(path, JSON.stringify(t, null, 2) + "\n");
-    } else {
-      target = m.reextract ? [m.file, m.file.replace(/\.[^.]+$/, ".json")] : [m.file];
-      const path = join(dir, m.file);
-      const src = readFileSync(path, "utf8");
-      const hits = src.split(m.find).length - 1;
-      if (hits !== 1) {
-        console.log(`BROKEN   ${m.name}: pattern matched ${hits} times (must be exactly 1)`);
-        broken++;
-        return;
-      }
-      writeFileSync(path, src.replace(m.find, m.replace));
-      if (m.reextract) spawnSync(process.execPath, ["charts/extract-tables.mjs"], { cwd: dir });
+    const target = plant(dir, m);
+    if (target === undefined) {
+      broken++;
+      return;
     }
-    const known = catchers[m.name];
-    let caught: (Catcher & { note: string }) | undefined;
-    if (known?.test !== undefined) {
-      const r = await runSuite(dir, known.suite, known.test);
-      if (!r.passed) caught = { suite: known.suite, test: r.failed ?? known.test, note: "the test that caught it last time" };
-    }
-    const order = catcherFirst(suiteOrder(target, SUITES, cost, readCached, memo), known?.suite);
-    for (let i = 0; caught === undefined && i < order.length; i++) {
-      const suite = order[i] as string;
-      const r = await runSuite(dir, suite);
-      if (!r.passed) caught = { suite, test: r.failed, note: `file ${i + 1} of ${order.length}` };
-    }
+    const caught = await hunt(dir, m, target);
     if (caught === undefined) {
       delete catchers[m.name];
       survived++;
       console.log(`SURVIVED ${m.name}`);
     } else {
       catchers[m.name] = caught.test === undefined ? { suite: caught.suite } : { suite: caught.suite, test: caught.test };
-      if (caught.note.startsWith("the test")) how.test++;
-      else if (caught.note.startsWith("file 1 ")) how.file++;
-      else how.later++;
+      how[caught.how]++;
       console.log(`killed   ${m.name} (by ${caught.suite}, ${caught.note})`);
     }
   } finally {
