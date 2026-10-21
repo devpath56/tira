@@ -1,0 +1,6 @@
+{
+  "about": "An admissible oracle label: oracle:qa judges the orchestrator's approval of brief b1 found-bad, citing a later event in the same log. test/labels.test.ts builds the scratch stream these ids resolve in.",
+  "actor": "oracle:qa",
+  "id": "lbl-qa-1",
+  "payload": { "brief": "b1", "verifying_event_id": "approval-b1", "verdict": "found-bad", "evidence": "evidence-b1" }
+}

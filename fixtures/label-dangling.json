@@ -1,0 +1,9 @@
+{
+  "about": "T2: a label citing evidence no event in the log carries. The write path refuses it, so this is the stored event as it would read had it reached the log another way; appended straight to the store, it folds as an anomaly and is excluded from every label count.",
+  "event": {
+    "eventId": "label-dangling-1",
+    "type": "label.recorded",
+    "data": { "entity": { "id": "lbl-dangling-1" }, "payload": { "brief": "b1", "verifying_event_id": "approval-b1", "verdict": "found-bad", "evidence": "no-such-event" } },
+    "metadata": { "actor": "oracle:qa", "era": 2 }
+  }
+}

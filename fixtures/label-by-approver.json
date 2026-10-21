@@ -1,0 +1,6 @@
+{
+  "about": "T1: the approval's own approver (orchestrator) labels it, as oracle:orchestrator. The write path refuses it, the CLI exits 2, and nothing is appended.",
+  "actor": "oracle:orchestrator",
+  "id": "lbl-self-1",
+  "payload": { "brief": "b1", "verifying_event_id": "approval-b1", "verdict": "confirmed-good", "evidence": "evidence-b1" }
+}

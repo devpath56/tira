@@ -1,0 +1,10 @@
+{
+  "id": "label",
+  "initial": "recorded",
+  "states": [
+    "recorded"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

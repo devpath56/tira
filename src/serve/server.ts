@@ -157,6 +157,7 @@ const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; tex
     return { ok: true, text: `${label} ${id}: done (seq ${r.seq})${nothing}.${closed}` };
   }
   if (r.status === "rejected") return { ok: false, text: `${label} ${id}: refused (${r.code}: ${r.detail}). The refusal is in the log (seq ${r.seq}).` };
+  if (r.status === "refused") return { ok: false, text: `${label} ${id}: refused (${r.code}: ${r.detail}). Nothing was written.` };
   return { ok: true, text: `${label} ${id}: ${r.status} (seq ${r.seq}).` };
 };
 

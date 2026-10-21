@@ -26,7 +26,9 @@ export type RejectCode =
   | "bad-version"
   | "handoff-refused"
   | "cycle"
-  | "unknown-ref";
+  | "unknown-ref"
+  | "bad-label" // a label citing what its log doesn't hold (fold/labels.ts)
+  | "self-label"; // an approver labelling its own approval: refused, nothing stored
 
 export type Intent =
   | { kind: "create"; entity: EntityRef; payload: Record<string, unknown>; actor: string | undefined }
