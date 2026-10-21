@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
-import { defaultRegistry, LEGACY_ERA, Registry, RULES_ERA } from "../src/tables/registry.ts";
+import { defaultRegistry, LEGACY_ERA, Registry, RULES_ERA, SHADOW_ERA } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
@@ -78,12 +78,12 @@ test("new writes are stamped with today's era and judged by today's rules; one l
 });
 
 test("an era this build doesn't know is an anomaly, never a guess", async () => {
-  for (const era of [RULES_ERA + 1, 0, "2", 1.5, null]) {
+  for (const era of [SHADOW_ERA + 1, 0, "2", 1.5, null]) {
     const store = new SqliteEventStore();
     await store.append(S, [raw("born", "a", {}, era)]);
     const r = fold(await store.readStream(S), defaultRegistry());
     assert.equal(r.anomalies.length, 1, String(era));
-    assert.match(r.anomalies[0]?.problem ?? "", /^written under rules era .+, which this build doesn't know \(eras 1 to 2\)$/);
+    assert.match(r.anomalies[0]?.problem ?? "", /^written under rules era .+, which this build doesn't know \(eras 1 to 3\)$/);
     assert.equal(r.entities.length, 0, String(era));
   }
 });

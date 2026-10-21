@@ -1,0 +1,10 @@
+{
+  "id": "check-event",
+  "initial": "recorded",
+  "states": [
+    "recorded"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

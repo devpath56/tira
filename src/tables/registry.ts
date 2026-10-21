@@ -12,6 +12,7 @@ import { DEFAULT_GUARDS, loadTable, type GuardFn, type Table } from "./table.ts"
 import type { EntityState, StateView } from "../fold/types.ts";
 import { TABLE_EVENT_NAME } from "../fold/events.ts";
 import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
+import { CHECK_GUARDS, checkTypes } from "./checks.ts";
 
 // Versioned rules (ruling 2026-10-20). Every event the write path appends carries the rules
 // era it was decided under (metadata.era), and replay applies that era's tables: a rule
@@ -22,8 +23,13 @@ import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
 //   have text, not only spaces (hasReasonText).
 // A rule change adds an era: freeze the old table under charts/eras/, list it under the
 // type's `eras` for every earlier era it governed, and bump RULES_ERA.
+//   era 3 (shadow, citation-construction slice S1): a node's COMPLETE and a drop's VERIFIED
+//   also check that any `citation` they carry is a typed citation object (tables/checks.ts).
+//   Shadow: replay knows era 3 and judges a row stamped era 3 by its tables, but new writes
+//   are still decided under RULES_ERA. Promoting it (S3) means bumping RULES_ERA to it.
 export const LEGACY_ERA = 1;
 export const RULES_ERA = 2;
+export const SHADOW_ERA = 3;
 
 // Derived predicates see the entity (incl. lastRecordedAt / lastActor), the rest of
 // its stream, and the caller's clock and vantage. Nothing else — so they stay pure.
@@ -82,7 +88,8 @@ export interface EntityTypeDef {
   // Derived predicates (like drain or liveness): computed by the fold, never stored.
   derived?: Record<string, (entity: EntityState, ctx: DeriveContext) => unknown>;
   // Earlier eras' tables, by era then region, where the rules have changed since (versioned
-  // rules). An era not listed here ran under today's tables.
+  // rules), and the shadow era's where it differs from today. An era not listed here runs
+  // under today's tables.
   eras?: Record<number, Record<string, Table>>;
 }
 
@@ -97,6 +104,8 @@ export class Registry {
   private readonly byEvent = new Map<string, Map<string, { region: string; table: Table }>>();
   readonly guards: Record<string, GuardFn>;
   readonly era = RULES_ERA; // the era new writes are decided under
+  readonly shadowEra = SHADOW_ERA; // the era replay knows ahead of any writer (never stamped)
+  readonly lastEra = SHADOW_ERA; // the newest era replay judges
 
   constructor(guards: Record<string, GuardFn> = {}) {
     this.guards = { ...DEFAULT_GUARDS, ...guards };
@@ -156,7 +165,9 @@ export class Registry {
     const fail = (msg: string): never => {
       throw new Error(`entity type ${def.type}: era ${era} ${msg}`);
     };
-    if (!Number.isInteger(era) || era < LEGACY_ERA || era >= this.era) fail(`must be an earlier era (${LEGACY_ERA}..${this.era - 1})`);
+    if (!Number.isInteger(era) || era < LEGACY_ERA || (era >= this.era && era !== this.shadowEra)) {
+      fail(`must be an earlier era (${LEGACY_ERA}..${this.era - 1}) or the shadow era (${this.shadowEra})`);
+    }
     for (const [region, table] of Object.entries(regions)) {
       const now = def.regions[region];
       if (!now) return fail(`region ${region} is not a region of this type`);
@@ -226,12 +237,15 @@ const chart = (name: string) => loadTable(new URL(`../../charts/${name}`, import
 // The vocabularies specced today: dashboard nodes (the S1–S9 test vocabulary), vapor
 // ideas, and the factory's brief / session / drop (Track B1).
 export function defaultRegistry(): Registry {
-  const r = new Registry(FACTORY_GUARDS)
+  const r = new Registry({ ...FACTORY_GUARDS, ...CHECK_GUARDS })
     .register({
       type: "node",
       createdAs: "BORN",
       regions: { lifecycle: chart("node-lifecycle.json") },
-      eras: { [LEGACY_ERA]: { lifecycle: chart("eras/node-lifecycle.era1.json") } },
+      eras: {
+        [LEGACY_ERA]: { lifecycle: chart("eras/node-lifecycle.era1.json") },
+        [SHADOW_ERA]: { lifecycle: chart("eras/node-lifecycle.era3.json") },
+      },
       tree: {
         region: "lifecycle",
         terminal: ["done", "cancelled"],
@@ -248,6 +262,10 @@ export function defaultRegistry(): Registry {
       },
     })
     .register({ type: "idea", regions: { lifecycle: chart("idea-lifecycle.json") } });
-  for (const def of factoryTypes(chart)) r.register(def);
+  for (const def of factoryTypes(chart)) {
+    // era 3 (shadow): a drop's VERIFIED also checks its citation's shape
+    r.register(def.type === "drop" ? { ...def, eras: { [SHADOW_ERA]: { lifecycle: chart("eras/drop.era3.json") } } } : def);
+  }
+  for (const def of checkTypes(chart)) r.register(def);
   return r;
 }

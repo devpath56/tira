@@ -1,0 +1,214 @@
+{
+  "id": "node-lifecycle",
+  "initial": "unstarted",
+  "states": [
+    "unstarted",
+    "in_progress",
+    "blocked",
+    "done",
+    "cancelled"
+  ],
+  "events": [
+    "START",
+    "BLOCK",
+    "CANCEL",
+    "ADD_CHILD",
+    "COMPLETE",
+    "UNBLOCK",
+    "REOPEN"
+  ],
+  "pairs": [
+    {
+      "from": "unstarted",
+      "event": "START",
+      "outcome": "transition",
+      "to": "in_progress"
+    },
+    {
+      "from": "unstarted",
+      "event": "BLOCK",
+      "outcome": "transition",
+      "to": "blocked",
+      "guard": "hasReasonText"
+    },
+    {
+      "from": "unstarted",
+      "event": "CANCEL",
+      "outcome": "transition",
+      "to": "cancelled"
+    },
+    {
+      "from": "unstarted",
+      "event": "ADD_CHILD",
+      "outcome": "noop"
+    },
+    {
+      "from": "unstarted",
+      "event": "COMPLETE",
+      "outcome": "denied"
+    },
+    {
+      "from": "unstarted",
+      "event": "UNBLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "unstarted",
+      "event": "REOPEN",
+      "outcome": "denied"
+    },
+    {
+      "from": "in_progress",
+      "event": "START",
+      "outcome": "noop"
+    },
+    {
+      "from": "in_progress",
+      "event": "BLOCK",
+      "outcome": "transition",
+      "to": "blocked",
+      "guard": "hasReasonText"
+    },
+    {
+      "from": "in_progress",
+      "event": "CANCEL",
+      "outcome": "transition",
+      "to": "cancelled"
+    },
+    {
+      "from": "in_progress",
+      "event": "ADD_CHILD",
+      "outcome": "noop"
+    },
+    {
+      "from": "in_progress",
+      "event": "COMPLETE",
+      "outcome": "transition",
+      "to": "done",
+      "guard": "hasEvidenceRefCitationShape"
+    },
+    {
+      "from": "in_progress",
+      "event": "UNBLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "in_progress",
+      "event": "REOPEN",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "START",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "BLOCK",
+      "outcome": "noop"
+    },
+    {
+      "from": "blocked",
+      "event": "CANCEL",
+      "outcome": "transition",
+      "to": "cancelled"
+    },
+    {
+      "from": "blocked",
+      "event": "ADD_CHILD",
+      "outcome": "noop"
+    },
+    {
+      "from": "blocked",
+      "event": "COMPLETE",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "UNBLOCK",
+      "outcome": "transition",
+      "to": "in_progress"
+    },
+    {
+      "from": "blocked",
+      "event": "REOPEN",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "START",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "BLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "CANCEL",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "ADD_CHILD",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "COMPLETE",
+      "outcome": "noop"
+    },
+    {
+      "from": "done",
+      "event": "UNBLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "done",
+      "event": "REOPEN",
+      "outcome": "transition",
+      "to": "in_progress",
+      "guard": "hasReasonText"
+    },
+    {
+      "from": "cancelled",
+      "event": "START",
+      "outcome": "denied"
+    },
+    {
+      "from": "cancelled",
+      "event": "BLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "cancelled",
+      "event": "CANCEL",
+      "outcome": "noop"
+    },
+    {
+      "from": "cancelled",
+      "event": "ADD_CHILD",
+      "outcome": "denied"
+    },
+    {
+      "from": "cancelled",
+      "event": "COMPLETE",
+      "outcome": "denied"
+    },
+    {
+      "from": "cancelled",
+      "event": "UNBLOCK",
+      "outcome": "denied"
+    },
+    {
+      "from": "cancelled",
+      "event": "REOPEN",
+      "outcome": "denied"
+    }
+  ],
+  "guards": {
+    "hasReasonText": "event.reason has text (not only spaces)",
+    "hasEvidenceRefCitationShape": "event.evidenceRef is a non-empty string, and event.citation, when present, is a typed citation object (or a non-empty list of them): shape only, never resolution"
+  }
+}

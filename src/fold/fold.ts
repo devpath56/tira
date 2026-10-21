@@ -16,6 +16,7 @@ import { compareCodeUnits, makeView } from "./view.ts";
 import { blockRefusal, due, indexKey, pending as pendingHandoffs, type PendingHandoff, type TriggerIndex } from "./handoffs.ts";
 import { DISPATCHER, ORCHESTRATOR, frontier } from "../tables/factory.ts";
 import { LABEL, isLabelBirth, isOracle, labelProblem, summarize, type LabelSummary } from "./labels.ts";
+import { CLAIM_CLASSES, resolveClaim, type Resolution } from "./citations.ts";
 
 export { compareCodeUnits, makeView } from "./view.ts";
 
@@ -67,6 +68,18 @@ export interface FoldResult {
   // stream -> outcome labels, derived at read time (fold/labels.ts), for streams with any label
   // event; absent when no stream has one, so a log without labels folds to the same bytes
   labels?: Record<string, LabelSummary>;
+  // stream -> each applied done claim that carries a citation, resolved (fold/citations.ts).
+  // SHADOW: reported, never enforced. Absent when no claim carries one, so a pre-citation
+  // log folds to the same bytes.
+  citations?: Record<string, ClaimCitations[]>;
+}
+
+export interface ClaimCitations {
+  seq: number;
+  eventId: string;
+  claim: string; // the claimed entity's key
+  era: number;
+  resolutions: Resolution[];
 }
 
 const isRejectedData = (d: unknown): d is RejectedData => {
@@ -101,7 +114,7 @@ function isTiraPair(a: StoredEvent, b: StoredEvent, registry: Registry, creation
 
 // An event's rules era (versioned rules): what the write path stamped, or legacy if nothing.
 export const eraOf = (e: StoredEvent): number => (e.metadata?.era === undefined ? LEGACY_ERA : (e.metadata.era as number));
-const knownEra = (era: unknown, registry: Registry): boolean => Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.era;
+const knownEra = (era: unknown, registry: Registry): boolean => Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.lastEra;
 
 export function fold(events: readonly StoredEvent[], registry: Registry, opts: FoldOptions = {}): FoldResult {
   return foldDetailed(events, registry, opts).result;
@@ -248,7 +261,7 @@ export function foldDetailed(
     // Versioned rules: each event is judged by the rules of the era it was written in.
     const era = eraOf(e);
     if (!knownEra(era, registry)) {
-      anomaly(`written under rules era ${show(e.metadata?.era)}, which this build doesn't know (eras ${LEGACY_ERA} to ${registry.era})`);
+      anomaly(`written under rules era ${show(e.metadata?.era)}, which this build doesn't know (eras ${LEGACY_ERA} to ${registry.lastEra})`);
       if (!byTira) settle(e, undefined);
       continue;
     }
@@ -355,8 +368,28 @@ export function foldDetailed(
     const refused = anomalies.filter((a) => a.stream === stream && a.type.startsWith(`${LABEL}.`)).length;
     if (recorded.length > 0 || refused > 0) labels[stream] = summarize(recorded, refused);
   }
+  // Citations (shadow): every applied done claim that carries one, resolved against what the
+  // fold applied in its stream. A drop's worker is its filer.
+  const citations: Record<string, ClaimCitations[]> = {};
+  for (const [stream, applied] of [...appliedIds].sort(([a], [b]) => compareCodeUnits(a, b))) {
+    const view = views.get(stream) as StateView;
+    for (const e of applied.values()) {
+      if (!(e.type in CLAIM_CLASSES) || !("citation" in ((e.data as unknown as EventData).payload ?? {}))) continue;
+      const ent = (e.data as unknown as EventData).entity;
+      const key = entityKey({ type: e.type.split(".")[0] as string, ...ent });
+      const worker = e.type === "drop.verified" ? view.getKey(key)?.createdBy : undefined;
+      (citations[stream] ??= []).push({
+        seq: e.seq, eventId: e.eventId, claim: key, era: eraOf(e),
+        resolutions: resolveClaim(e, (id) => applied.get(id), worker === undefined ? {} : { worker }),
+      });
+    }
+  }
   return {
-    result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable, ...(Object.keys(labels).length > 0 ? { labels } : {}) },
+    result: {
+      lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable,
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
+      ...(Object.keys(citations).length > 0 ? { citations } : {}),
+    },
     indexes,
   };
 }

@@ -393,14 +393,33 @@ const MUTANTS: Mutant[] = [
   // Versioned rules and the reason check (rulings 2026-10-20)
   { name: "eras: replay judges every event by today's rules", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era });", replace: "{ pairedClose: paired !== undefined, era: registry.era });" },
   { name: "eras: new writes aren't stamped", file: "src/write/write-path.ts", find: "metadata: { ...x.metadata, era: this.registry.era }", replace: "metadata: { ...x.metadata }" },
-  { name: "eras: the legacy era runs today's task table", file: "src/tables/registry.ts", find: "      eras: { [LEGACY_ERA]: { lifecycle: chart(\"eras/node-lifecycle.era1.json\") } },\n", replace: "" },
-  { name: "eras: an unknown era replays anyway", file: "src/fold/fold.ts", find: "Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.era;", replace: "true;" },
-  { name: "eras: a future era is accepted", file: "src/fold/fold.ts", find: "(era as number) <= registry.era;", replace: "(era as number) <= registry.era + 1;" },
+  { name: "eras: the legacy era runs today's task table", file: "src/tables/registry.ts", find: "        [LEGACY_ERA]: { lifecycle: chart(\"eras/node-lifecycle.era1.json\") },\n", replace: "" },
+  { name: "eras: an unknown era replays anyway", file: "src/fold/fold.ts", find: "Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.lastEra;", replace: "true;" },
+  { name: "eras: a future era is accepted", file: "src/fold/fold.ts", find: "(era as number) <= registry.lastEra;", replace: "(era as number) <= registry.lastEra + 1;" },
   { name: "eras: an earlier era may change the shape", file: "src/tables/registry.ts", find: "if (table.initial !== now.initial || !same(table.states, now.states) || !same(table.events, now.events)) {", replace: "if (false) {" },
   { name: "reason check: only spaces counts as a reason", file: "src/tables/table.ts", find: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.trim().length > 0,", replace: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.length > 0," },
   { name: "page: a finished active parent needs you", file: "src/render/html.ts", find: "const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "const busy = nodes.filter((n) => n.row.active);" },
   { name: "page: legacy events unlabelled", file: "src/render/html.ts", find: "legacy: e.metadata.era === undefined, key: `${type}:${d.entity.id}`", replace: "legacy: false, key: `${type}:${d.entity.id}`" },
   { name: "command: a value of only spaces gets through", file: "src/serve/command.ts", find: "if (typeof v === \"string\" && v.trim() !== \"\") return undefined;", replace: "if (typeof v === \"string\" && v !== \"\") return undefined;" },
+  // Citation construction, slice S1 (shadow): check events, resolution states, era 3
+  { name: "citations: any event type is a check", file: "src/fold/citations.ts", find: "if (!cls || check.type !== cls.cites) {", replace: "if (!cls) {" },
+  { name: "citations: a check on another entity counts", file: "src/fold/citations.ts", find: "if (!cls.speaksTo(p, subject)) {", replace: "if (false) {" },
+  { name: "citations: a check after the claim counts", file: "src/fold/citations.ts", find: "if (check.seq >= claim.seq) {", replace: "if (false) {" },
+  { name: "citations: the worker may check itself", file: "src/fold/citations.ts", find: "if (sameComponent || byWorker) {", replace: "if (sameComponent) {" },
+  { name: "citations: the completing component may check itself", file: "src/fold/citations.ts", find: "if (sameComponent || byWorker) {", replace: "if (byWorker) {" },
+  { name: "citations: a stale test definition resolves", file: "src/fold/citations.ts", find: "    if (leg === \"fail\") return out(\"stale-blob\", `the done test's", replace: "    if (false) return out(\"stale-blob\", `the done test's" },
+  { name: "citations: a stale cited file resolves", file: "src/fold/citations.ts", find: "if (leg === \"fail\") return out(\"stale-blob\", `${citation.path}", replace: "if (false) return out(\"stale-blob\", `${citation.path}" },
+  { name: "citations: no blob resolver passes the blob leg", file: "src/fold/citations.ts", find: "if (!opts.blobAt) return { leg: \"unverifiable\" };", replace: "if (!opts.blobAt) return { leg: \"ok\" };" },
+  { name: "citations: a claim citing nothing resolves", file: "src/fold/citations.ts", find: "if (!c.cited) return [{ state: \"legacy\"", replace: "if (!c.cited) return [{ state: \"resolving\"" },
+  { name: "citations: a rejected command counts as a cited event", file: "src/fold/citations.ts", find: "byId = new Map(log.filter((e) => e.stream === claim.stream && e.type !== REJECTED)", replace: "byId = new Map(log.filter((e) => e.stream === claim.stream)" },
+  { name: "citations: a string is a citation", file: "src/tables/checks.ts", find: "return { cited: true, list: Array.isArray(c) ? c : [c] };", replace: "return { cited: true, list: (Array.isArray(c) ? c : [c]).map((x) => (typeof x === \"string\" ? { event_id: x } : x)) };" },
+  { name: "citations: the fold forgets the drop's filer", file: "src/fold/fold.ts", find: "const worker = e.type === \"drop.verified\" ? view.getKey(key)?.createdBy : undefined;", replace: "const worker = undefined as string | undefined;" },
+  { name: "citations: a done test needs no blob", file: "src/tables/checks.ts", find: "isObj(t) && s(t.path) && typeof t.blob === \"string\" && BLOB.test(t.blob);", replace: "isObj(t) && s(t.path);" },
+  { name: "citations: tira may report a machine check", file: "src/tables/checks.ts", find: "    s(actor) && !isMachineRole(actor) && s(payload.component) && !isMachineRole(payload.component) &&\n    s(payload.node)", replace: "    s(actor) && s(payload.component) &&\n    s(payload.node)" },
+  { name: "citations: era 3's task table checks no shape", file: "src/tables/checks.ts", find: "hasEvidenceRefCitationShape: ({ payload }) => s(payload.evidenceRef) && citationShapeOk(payload),", replace: "hasEvidenceRefCitationShape: ({ payload }) => s(payload.evidenceRef)," },
+  { name: "citations: era 3 has no drop table", file: "src/tables/registry.ts", find: "r.register(def.type === \"drop\" ? { ...def, eras: { [SHADOW_ERA]: { lifecycle: chart(\"eras/drop.era3.json\") } } } : def);", replace: "r.register(def);" },
+  { name: "citations: era 3 is stamped on new writes", file: "src/tables/registry.ts", find: "export const RULES_ERA = 2;", replace: "export const RULES_ERA = 3;" },
+  { name: "citations: the gate records PASS whatever the exit", file: "src/write/checks.ts", find: "const result = run.status === 0 ? \"PASS\" : \"FAIL\";", replace: "const result = \"PASS\";" },
   // B3 round 1, published: the scorer and the generator
   { name: "b3 score: any non-OK verdict counts as caught", file: "scripts/b3-score.ts", find: "if (m.verdict !== \"OK\" && got === m.verdict) caught++;", replace: "if (m.verdict !== \"OK\" && got !== \"OK\") caught++;" },
   { name: "b3 score: false positives not counted", file: "scripts/b3-score.ts", find: "    if (m.verdict === \"OK\" && got !== \"OK\") falsePositives++;\n", replace: "" },
@@ -498,7 +517,7 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "citations"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
