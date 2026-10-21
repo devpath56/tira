@@ -536,3 +536,85 @@ test("divergence panel: one read + render at ~2,800 tira events costs under 1 s"
   console.log(`divergence read+render: ${tlOut.length} tira events, ${facOut.length} factory records, ${report.population.ids} ids: ${ms.toFixed(1)} ms`);
   assert.ok(ms < 1000, `read+render took ${ms.toFixed(1)} ms at ${tlOut.length} events: continuous-at-read is falsified`);
 });
+
+// --- the panel wired into `tira render` (B3 watchdog, the wiring slice) ----------------------
+// The page's caller runs the differ in the same run, on the factory file and the events the
+// page renders. Here the B3 tira log is loaded into a real store, so `tira render` and a live
+// `tira divergence` read the same stream.
+
+async function b3Store(dir: string): Promise<string> {
+  const db = join(dir, "b3.db");
+  const store = new SqliteEventStore({ path: db });
+  try {
+    for (const e of lines(B3_TIRA)) await store.append(e.stream, [{ eventId: e.eventId, type: e.type, data: e.data, metadata: e.metadata }]);
+  } finally {
+    store.close();
+  }
+  return db;
+}
+
+async function cli(argv: string[], env: Record<string, string>) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env });
+  return { code, out: out.join("\n"), err: err.join("\n") };
+}
+
+test("tira render: the page's divergence section is the report a live tira divergence computes on the same inputs", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-render-wired-"));
+  const db = await b3Store(dir);
+  const env = { TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") };
+  const live = await cli(["--db", db, "divergence", "--factory", B3_FACTORY, "--stream", "factory-b3", "--json"], env);
+  assert.equal(live.code, 0, live.err);
+  const report = JSON.parse(live.out) as DivergenceReport;
+  const out = join(dir, "page.html");
+  const r = await cli(["--db", db, "--stream", "factory-b3", "render", "--factory", B3_FACTORY, "--out", out], env);
+  assert.equal(r.code, 0, r.err);
+  const p = panelOf(readFileSync(out, "utf8"));
+  assert.equal(p.state, "divergent");
+  assert.deepEqual(p.counts, report.counts);
+  assert.deepEqual(p.counts, { OK: 39, MISSING: 2, PHANTOM: 2, "WRONG-ENTITY": 2, DUPLICATE: 1, ORPHAN: 1 });
+  assert.deepEqual(p.rows.map((x) => ({ ...x, detail: unesc(x.detail) })), report.findings);
+  // coordinates and population: the live pin (sha256 of the bytes read), the stream at its last seq
+  assert.equal(report.coordinates.factory.pin, "sha256");
+  assert.match(p.sec, new RegExp(`data-factory-snapshot="${report.coordinates.factory.snapshot}" data-stream="factory-b3" data-at-seq="65"`));
+  assert.match(p.sec, /data-factory-records="46" data-tira-fx-events="45" data-ids="47"/);
+  // the same counts as the fixture run of the command (tira's side read from the log file)
+  const { report: fixture } = await cliReport(B3_FACTORY, B3_TIRA);
+  assert.deepEqual(p.counts, fixture?.counts);
+  // TIRA_FACTORY is the flag's default, as $TIRA_STREAM is --stream's
+  const viaEnv = join(dir, "env.html");
+  assert.equal((await cli(["--db", db, "--stream", "factory-b3", "render", "--out", viaEnv], { ...env, TIRA_FACTORY: B3_FACTORY })).code, 0);
+  assert.deepEqual(panelOf(readFileSync(viaEnv, "utf8")).counts, report.counts);
+  // render --at N: the panel judges the events the page shows, not the whole log
+  const at = join(dir, "at.html");
+  assert.equal((await cli(["--db", db, "--stream", "factory-b3", "render", "--at", "30", "--factory", B3_FACTORY, "--out", at], env)).code, 0);
+  assert.match(panelOf(readFileSync(at, "utf8")).sec, /data-at-seq="30"/);
+});
+
+test("tira render: no factory file, or one that cannot be read, renders the section UNEVALUABLE, never a blank or a 0", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-render-uneval-"));
+  const db = await b3Store(dir);
+  const env = { TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") };
+  const bad = join(dir, "bad.jsonl");
+  writeFileSync(bad, "{not json\n");
+  const cases: [string[], RegExp][] = [
+    [[], /no factory file: pass --factory FILE or set TIRA_FACTORY/],
+    [["--factory", join(dir, "absent.jsonl")], /cannot read factory file/],
+    [["--factory", bad], /line 1: not valid JSON/],
+  ];
+  for (const [flags, why] of cases) {
+    const out = join(dir, "page.html");
+    const r = await cli(["--db", db, "--stream", "factory-b3", "render", ...flags, "--out", out], env);
+    assert.equal(r.code, 0, "an unevaluable panel is a page state, not a failed render");
+    const p = panelOf(readFileSync(out, "utf8"));
+    assert.equal(p.state, "unevaluable", flags.join(" "));
+    assert.match(unesc(p.sec), why);
+    assert.equal(p.count, undefined);
+    assert.doesNotMatch(p.sec, /0 divergences|data-count=/);
+  }
+  // a stream with no events is no tira side to compare against
+  const empty = join(dir, "empty.html");
+  assert.equal((await cli(["--db", db, "--stream", "nothing-here", "render", "--factory", B3_FACTORY, "--out", empty], env)).code, 0);
+  assert.match(panelOf(readFileSync(empty, "utf8")).sec, /stream nothing-here has no events/);
+});
