@@ -670,7 +670,7 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
   // blocked work, grouped by its reason, groups in the order they first blocked
   const groups = new Map<string, Placed[]>();
   const firstSeq = (n: Placed) => blocked.get(n.row.key)?.seq ?? Number.MAX_SAFE_INTEGER;
-  for (const n of [...stuck].sort((a, b) => firstSeq(a) - firstSeq(b) || a.i - b.i)) {
+  for (const n of [...stuck].sort((a, b) => firstSeq(b) - firstSeq(a) || a.i - b.i)) {
     const why = whyLabel(blocked.get(n.row.key)?.reason);
     groups.set(why, [...(groups.get(why) ?? []), n]);
   }
