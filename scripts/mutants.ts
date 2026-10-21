@@ -4,14 +4,20 @@
 // error too — a silent no-op mutant would report a catch that never happened.
 // The match check (scripts/mutant-anchors.ts) proves that for every one up front,
 // in seconds, before any test runs.
+// Speed: each bug stops at its first failure. It tries the one test that caught it last
+// time (.mutant-catchers.json, kept between CI runs by the cache), then whole test files,
+// likely catchers first (scripts/mutant-order.ts). Several bugs run at once, one per core.
+// Order is speed only: a bug counts as survived only after every whole file passes.
 //   node scripts/mutants.ts            (npm run mutants)
 //   node scripts/mutants.ts --check    (npm run mutants:check: the match check alone)
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+//   MUTANT_JOBS=1 node scripts/mutants.ts    (one bug at a time; default: one per core)
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { anchorProblems } from "./mutant-anchors.ts";
+import { catcherFirst, failedTest, namePattern, suiteOrder } from "./mutant-order.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -497,12 +503,59 @@ function scratchCopy(): string {
   return dir;
 }
 
-function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels"].map((n) => `test/${n}.test.ts`);
-  // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
-  const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
-  if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
-  return r.status ?? 1;
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels"];
+// a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
+const SUITE_TIMEOUT = 60_000;
+const CATCHERS = join(ROOT, ".mutant-catchers.json");
+const running = new Set<number>();
+
+interface Run { passed: boolean; failed?: string | undefined }
+interface Catcher { suite: string; test?: string | undefined }
+
+// One test file (or just the test named `only` in it) in its own process group, so a
+// timeout takes down the file's test process too. A failure names its first failing test.
+function runSuite(dir: string, suite: string, only?: string): Promise<Run> {
+  return new Promise((resolve) => {
+    const pick = only === undefined ? [] : [`--test-name-pattern=${namePattern(only)}`];
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...pick, `test/${suite}.test.ts`], { cwd: dir, stdio: ["ignore", "pipe", "ignore"], detached: true });
+    let out = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      out += chunk;
+    });
+    const pid = child.pid;
+    if (pid !== undefined) running.add(pid);
+    const timer = setTimeout(() => killGroup(pid), SUITE_TIMEOUT);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (pid !== undefined) running.delete(pid);
+      resolve(code === 0 ? { passed: true } : { passed: false, failed: failedTest(out) });
+    });
+  });
+}
+
+function killGroup(pid: number | undefined) {
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
+}
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    for (const pid of running) killGroup(pid);
+    process.exit(130);
+  });
+}
+
+// Up to `jobs` workers take the next item until none is left.
+async function pool<T>(items: readonly T[], jobs: number, work: (item: T) => Promise<void>) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await work(items[next++] as T);
+  };
+  await Promise.all(Array.from({ length: Math.min(jobs, items.length) }, worker));
 }
 
 // Optional filter: node scripts/mutants.ts <substring of a name> runs only the matching ones.
@@ -530,41 +583,97 @@ if (args.includes("--check")) {
   process.exit(0);
 }
 
-let survived = 0;
-let broken = 0;
+const jobs = Math.max(1, Number(process.env.MUTANT_JOBS) || availableParallelism());
+const t0 = performance.now();
+
+// Baseline: every test file passes alone on an unmutated copy, timed for the ordering.
+const cost: Record<string, number> = {};
 const base = scratchCopy();
-if (runTests(base, true) !== 0) {
-  console.error("baseline suite fails on an unmutated copy — fix that first");
+const failing: string[] = [];
+await pool(SUITES, jobs, async (suite) => {
+  const t = performance.now();
+  if (!(await runSuite(base, suite)).passed) failing.push(suite);
+  cost[suite] = performance.now() - t;
+});
+rmSync(base, { recursive: true, force: true });
+if (failing.length > 0) {
+  console.error(`baseline fails on an unmutated copy (${failing.join(", ")}) — fix that first`);
   process.exit(2);
 }
-rmSync(base, { recursive: true, force: true });
 
-for (const m of selected) {
+const texts = new Map<string, string | undefined>();
+const readCached = (path: string) => {
+  if (!texts.has(path)) texts.set(path, readRepo(path));
+  return texts.get(path);
+};
+const memo = new Map<string, string[]>();
+// What caught each bug last time; a missing, unreadable or odd entry only means a slower run.
+const catchers: Record<string, Catcher> = {};
+try {
+  const saved: unknown = existsSync(CATCHERS) ? JSON.parse(readFileSync(CATCHERS, "utf8")) : {};
+  for (const [name, c] of Object.entries(saved as Record<string, Partial<Catcher>>)) {
+    if (typeof c?.suite === "string" && SUITES.includes(c.suite)) catchers[name] = typeof c.test === "string" ? { suite: c.suite, test: c.test } : { suite: c.suite };
+  }
+} catch {
+  // start from nothing
+}
+let survived = 0;
+let broken = 0;
+const how = { test: 0, file: 0, later: 0 };
+
+await pool(selected, jobs, async (m) => {
   const dir = scratchCopy();
   try {
+    let target: string[];
     if ("json" in m) {
+      target = [m.json];
       const path = join(dir, m.json);
       const t = JSON.parse(readFileSync(path, "utf8"));
       m.edit(t);
       writeFileSync(path, JSON.stringify(t, null, 2) + "\n");
     } else {
+      target = m.reextract ? [m.file, m.file.replace(/\.[^.]+$/, ".json")] : [m.file];
       const path = join(dir, m.file);
       const src = readFileSync(path, "utf8");
       const hits = src.split(m.find).length - 1;
       if (hits !== 1) {
         console.log(`BROKEN   ${m.name}: pattern matched ${hits} times (must be exactly 1)`);
         broken++;
-        continue;
+        return;
       }
       writeFileSync(path, src.replace(m.find, m.replace));
       if (m.reextract) spawnSync(process.execPath, ["charts/extract-tables.mjs"], { cwd: dir });
     }
-    const code = runTests(dir);
-    if (code === 0) survived++;
-    console.log(`${code === 0 ? "SURVIVED" : "killed  "} ${m.name}`);
+    const known = catchers[m.name];
+    let caught: (Catcher & { note: string }) | undefined;
+    if (known?.test !== undefined) {
+      const r = await runSuite(dir, known.suite, known.test);
+      if (!r.passed) caught = { suite: known.suite, test: r.failed ?? known.test, note: "the test that caught it last time" };
+    }
+    const order = catcherFirst(suiteOrder(target, SUITES, cost, readCached, memo), known?.suite);
+    for (let i = 0; caught === undefined && i < order.length; i++) {
+      const suite = order[i] as string;
+      const r = await runSuite(dir, suite);
+      if (!r.passed) caught = { suite, test: r.failed, note: `file ${i + 1} of ${order.length}` };
+    }
+    if (caught === undefined) {
+      delete catchers[m.name];
+      survived++;
+      console.log(`SURVIVED ${m.name}`);
+    } else {
+      catchers[m.name] = caught.test === undefined ? { suite: caught.suite } : { suite: caught.suite, test: caught.test };
+      if (caught.note.startsWith("the test")) how.test++;
+      else if (caught.note.startsWith("file 1 ")) how.file++;
+      else how.later++;
+      console.log(`killed   ${m.name} (by ${caught.suite}, ${caught.note})`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
+const names = new Set(MUTANTS.map((m) => m.name));
+writeFileSync(CATCHERS, JSON.stringify(Object.fromEntries(Object.entries(catchers).filter(([k]) => names.has(k)).sort(([a], [b]) => a.localeCompare(b))), null, 1) + "\n");
+const seconds = Math.round((performance.now() - t0) / 1000);
 console.log(`\n${selected.length - survived - broken}/${selected.length} killed, ${survived} survived, ${broken} broken`);
+console.log(`${jobs} at a time, ${seconds}s; caught by last time's test: ${how.test}, by the first file tried: ${how.file}, later: ${how.later}`);
 process.exit(survived || broken ? 1 : 0);
