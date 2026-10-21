@@ -69,7 +69,7 @@ export class Dispatcher {
         const view = makeView(entities);
         // still called for, and still acceptable: if a race made the rules refuse it, skip it
         // (it stays in the pending list) rather than log a rejection under the dispatcher's name
-        return due(view, indexes.get(stream) ?? new Map()).some(same) && evaluate(this.registry, entities, view, intentOf(next, DISPATCHER)).ok;
+        return due(view, indexes.get(stream) ?? new Map(), this.registry).some(same) && evaluate(this.registry, entities, view, intentOf(next, DISPATCHER)).ok;
       };
       const r = await this.writePath.submitAsDispatcher({
         stream,
@@ -90,7 +90,7 @@ export class Dispatcher {
 
   private async nextDue(stream: string): Promise<Receiver | undefined> {
     const { view, idx, entities } = await this.snapshot(stream);
-    return due(view, idx).find((r) => evaluate(this.registry, entities, view, intentOf(r, DISPATCHER)).ok);
+    return due(view, idx, this.registry).find((r) => evaluate(this.registry, entities, view, intentOf(r, DISPATCHER)).ok);
   }
 
   private async relayBlock(cmd: Extract<Command, { kind: "event" }>): Promise<WriteResult> {

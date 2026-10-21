@@ -19,6 +19,14 @@ fires by surprise, and every one has two views side by side (stacked on a phone)
    the reason in; a subtask under work already under way is pre-marked as found
    (`kind=discovered`), and elsewhere a chip adds it.
 
+**An idea's two approvals use it too** (`ideas.md`): the Decision is the idea's summary, why,
+who declared it and where tira proposes it go; Approve placement opens with tira's parent
+filled in (`tira send idea pagination APPROVE_NODE parent_id="table"`, editable), or empty
+with the candidates as buttons when tira couldn't settle one, and the parent is checked
+before anything is written. A stage skip typed in (approving the placement while the file is
+pending) is refused in plain words: "the file isn't approved yet, and the placement comes
+after the file", with what to do instead.
+
 **Blocking makes the wait a ticket.** Block asks "Blocked by": type a name and the command
 becomes two lines, run in order (each checked by tira first; if the ticket isn't written,
 neither is the block):

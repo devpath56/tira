@@ -16,6 +16,8 @@
 //   H4 drop.rejected -> brief.blocked {block_reason: defective}            (A7)
 //   H5 session.ended -> brief.released {reason: session-ended} for briefs it held (A10)
 //   H6 a dependency's drop.verified -> brief.unblocked (dependency blocks only, A5)
+//   V1 idea.created with a summary (idea declared) -> idea.draft-file {summary, why}  (D5: tira drafts the file)
+//   V2 idea.approve-file (idea filed, its file has a summary) -> idea.propose-node {parent_id?, candidates, basis}
 //   F1 idea.approve-node (idea materialized) -> node.born {idea_id}        (R2, ruling 2026-10-18)
 // Plus one relay: the orchestrator asks to block a brief; the dispatcher writes
 // brief.blocked {block_reason, requested_by} when the B1 §4 conditions hold.
@@ -26,6 +28,7 @@ import type { EntityRef, EntityState, StateView } from "./types.ts";
 import { entityKey } from "./types.ts";
 import { show } from "../text.ts";
 import { compareCodeUnits } from "./view.ts";
+import { IDEA, fileFrom, placement, proposalPayload } from "./ideas.ts";
 
 export interface TriggerRecord {
   eventId: string;
@@ -37,7 +40,7 @@ export interface TriggerRecord {
 export type TriggerIndex = Map<string, TriggerRecord>;
 export const indexKey = (key: string, storedType: string) => `${key}|${storedType}`;
 
-export type Rule = "H1" | "H2" | "H3" | "H4" | "H5" | "H6" | "F1" | "block";
+export type Rule = "H1" | "H2" | "H3" | "H4" | "H5" | "H6" | "V1" | "V2" | "F1" | "block";
 
 export interface Receiver {
   rule: Rule;
@@ -73,8 +76,9 @@ function latestCause(view: StateView, idx: TriggerIndex, b: EntityState, first: 
   return best;
 }
 
-// Every receiver that is due now, in a fixed order.
-export function due(view: StateView, idx: TriggerIndex): Receiver[] {
+// Every receiver that is due now, in a fixed order. The registry's rules decide which task can
+// take an idea (V2).
+export function due(view: StateView, idx: TriggerIndex, registry: Registry): Receiver[] {
   const out: Receiver[] = [];
   const on = (rule: Rule, target: EntityState, event: string, payload: Record<string, unknown>, first: TriggerRecord, cause: TriggerRecord = first) =>
     out.push({ rule, target: ref(target), kind: "event", event, payload, correlationId: first.eventId, causationId: cause.eventId });
@@ -120,6 +124,17 @@ export function due(view: StateView, idx: TriggerIndex): Receiver[] {
         on("H5", b, "RELEASED", { reason: "session-ended" }, ended);
       }
     }
+  }
+  // V1, V2: between a person's two approvals the idea pipeline moves itself (D5). An idea declared
+  // with a summary gets its file drafted from what it said; once the file is approved, tira
+  // proposes where it goes (fold/ideas.ts). An idea declared without one is driven by hand.
+  for (const i of view.all(IDEA)) {
+    const born = idx.get(indexKey(i.key, `${IDEA}.created`));
+    const said = fileFrom(born?.payload);
+    if (born && said && i.regions.lifecycle === "declared") on("V1", i, "DRAFT_FILE", { ...said }, born);
+    const approved = i.regions.lifecycle === "filed" ? idx.get(indexKey(i.key, `${IDEA}.approve-file`)) : undefined;
+    const file = fileFrom(idx.get(indexKey(i.key, `${IDEA}.draft-file`))?.payload);
+    if (approved && file) on("V2", i, "PROPOSE_NODE", proposalPayload(placement(view, registry, file, born?.payload.under as string | undefined)), approved);
   }
   // F1: a materialized idea is born as a node (same id), under the parent it was approved for.
   for (const i of view.all("idea")) {
@@ -195,7 +210,7 @@ export function pending(view: StateView, idx: TriggerIndex, registry: Registry, 
       add("F1", node.key, approved.seq, `a fix: ${node.key} already exists and wasn't born from this idea`);
     }
   }
-  for (const r of due(view, idx)) {
+  for (const r of due(view, idx, registry)) {
     const ev = evaluate(registry, entities, view, intentOf(r, "dispatcher"));
     const since = [...idx.values()].find((t) => t.eventId === r.correlationId)?.seq ?? 0;
     add(r.rule, entityKey(r.target), since, ev.ok ? "the dispatcher" : `a fix: ${ev.detail}`);

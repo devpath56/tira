@@ -243,7 +243,7 @@ export function foldDetailed(
       const k = entityKey(intent.entity);
       const called = intent.kind === "event" && intent.event === "BLOCKED" && intent.payload.requested_by !== undefined
         ? intent.payload.requested_by === ORCHESTRATOR && blockRefusal(view, view.getKey(k), ORCHESTRATOR, intent.payload.block_reason) === undefined
-        : due(view, idx).some((r) => entityKey(r.target) === k && r.kind === intent.kind && (intent.kind === "create" || r.event === intent.event) && r.correlationId === e.metadata.correlationId);
+        : due(view, idx, registry).some((r) => entityKey(r.target) === k && r.kind === intent.kind && (intent.kind === "create" || r.event === intent.event) && r.correlationId === e.metadata.correlationId);
       if (!called) anomaly(`the dispatcher wrote ${e.type} on ${k}, but no handoff rule called for it`);
     }
     // Versioned rules: each event is judged by the rules of the era it was written in.

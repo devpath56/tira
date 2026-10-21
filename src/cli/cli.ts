@@ -21,6 +21,8 @@ import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
+import { makeView } from "../fold/view.ts";
+import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
 
 export interface Io {
   out(line: string): void;
@@ -34,6 +36,13 @@ Usage:
   tira types                                      entity types, their states and events
   tira create <type> <id> [--parent P] [k=v ...]  create an entity          e.g. tira create node colors --parent improve_visual
   tira send <type> <id> <EVENT> [key=value ...]   send an event             e.g. tira send node colors COMPLETE evidenceRef=palette.png
+  tira idea "<summary>" --why "<why>" [--under TASK] [--id ID]
+                                                  push an idea (for agents): tira declares it, drafts its file
+                                                  from the two lines and says where it would put it: under
+                                                  --under, or the task the summary names; when those disagree or
+                                                  name nothing, a person picks the parent. A person approves the
+                                                  file, then the placement (tira serve), and the task is born
+  tira ideas                                      the ideas in the stream: stage, file, proposed parent
   tira log                                        the raw event log, in seq order (rejections included)
   tira state [--at N] [--now ISO] [--vantage V]   derived state, plus rejections and anomalies
   tira replay <N>                                 state as of event N (same as: tira state --at N)
@@ -54,7 +63,8 @@ Usage:
   tira serve --actor NAME [--port N] [--factory FILE]
                                                   the page, live, on 127.0.0.1 only (default port 4747): needs
                                                   attention, ⌘K search, and start / unblock / complete / block /
-                                                  cancel / reopen / add subtask, each through a decision dialog,
+                                                  cancel / reopen / add subtask, and an idea's approvals (file,
+                                                  then placement), each through a decision dialog,
                                                   written as NAME; the divergence section is recomputed on every
                                                   page load. Ctrl-C stops it
   tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]
@@ -78,6 +88,9 @@ Options:
   --json           machine-readable output
   --hash           (dump) print sha256 of the canonical JSON
   --parent ID      (create) the parent node; discovered work: kind=discovered discovered_during=ID
+  --why TEXT       (idea) why it's worth doing: the file record's second line
+  --under TASK     (idea) the task it belongs under, if the agent knows it
+  --id ID          (idea) the idea's id, which the task it becomes keeps (default: from the summary)
   --out FILE       (render) output path (default: tira.html)
   --factory FILE   (divergence, render, serve) the factory's file state, JSONL (default: $TIRA_FACTORY)
   --tira-log FILE  (divergence) tira's log as JSONL, instead of the store
@@ -86,8 +99,8 @@ Options:
 Event names: use the table's name (COMPLETE, ADD_CHILD) or the stored form (complete, add-child).
 
 Writes go through the dispatcher: after your command lands it writes any handoff it
-made due (factory briefs, drops and sessions; idea -> node births) as "dispatcher",
-and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
+made due (factory briefs, drops and sessions; an idea's file and proposed parent; idea -> node
+births) as "dispatcher", and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
 
 Exit codes: 0 ok · 2 rejected or refused by the rules · 3 the sweep found something broken · 1 usage or other error
 (including malformed or empty divergence input). Divergences are warn-only (severity policy v1): they exit 0.`;
@@ -107,6 +120,9 @@ const OPTIONS = {
   json: { type: "boolean" },
   hash: { type: "boolean" },
   parent: { type: "string" },
+  why: { type: "string" },
+  under: { type: "string" },
+  id: { type: "string" },
   out: { type: "string" },
   port: { type: "string" },
   factory: { type: "string" },
@@ -193,7 +209,69 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
   }
   const { result: r, handoffs } = await new Dispatcher(store, registry).submit(commandFrom(kind, args, values, stream, io));
   io.out(values.json ? JSON.stringify(handoffs.length > 0 ? { ...r, handoffs } : r) : describe(r, handoffs));
+  return exitOf(r);
+}
+
+// exit 2 when the rules said no
+const exitOf = (r: WriteResult) => {
   return r.status === "rejected" || r.status === "refused" ? 2 : 0;
+};
+
+// An idea, pushed (D5, the vapor catch): an agent's one sentence becomes a declared idea whose
+// file tira drafts at once (the dispatcher's V1). It prints where tira would put it, so the agent
+// can tell the person what happens next; the proposal itself is made when the file is approved,
+// on the tree as it is then.
+const IDEA_TEXT_MAX = 500;
+async function idea(args: string[], values: Values, store: ClosableStore, registry: Registry, stream: string, io: Io): Promise<number> {
+  const summary = args.join(" ").trim();
+  const why = values.why?.trim() ?? "";
+  if (summary === "" || args.length === 0) throw new UsageError('usage: tira idea "<summary>" --why "<why>" [--under TASK] [--id ID]');
+  if (why === "") throw new UsageError('an idea\'s file is its summary and why: add --why "<why it\'s worth doing>"');
+  if (summary.length > IDEA_TEXT_MAX || why.length > IDEA_TEXT_MAX) throw new UsageError(`keep the summary and the why to ${IDEA_TEXT_MAX} characters each`);
+  const actor = values.actor ?? io.env.TIRA_ACTOR;
+  if (actor === undefined) throw new UsageError("tira idea needs --actor NAME (or TIRA_ACTOR): who is declaring it");
+  const under = values.under?.trim() || undefined;
+  const file: IdeaFile = { summary, why };
+  const view = makeView(new Map(fold(await store.readStream(stream), registry).entities.filter((e) => e.stream === stream).map((e) => [e.key, e])));
+  const place = placement(view, registry, file, under);
+  const id = values.id?.trim() || ideaId(view, summary, place.parent);
+  if (values.id !== undefined && (view.get({ type: IDEA, id }) || view.get({ type: "node", id }))) throw new UsageError(`${id} is taken (an idea or a task has that id): pick another --id`);
+  const cmd: Command = {
+    stream, kind: "create", entity: { type: IDEA, id }, actor,
+    payload: { summary, why, ...(under === undefined ? {} : { under }) },
+    ...(values["event-id"] !== undefined ? { eventId: values["event-id"] } : {}),
+  };
+  const { result: r, handoffs } = await new Dispatcher(store, registry).submit(cmd);
+  const next = whatNext(place);
+  if (values.json) io.out(JSON.stringify({ ...r, id, ...(handoffs.length > 0 ? { handoffs } : {}), file, placement: place, next }));
+  else {
+    io.out(describe(r, handoffs));
+    if (r.status === "appended" || r.status === "duplicate") {
+      io.out(`idea ${id}: "${summary}"`);
+      io.out(`parent: ${place.parent ?? "not settled"} (${place.basis})`);
+      io.out(`next: ${next}`);
+    }
+  }
+  return exitOf(r);
+}
+
+const whatNext = (p: Placement): string =>
+  p.parent === undefined
+    ? `a person approves the file, then picks where it goes when approving the placement${p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : ""}`
+    : `a person approves the file; tira then proposes it under ${p.parent}, and a person approves that`;
+
+// The stream's ideas, for an agent checking on what it pushed.
+async function ideas(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const events = await store.readStream(stream);
+  const rows = ideaRows(fold(events, registry), events, stream);
+  if (values.json) {
+    io.out(JSON.stringify(rows.map((i) => ({ ...i, stageWords: stageWord(i), open: OPEN_STAGES.has(i.stage) }))));
+    return 0;
+  }
+  io.out(`stream ${stream} · ${rows.length} idea(s), ${rows.filter((i) => OPEN_STAGES.has(i.stage)).length} open`);
+  const where = (i: IdeaRow) => i.placedUnder ?? i.proposal?.parent ?? (i.proposal ? `? (${i.proposal.candidates.join(", ") || "no candidates"})` : i.under ?? "");
+  for (const l of table(rows.map((i) => ({ id: i.id, stage: stageWord(i), under: where(i), summary: i.summary ?? "", by: i.declaredBy ?? "" })), ["id", "stage", "under", "summary", "by"])) io.out(l);
+  return 0;
 }
 
 // The fx: key for a transition (src/write/fxkey.ts), computed the way the factory must. It
@@ -640,7 +718,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence"].includes(cmd)) {
+  if (!["create", "send", "idea", "ideas", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -660,6 +738,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "create":
       case "send":
         return await write(cmd, args, values, store, registry, stream, io);
+      case "idea":
+        return await idea(args, values, store, registry, stream, io);
+      case "ideas":
+        return await ideas(store, registry, stream, values, io);
       case "log":
         return await log(store, stream, values, io);
       case "state":

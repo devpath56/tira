@@ -42,7 +42,7 @@ test("a command is read back into the page's action, with a note kept for the hi
 test("a command the page won't run is explained, never guessed at", () => {
   const why = (text: string) => { const p = read(text); return p.ok ? "ran" : p.why; };
   assert.match(why("rm -rf /"), /start with "tira"/);
-  assert.match(why("tira send node x DELETE"), /the page sends START, UNBLOCK, COMPLETE, BLOCK, CANCEL, REOPEN, not DELETE/);
+  assert.match(why("tira send node x DELETE"), /the page sends START, UNBLOCK, COMPLETE, BLOCK, CANCEL, REOPEN, APPROVE_FILE, REJECT_FILE, APPROVE_NODE, REJECT_NODE, not DELETE/);
   assert.match(why("tira send node x ADD_SUBTASK"), /not ADD_SUBTASK/);
   assert.match(why("tira send brief b START"), /acts on tasks \(node\), not brief/);
   assert.match(why('tira send node x COMPLETE evidenceRef="e" actor="tira"'), /COMPLETE takes evidenceRef="…" and note="…", not actor/);
