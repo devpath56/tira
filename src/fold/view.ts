@@ -5,7 +5,7 @@ import { entityKey, type EntityRef, type EntityState, type StateView } from "./t
 // on the machine's locale or ICU version, or refolds stop being byte-identical
 // across machines (build-plan.md T2, manual test M0).
 export function compareCodeUnits(a: string, b: string): number {
-  if (a.toLowerCase() < b.toLowerCase()) return -1;
+  if (a < b) return -1;
   if (a > b) return 1;
   return 0;
 }
