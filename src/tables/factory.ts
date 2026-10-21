@@ -7,6 +7,7 @@ import type { GuardFn } from "./table.ts";
 import type { EntityTypeDef } from "./registry.ts";
 import type { EntityState, StateView } from "../fold/types.ts";
 import { isIsoTime, isoMs } from "../time.ts";
+import { isOracle, VERDICTS } from "../fold/labels.ts";
 
 // Role names are literal actor ids (A15). The dispatcher is the single append process
 // for handoff receivers (N2, A9); the write path reserves its name like tira's.
@@ -102,6 +103,10 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
   sessionNamesItself: ({ actor, entity }) => s(actor) && actor === entity.id,
   // A9: sessions file drops; a role can't (the filer is who the claim is checked against).
   dropFiledBySession: ({ actor }) => s(actor) && !ROLES.has(actor),
+  // KAN-8: an oracle labels an approval (fold/labels.ts). What it cites is checked against
+  // the log by the write path and the fold; the guard checks only the label's own shape.
+  labelWellFormed: ({ actor, payload }) =>
+    isOracle(actor) && s(payload.brief) && s(payload.verifying_event_id) && s(payload.evidence) && (VERDICTS as readonly unknown[]).includes(payload.verdict),
 };
 
 export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][string]): EntityTypeDef[] {
@@ -139,5 +144,8 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
       mustExist: [{ on: "birth", type: "session", from: "actor" }], // ruling 2026-10-18: a named session files
       regions: { lifecycle: chart("drop.json") },
     },
+    // KAN-8: an oracle's judgment of an approval, keyed to (brief, verifying event id) by its
+    // birth payload; 1:N per approval. Born recorded and never moves (fold/labels.ts).
+    { type: "label", createdAs: "RECORDED", createGuard: "labelWellFormed", keepBirth: true, regions: { lifecycle: chart("label.json") } },
   ];
 }

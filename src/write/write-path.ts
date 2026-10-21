@@ -13,6 +13,10 @@
 // Note: the promise submit() returns is also observed by the queue, so an ignored
 // rejected submit() does not raise unhandledRejection. Always await submit().
 //
+// Outcome labels (fold/labels.ts): "oracle:*" names write labels and nothing else. A label
+// is judged against the log as it stands; a label from the approval's own approver is
+// refused with NOTHING appended (status "refused"), so a self-issued label never exists.
+//
 // Provisional semantics (not in the spec; flagged for the PM):
 // - eventId identifies a COMMAND. Re-submitting the same eventId with the same
 //   content returns "duplicate" (even if the original was rejected); re-submitting
@@ -42,6 +46,8 @@ import { children, nextCloseFor } from "../fold/tree.ts";
 import { MACHINE_ACTOR, entityKey, type EntityRef, type EntityState } from "../fold/types.ts";
 import { DISPATCHER, FX_KEY } from "../tables/factory.ts";
 import { fxKey, transitionOf } from "./fxkey.ts";
+import { skeleton } from "../text.ts";
+import { isLabelBirth, isOracle, labelProblem, type LogLookup } from "../fold/labels.ts";
 
 export type Command = {
   stream: string;
@@ -71,7 +77,8 @@ export type WriteResult =
     }
   | { status: "rejected"; seq: number; code: RejectCode; detail: string }
   | { status: "duplicate"; seq: number; original: "appended" | "rejected" }
-  | { status: "skipped"; seq: number }; // a dispatcher receiver that was no longer due: nothing written
+  | { status: "skipped"; seq: number } // a dispatcher receiver that was no longer due: nothing written
+  | { status: "refused"; seq: number; code: RejectCode; detail: string }; // inadmissible by construction: nothing written, not even a rejection (seq: the stream's last, as for skipped)
 
 export interface WritePathOptions {
   maxAttempts?: number; // re-read/re-evaluate on a lost cross-process race; default 10
@@ -95,14 +102,7 @@ const backoff = (attempt: number) =>
 
 // The machine roles' names are reserved: tira's, and the factory dispatcher's (B1: the
 // single writer of handoff receivers). Anything that reads as one of them on the page is
-// theirs: any casing or spacing, invisible characters, accents, and the common lookalike
-// letters (Cyrillic а/і/т, Turkish ı, Greek ι/α/τ).
-const LOOKALIKE: Record<string, string> = {
-  "а": "a", "с": "c", "е": "e", "і": "i", "о": "o", "р": "p", "т": "t", "х": "x", "һ": "h", "ԁ": "d", // Cyrillic
-  "ı": "i", "ι": "i", "α": "a", "τ": "t", "ο": "o", "ρ": "p", "ε": "e", "η": "h", // Turkish, Greek
-};
-const skeleton = (s: string) =>
-  [...s.normalize("NFKD").replace(/[\p{M}\p{Cf}\p{Cc}\s]/gu, "").toLowerCase()].map((c) => LOOKALIKE[c] ?? c).join("");
+// theirs (text.ts skeleton).
 const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);
 const isReserved = (actor: string | undefined) => actor !== undefined && RESERVED.has(skeleton(actor));
 // For callers that act under a fixed name (tira serve): refuse a reserved one up front.
@@ -276,6 +276,7 @@ export class WritePath {
       const { batch, result } = refusal
         ? { batch: [toRejectedEvent(intent, refusal.code, refusal.detail, moveId)], result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, ...refusal }) }
         : this.decide(intent, events, internal, moveId, meta);
+      if (batch.length === 0) return result([]); // refused: nothing to append
       // Versioned rules: every event carries the era it was decided under, so replay can judge
       // it by the same rules after they change.
       const stamped = batch.map((x) => ({ ...x, metadata: { ...x.metadata, era: this.registry.era } }));
@@ -305,7 +306,38 @@ export class WritePath {
         verdict: { ok: false, code: "reserved-actor", detail } as Preview,
       };
     }
-    const state = fold(events, this.registry);
+    if (!internal && isOracle(intent.actor) && !isLabelBirth(intent)) {
+      // an oracle writes labels and nothing else (only an oracle may write one: labelWellFormed)
+      const detail = `actor "${intent.actor}" is an oracle: it writes labels and nothing else`;
+      return {
+        batch: [toRejectedEvent(intent, "reserved-actor", detail, moveId)],
+        result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code: "reserved-actor", detail }),
+        verdict: { ok: false, code: "reserved-actor", detail } as Preview,
+      };
+    }
+    const applied = new Map<string, StoredEvent>();
+    const state = fold(events, this.registry, { onApply: (e) => applied.set(e.eventId, e) });
+    if (isLabelBirth(intent)) {
+      const seen = new Map(events.map((e) => [e.eventId, e]));
+      const log: LogLookup = { seen: (id) => seen.get(id), applied: (id) => applied.get(id) };
+      const problem = labelProblem(intent, log);
+      if (problem?.self) {
+        const detail = problem.detail;
+        return {
+          batch: [] as NewEvent[],
+          result: (): WriteResult => ({ status: "refused", seq: events.at(-1)?.seq ?? 0, code: "self-label", detail }),
+          verdict: { ok: false, code: "self-label", detail } as Preview,
+        };
+      }
+      if (problem) {
+        const detail = problem.detail;
+        return {
+          batch: [toRejectedEvent(intent, "bad-label", detail, moveId)],
+          result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code: "bad-label", detail }),
+          verdict: { ok: false, code: "bad-label", detail } as Preview,
+        };
+      }
+    }
     const entities = new Map<string, EntityState>(state.entities.map((e) => [e.key, e]));
     const plan = internal ? undefined : this.planTiraCloses(intent, entities, moveId);
     const after = plan?.overlay ?? entities;

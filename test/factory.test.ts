@@ -50,7 +50,7 @@ const clean = async (t: T) => assert.deepEqual((await t.now()).anomalies, []);
 test("the factory tables load, validate (captures included) and register with 0 shared events", () => {
   const r = defaultRegistry();
   assert.deepEqual(r.types().map((x) => `${x.type}:${Object.keys(x.regions).join("+")}`), [
-    "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "refusal:lifecycle", "override:lifecycle", "drop:lifecycle",
+    "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "refusal:lifecycle", "override:lifecycle", "drop:lifecycle", "label:lifecycle",
   ]);
   assert.equal(r.creationName("brief", 1), "CREATED");
   assert.equal(r.creationName("brief", 2), "REVISED");

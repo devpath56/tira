@@ -15,6 +15,7 @@ import { activeNodes, awaitingClose, contains, cursor, isDrained, isTerminal, ro
 import { compareCodeUnits, makeView } from "./view.ts";
 import { blockRefusal, due, indexKey, pending as pendingHandoffs, type PendingHandoff, type TriggerIndex } from "./handoffs.ts";
 import { DISPATCHER, ORCHESTRATOR, frontier } from "../tables/factory.ts";
+import { LABEL, isLabelBirth, isOracle, labelProblem, summarize, type LabelSummary } from "./labels.ts";
 
 export { compareCodeUnits, makeView } from "./view.ts";
 
@@ -63,6 +64,9 @@ export interface FoldResult {
   anomalies: Anomaly[];
   handoffs: Record<string, PendingHandoff[]>; // stream -> handoffs still waiting (proposal R3), when any
   frontier: Record<string, string[]>; // stream -> briefs claimable now (G9), for streams with briefs
+  // stream -> outcome labels, derived at read time (fold/labels.ts), for streams with any label
+  // event; absent when no stream has one, so a log without labels folds to the same bytes
+  labels?: Record<string, LabelSummary>;
 }
 
 const isRejectedData = (d: unknown): d is RejectedData => {
@@ -131,6 +135,14 @@ export function foldDetailed(
   const rejections: Rejection[] = [];
   const anomalies: Anomaly[] = [];
   let lastSeq = 0;
+  // Labels are judged on the log before them (labels.ts): every event seen, and those applied.
+  const seenIds = new Map<string, Map<string, StoredEvent>>();
+  const appliedIds = new Map<string, Map<string, StoredEvent>>();
+  const idsOf = (m: Map<string, Map<string, StoredEvent>>, stream: string) => {
+    let x = m.get(stream);
+    if (!x) m.set(stream, (x = new Map()));
+    return x;
+  };
   const creationNameOf = (t: string, v?: number) => registry.creationName(t, v);
 
   // Replay check of tira's own writes (ruling 2026-10-18: "the machine writes, it never
@@ -184,6 +196,7 @@ export function foldDetailed(
     const anomaly = (problem: string) =>
       anomalies.push({ seq: e.seq, stream: e.stream, eventId: e.eventId, type: e.type, problem });
     const byTira = e.metadata?.actor === MACHINE_ACTOR;
+    idsOf(seenIds, e.stream).set(e.eventId, e);
 
     if (e.type === REJECTED) {
       if (!isRejectedData(e.data)) {
@@ -203,6 +216,22 @@ export function foldDetailed(
       anomaly("unrecognised event shape");
       if (!byTira) settle(e, undefined);
       continue;
+    }
+    // Outcome labels: an oracle writes labels only, and a label must stand on the log before it.
+    if (isOracle(intent.actor) && !isLabelBirth(intent)) {
+      anomaly(`${intent.actor} is an oracle: it writes labels and nothing else`);
+      settle(e, undefined);
+      continue;
+    }
+    if (isLabelBirth(intent)) {
+      const seen = idsOf(seenIds, e.stream);
+      const applied = idsOf(appliedIds, e.stream);
+      const problem = labelProblem(intent, { seen: (id) => (id === e.eventId ? undefined : seen.get(id)), applied: (id) => applied.get(id) });
+      if (problem) {
+        anomaly(`${problem.self ? "self-label" : "bad-label"}: ${problem.detail}`);
+        settle(e, undefined);
+        continue;
+      }
     }
     const { entities, view } = scope(e.stream);
     const idx = indexOf(e.stream);
@@ -232,6 +261,7 @@ export function foldDetailed(
       continue;
     }
     opts.onApply?.(e, intent, ev, view);
+    idsOf(appliedIds, e.stream).set(e.eventId, e);
     const prev = entities.get(ev.key);
     const createdBy = prev ? prev.createdBy : intent.actor;
     const tree = prev?.tree ?? ev.tree;
@@ -318,7 +348,17 @@ export function foldDetailed(
     const view = views.get(stream) as StateView;
     if (view.all("brief").length > 0) claimable[stream] = frontier(view).map((b) => b.key);
   }
-  return { result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable }, indexes };
+  const labels: Record<string, LabelSummary> = {};
+  const labelStreams = new Set([...views.keys(), ...anomalies.map((a) => a.stream)]);
+  for (const stream of [...labelStreams].sort(compareCodeUnits)) {
+    const recorded = views.get(stream)?.all(LABEL) ?? [];
+    const refused = anomalies.filter((a) => a.stream === stream && a.type.startsWith(`${LABEL}.`)).length;
+    if (recorded.length > 0 || refused > 0) labels[stream] = summarize(recorded, refused);
+  }
+  return {
+    result: { lastSeq, entities, derived, trees, rejections, anomalies, handoffs, frontier: claimable, ...(Object.keys(labels).length > 0 ? { labels } : {}) },
+    indexes,
+  };
 }
 
 // Stable serialization: sorted keys at every level. Two folds of the same log

@@ -88,7 +88,7 @@ Writes go through the dispatcher: after your command lands it writes any handoff
 made due (factory briefs, drops and sessions; idea -> node births) as "dispatcher",
 and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
 
-Exit codes: 0 ok · 2 rejected by the rules · 3 the sweep found something broken · 1 usage or other error
+Exit codes: 0 ok · 2 rejected or refused by the rules · 3 the sweep found something broken · 1 usage or other error
 (including malformed or empty divergence input). Divergences are warn-only (severity policy v1): they exit 0.`;
 
 class UsageError extends Error {}
@@ -159,6 +159,7 @@ function describe(r: WriteResult, handoffs: HandoffWrite[] = []): string {
   }
   if (r.status === "duplicate") return `duplicate  seq ${r.seq}  (original was ${r.original}; nothing new stored)`;
   if (r.status === "skipped") return `skipped    seq ${r.seq}  (no longer due; nothing new stored)`;
+  if (r.status === "refused") return `REFUSED    ${r.code}  ${r.detail}  (nothing stored)`;
   return `REJECTED   seq ${r.seq}  ${r.code}  ${r.detail}`;
 }
 
@@ -191,7 +192,7 @@ async function write(kind: "create" | "send", args: string[], values: Values, st
   }
   const { result: r, handoffs } = await new Dispatcher(store, registry).submit(commandFrom(kind, args, values, stream, io));
   io.out(values.json ? JSON.stringify(handoffs.length > 0 ? { ...r, handoffs } : r) : describe(r, handoffs));
-  return r.status === "rejected" ? 2 : 0;
+  return r.status === "rejected" || r.status === "refused" ? 2 : 0;
 }
 
 // The fx: key for a transition (src/write/fxkey.ts), computed the way the factory must. It
@@ -292,6 +293,15 @@ function printState(r: FoldResult, stream: string, upTo: number | undefined, io:
     for (const l of table(
       waiting.map((p) => ({ since: String(p.since), rule: p.rule, on: p.key, "waiting on": p.waitingOn })),
       ["since", "rule", "on", "waiting on"],
+    )) io.out(l);
+  }
+  const labels = r.labels?.[stream];
+  if (labels !== undefined) {
+    io.out("");
+    io.out(`labels: ${labels.labels} on ${labels.labeled} approval(s) · found bad ${labels.foundBad} · oracles disagree on ${labels.disagreements} · ${labels.anomalies} refused by the fold`);
+    for (const l of table(
+      Object.entries(labels.approvals).map(([vid, a]) => ({ approval: vid, brief: a.brief, verdict: a.verdict, oracles: a.labels.map((x) => `${x.actor} ${x.verdict}`).join(", ") })),
+      ["approval", "brief", "verdict", "oracles"],
     )) io.out(l);
   }
   if (r.anomalies.length > 0) {
