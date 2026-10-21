@@ -1,7 +1,10 @@
 name: ci
 
+# A push to a PR branch is already covered by pull_request; push only for main,
+# so each PR push runs CI once, not twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
