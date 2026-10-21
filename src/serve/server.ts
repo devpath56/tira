@@ -222,7 +222,7 @@ function briefHtml(p: Packet): string {
 function noticesHtml(opts: ConfirmOpts): string {
   const moved = opts.moved ? `<p class="flash no" role="status" data-moved>The log changed since you opened this, so nothing was written. This is what tira says now.</p>` : "";
   const notice = opts.notice ? `<p class="flash no" role="status" data-notice>${esc(opts.notice)}</p>` : "";
-  const error = opts.error ? `<p class="flash no" role="alert" data-error>${opts.error} Nothing was written.</p>` : "";
+  const error = opts.error ? `<p class="flash no" role="alert" data-error>${esc(opts.error)} Nothing was written.</p>` : "";
   return moved + notice + error;
 }
 
