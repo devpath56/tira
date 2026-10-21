@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 223 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 258 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -122,13 +122,15 @@ node scripts/tira.ts log                                              # raw log,
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
 node scripts/tira.ts dump --hash                                      # sha256 of the canonical derived state
+node scripts/tira.ts sweep                                            # health checks; exit 3 if something is broken
 ```
 
 Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` and `tira.html` are git-ignored).
 Tree: `--stream` (default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values
 are strings; use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a
 `duplicate`. Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or
-`add-child`). `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 1 usage/error.
+`add-child`). `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 3 the health
+sweep found something broken · 1 usage/error.
 
 ### Demo D0 script (manual test M0)
 
@@ -460,13 +462,15 @@ the folded result, which can include:
 - the trail of events per task;
 - provenance and handoff pairs;
 - pending handoffs and the frontier;
+- what the health sweep finds;
 - snapshots at labelled steps (replay to N).
 
 `after` chains scripts on one log; for example, S3 runs after S1, S2 and S7.
 
 `npm run scenarios` (and `npm test`, so CI) runs each one through the real dispatcher on
 a fresh store. It also checks that each log folds to the same bytes twice, and from a
-shuffled copy, and that no prefix of it shows an anomaly. Self-tests feed the runner a
+shuffled copy, that no prefix of it shows an anomaly, and that the health sweep finds
+nothing broken in it (at the end and at every snapshot). Self-tests feed the runner a
 script with a wrong expectation of every kind, and check each one is reported. They also
 check the runner refuses malformed scripts: a duplicate label, a script that runs after
 itself, or a one-word state for a brief with three regions.
@@ -478,6 +482,52 @@ Waiting on unbuilt phases (shown as TODO, with the reason):
 | S8, T6 | the suggester (Phase 2) and Devansh's ranking rule |
 | S9, T5 | aging and its SLA (Phase 3, A13) |
 | S5's age check | aging; S5's idea → node part runs now |
+
+## Health sweeps (Phase 3): on-demand safety checks
+
+`tira sweep [--at N] [--json]` folds the log, then re-checks the result from its raw
+fields (parent pointers, child lists, depths, states). It doesn't use the tree helpers the
+fold and the gates use, so a bug there shows up here instead of agreeing with itself. It
+flags; it never fixes (`src/sweep/sweep.ts`).
+
+| Check | Finds | Kind |
+|---|---|---|
+| The log follows the rules | Events replay refused: they skipped the write path, or the code changed | Broken |
+| Every task's parent exists | A parent that doesn't exist or is another type; a task with no place in the tree | Broken |
+| No loops | Parents that come back round; briefs whose `blocked_by` loop (current versions only) | Broken |
+| Parents and children agree | A parent listing a child twice, a child that doesn't exist, or one that names another parent; a child its parent doesn't list | Broken |
+| The counts add up | Tasks the roots don't reach, or reach twice; more than one task in progress; a parent over the 20-child cap | Broken |
+| Depths match | A recorded depth that isn't where the task sits; deeper than the cap of 8 | Broken |
+| No closed parent has open work | A done or cancelled task with an open child | Broken |
+| Every task says what it is and when it's done | A task born without a `definition` or `done_criteria` (blank counts as none). A task born from an idea takes what the idea's birth said | To look at |
+| Finished work that grew new work | A child added under a task that was done and then re-opened (scope creep: allowed, with a reason) | To look at |
+
+The write path and replay refuse anything that would break the first seven, so on a log
+written through tira they only fire on tampering or a bug. Tests feed each check broken
+state directly to prove it fires. "To look at" findings never fail the sweep: it exits 0
+with them, and 3 when something is broken. Every scenario checks that its log sweeps with
+nothing broken. S4, T7 and `scenarios/health-sweep.json` check the two "to look at" kinds.
+
+One fold does all of it: `--at N` replays to N the way `tira state --at N` does, and the
+history check rides along on that fold. A log of about 2,800 events sweeps in under 50 ms.
+The walks are iterative and visit each task once, so even state the fold could never
+produce (shared child lists, a 10,000-deep chain) can't hang or crash a sweep.
+
+Calls made here, for the PM:
+
+- **Field names:** a task's definition and done criteria are `definition` and
+  `done_criteria` in its birth payload. Nothing sets them later yet, and no current
+  scenario sets them, so today's seed tree is all hollow. A task born from an idea is
+  read through `idea_id` to the idea's birth.
+- **"Counts that don't add up":** the roots reach every task exactly once, at most one task
+  is in progress, and no parent is over the children cap.
+- **"Depths that drifted":** a recorded depth that doesn't match the parent chain, or one
+  over the cap.
+- **Regrown** means "done, re-opened, then grew a child", including a done leaf that's
+  re-opened and split (S4). A drained parent that is still open taking another child is
+  ordinary planning (the un-drain window, ruling 2026-10-18), so it isn't flagged. A
+  finding stays in the history after the branch is done again.
+- **Not on the page yet.** The sweep is on demand, from the command line.
 
 ## Docs & showcase
 

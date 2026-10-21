@@ -331,6 +331,37 @@ test("tira key: checks what send would refuse without a log, never opens the sto
   }
 });
 
+test("tira sweep: exits 0 with things to look at, 3 when something is broken; --json and --at", async () => {
+  const s = sandbox();
+  try {
+    await s.tira("create", "node", "app", "definition=the app", "done_criteria=it ships");
+    await s.tira("create", "node", "a", "--parent", "app");
+    const ok = await s.tira("sweep");
+    assert.equal(ok.code, 0);
+    assert.match(ok.out, /^health sweep · stream tasktree-main · as of seq 2$/m);
+    assert.match(ok.out, /^ok {4}no closed parent has open work$/m);
+    assert.match(ok.out, /^look {2}every task says what it is and when it's done \(1\)\n {6}node:a {2}no definition or done_criteria$/m);
+    assert.match(ok.out, /^nothing broken; 1 to look at$/m);
+    const json = JSON.parse((await s.tira("sweep", "--json")).out) as { broken: number; attention: number; atSeq: number };
+    assert.deepEqual([json.broken, json.attention, json.atSeq], [0, 1, 2]);
+    // an event appended past the write path
+    const { SqliteEventStore } = await import("../src/store/sqlite-store.ts");
+    const raw = new SqliteEventStore({ path: s.db });
+    await raw.append("tasktree-main", [{ type: "node.complete", data: { entity: { id: "a" }, payload: {} } }]);
+    raw.close();
+    const bad = await s.tira("sweep");
+    assert.equal(bad.code, 3);
+    assert.match(bad.out, /^FAIL {2}the log follows the rules \(1\)\n {6}seq 3 {2}node\.complete: denied/m);
+    assert.match(bad.out, /^1 broken; 1 to look at$/m);
+    const before = await s.tira("sweep", "--at", "2");
+    assert.equal(before.code, 0);
+    assert.match(before.out, /as of seq 2$/m);
+    assert.equal((await s.tira("sweep", "--at", "x")).code, 1);
+  } finally {
+    s.done();
+  }
+});
+
 test("environment defaults: TIRA_DB, TIRA_STREAM, TIRA_ACTOR", async () => {
   const s = sandbox();
   try {

@@ -59,6 +59,7 @@ test("the runner also reports every other kind of wrong expectation, and refuses
       closedByTira: ["node:table"], anomalies: 1, frontier: ["brief:x@1"],
       provenance: { "node:design_tokens": { parent: "node:metrics_card", kind: "planned" } },
       paired: [{ from: "idea.approve-node idea:none", to: "node.born node:none" }],
+      sweep: { broken: 1, found: { regrown: ["node:x"], orphan: [] } },
     },
   };
   const said = (await runScenario(tree, all)).failures.join("\n");
@@ -66,6 +67,7 @@ test("the runner also reports every other kind of wrong expectation, and refuses
     "node:table exists, expected none", "node:table isn't drained", "node:improve_visual is drained",
     "waiting for tira is [\"node:improve_visual\"], expected [\"node:table\"]", "closed by tira is [], expected [\"node:table\"]",
     "0 anomalies", "the frontier is [], expected [\"brief:x@1\"]", "node:design_tokens's provenance", "no pair idea.approve-node idea:none",
+    "the health sweep found 0 broken (), expected 1", "the sweep's regrown findings is [], expected [\"node:x\"]", "the sweep has no check \"orphan\"",
   ]) assert.ok(said.includes(bit), `missing: ${bit}\n--- got:\n${said}`);
   // a factory brief has three regions: a one-word state is refused, region states are compared
   const brief = { id: "wrong-brief", title: "wrong", after: ["I2-unchecked-landing"], steps: [], expect: { states: { "brief:b@1": "gated", "drop:b@1": "filed" } } };
