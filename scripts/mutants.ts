@@ -63,7 +63,7 @@ const MUTANTS: Mutant[] = [
   { name: "cli: replay ignores N", file: "src/cli/cli.ts", find: 'return await state(store, registry, stream, seqArg(args[0], "replay N"), values, io);', replace: "return await state(store, registry, stream, undefined, values, io);" },
   { name: "cli: key=value values parsed as JSON", file: "src/cli/cli.ts", find: "payload[p.slice(0, eq)] = p.slice(eq + 1);", replace: "payload[p.slice(0, eq)] = (() => { try { return JSON.parse(p.slice(eq + 1)); } catch { return p.slice(eq + 1); } })();" },
   { name: "cli: key=value splits on the last =", file: "src/cli/cli.ts", find: 'const eq = p.indexOf("=");', replace: 'const eq = p.lastIndexOf("=");' },
-  { name: "cli: --actor ignored", file: "src/cli/cli.ts", find: "const actor = values.actor ?? io.env.TIRA_ACTOR;", replace: "const actor = io.env.TIRA_ACTOR;" },
+  { name: "cli: --actor ignored", file: "src/cli/cli.ts", find: "const actor = values.actor ?? io.env.TIRA_ACTOR;\n  const entity = {", replace: "const actor = io.env.TIRA_ACTOR;\n  const entity = {" },
   { name: "cli: TIRA_STREAM ignored", file: "src/cli/cli.ts", find: 'values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main"', replace: 'values.stream ?? "tasktree-main"' },
   { name: "cli: dump hash ignores the content", file: "src/cli/cli.ts", find: 'createHash("sha256").update(s)', replace: 'createHash("sha256").update("constant")' },
   { name: "cli: dump ignores --at", file: "src/cli/cli.ts", find: 'return await dump(store, registry, stream, values.at !== undefined ? seqArg(values.at, "--at") : undefined, values, io);', replace: "return await dump(store, registry, stream, undefined, values, io);" },
@@ -115,8 +115,8 @@ const MUTANTS: Mutant[] = [
   { name: "tira: a failed close keeps its start", file: "src/write/write-path.ts", find: "        overlay.set(parent.key, before);\n        records.push(refused);", replace: "        records.push(...mine, refused);" },
   { name: "tira: a failed close isn't logged", file: "src/write/write-path.ts", find: "        overlay.set(parent.key, before);\n        records.push(refused);", replace: "        overlay.set(parent.key, before);" },
   { name: "tira: keeps retrying after a failed close", file: "src/write/write-path.ts", find: "        records.push(refused);\n        break;", replace: "        records.push(refused);\n        continue;" },
-  { name: "replay: no paired treatment for tira's start", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined }", replace: "{}" },
-  { name: "replay: any tira start treated as paired", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined }", replace: "{ pairedClose: e.metadata?.actor === MACHINE_ACTOR }" },
+  { name: "replay: no paired treatment for tira's start", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era }", replace: "{ era }" },
+  { name: "replay: any tira start treated as paired", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era }", replace: "{ pairedClose: e.metadata?.actor === MACHINE_ACTOR, era }" },
   { name: "replay: pair check ignores the node", file: "src/fold/fold.ts", find: "    entityKey(ia.entity) === entityKey(ib.entity) &&\n", replace: "" },
   { name: "replay: pair check accepts someone else's complete", file: "src/fold/fold.ts", find: "if (a.metadata?.actor !== MACHINE_ACTOR || b.metadata?.actor !== MACHINE_ACTOR) return false;", replace: "if (a.metadata?.actor !== MACHINE_ACTOR) return false;" },
   { name: "replay: pair kept when its complete fails", file: "src/fold/fold.ts", find: "if (ev.ok && paired && !completes(paired, entities, ev))", replace: "if (false)" },
@@ -187,12 +187,12 @@ const MUTANTS: Mutant[] = [
   { name: "review: reserved names miss Cyrillic lookalikes", file: "src/write/write-path.ts", find: "\"\u0430\": \"a\", \"\u0441\": \"c\", \"\u0435\": \"e\", \"\u0456\": \"i\", \"\u043e\": \"o\", \"\u0440\": \"p\",", replace: "\"\u0430\": \"a\", \"\u0456\": \"i\"," },
   { name: "review: supersedes typed as text refused", file: "src/fold/evaluate.ts", find: "Number(intent.payload.supersedes) !== v - 1", replace: "intent.payload.supersedes !== v - 1" },
   { name: "review: a race-refused receiver is logged as the dispatcher's", file: "src/write/dispatcher.ts", find: " && evaluate(this.registry, entities, view, intentOf(next, DISPATCHER)).ok;", replace: ";" },
-  // The progress train
-  { name: "render: the train rides on the active task, not the cursor", file: "src/render/html.ts", find: "${r.cursor ? TRAIN : \"\"}", replace: "${r.active ? TRAIN : \"\"}" },
+  // The progress line
+  { name: "render: the next-task marker rides on the active task, not the cursor", file: "src/render/html.ts", find: "${r.cursor ? NEXT_MARK : \"\"}", replace: "${r.active ? NEXT_MARK : \"\"}" },
   { name: "render: no waiting ring on branch lines", file: "src/render/html.ts", find: "${r.awaitingClose ? `<span class=\"wait-ring\"", replace: "${false ? `<span class=\"wait-ring\"" },
   { name: "render: no tira mark on branch lines", file: "src/render/html.ts", find: "${r.closedByTira ? `<span class=\"tira-mark\"", replace: "${false ? `<span class=\"tira-mark\"" },
-  { name: "render: the active stop never pulses", file: "src/render/html.ts", find: "r.active ? \"is-active\" : \"\",\n    ].filter(Boolean)", replace: "\"\",\n    ].filter(Boolean)" },
-  { name: "render: long names not shortened on the train", file: "src/render/html.ts", find: "${esc(short(r.id))}${r.discoveredDuring ? \" \u2726\" : \"\"}", replace: "${esc(r.id)}${r.discoveredDuring ? \" \u2726\" : \"\"}" },
+  { name: "render: the active stop isn't marked", file: "src/render/html.ts", find: "r.active ? \"is-active\" : \"\",\n    ].filter(Boolean)", replace: "\"\",\n    ].filter(Boolean)" },
+  { name: "render: long names not shortened on the progress line", file: "src/render/html.ts", find: "${esc(short(r.id))}${r.discoveredDuring ? \" \u2726\" : \"\"}", replace: "${esc(r.id)}${r.discoveredDuring ? \" \u2726\" : \"\"}" },
   { name: "render: the track never fills", file: "src/render/html.ts", find: "CLOSED.has(r.state) ? \"closed\" : \"\",", replace: "\"\"," },
   { name: "render: branch lines count what's left wrong", file: "src/render/html.ts", find: "    const left = kids.length - closed;", replace: "    const left = kids.length;" },
   // Dependency graph, frontier, scenario runner
@@ -302,7 +302,58 @@ const MUTANTS: Mutant[] = [
   { name: "fold: onApply never called", file: "src/fold/fold.ts", find: "    opts.onApply?.(e, intent, ev, view);\n    const prev = entities.get(ev.key);", replace: "    const prev = entities.get(ev.key);" },
   { name: "scenarios: the sweep isn't checked", file: "src/scenario/run.ts", find: "  if (health.broken !== (x.sweep?.broken ?? 0)) {", replace: "  if (false) {" },
   { name: "cli: tira sweep always exits 0", file: "src/cli/cli.ts", find: "  return r.broken > 0 ? 3 : 0;", replace: "  return 0;" },
+  // A reason to block a task (Isha's call, 2026-10-20)
+  { name: "block reason: unstarted tasks block without one", json: "charts/node-lifecycle.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "unstarted" && p.event === "BLOCK") as { guard?: string }).guard; } },
+  { name: "block reason: in-progress tasks block without one", json: "charts/node-lifecycle.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "in_progress" && p.event === "BLOCK") as { guard?: string }).guard; } },
+  // The page, live: tira serve, needs attention, the palette (D1 UI brief, 2026-10-20)
+  { name: "serve: any Host answers", file: "src/serve/server.ts", find: "    if (!LOCAL_HOST.test(host)) return send(res, 403,", replace: "    if (false) return send(res, 403," },
+  { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) return send(res, 403,", replace: "    if (false) return send(res, 403," },
+  { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) return send(res, 403, text,", replace: "    if (false) return send(res, 403, text," },
+  { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !registry.get(type)?.tree || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
+  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "actor: opts.actor, payload: ask.payload };", replace: "actor: form.get(\"actor\") ?? opts.actor, payload: ask.payload };" },
+  { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
+  { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
+  { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "  const placeholder = verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {};", replace: "  const placeholder = {};" },
+  { name: "serve: confirm form without the token", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"token\" value=\"${esc(opts.token)}\">", replace: "" },
+  { name: "serve: the blocked reason not shown", file: "src/serve/server.ts", find: "  const said = opts.blockedWhy === undefined ? p.lines : [...p.lines, `Blocked because: ${opts.blockedWhy}`];", replace: "  const said = p.lines;" },
+  { name: "page: live parts in the rendered file", file: "src/render/html.ts", find: "  const live = opts.live !== undefined;", replace: "  const live = true;" },
+  { name: "page: attention ignores the reason", file: "src/render/html.ts", find: "    const why = whyLabel(blocked.get(n.row.key)?.reason);", replace: "    const why = \"blocked\";" },
+  { name: "page: attention dates a block by its last no-op", file: "src/render/html.ts", find: "  if (ev === \"block\" && !blocked.has(key)) blocked.set(key,", replace: "  if (ev === \"block\") blocked.set(key," },
+  { name: "page: attention rows carry data-key", file: "src/render/html.ts", find: "`<li class=\"att-row\" data-attention-key=\"${esc(n.row.key)}\"", replace: "`<li class=\"att-row\" data-key=\"${esc(n.row.key)}\"" },
+  { name: "page: attention shows parents in progress", file: "src/render/html.ts", find: "  const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "  const busy = nodes.filter((n) => n.row.state === \"in_progress\" && !n.row.awaitingClose);" },
+  { name: "page: the theme switch starts on Dark", file: "src/render/html.ts", find: "id=\"th-${t}\"${t === \"system\" ? \" checked\" : \"\"}", replace: "id=\"th-${t}\"${t === \"dark\" ? \" checked\" : \"\"}" },
+  { name: "page: a picked Light doesn't beat a dark system", file: "src/render/html.ts", find: ":root:has(#th-light:checked){color-scheme:light;${LIGHT}}", replace: ":root:has(#th-light:checked){color-scheme:light}" },
+  { name: "page: a picked Dark prints dark", file: "src/render/html.ts", find: "@media screen{:root:has(#th-dark:checked)", replace: "@media all{:root:has(#th-dark:checked)" },
+  { name: "serve: the confirm page forgets the theme", file: "src/serve/server.ts", find: "<script type=\"module\" src=\"/theme.mjs\"></script></body>", replace: "</body>" },
+  { name: "serve: the page forgets the theme", file: "src/serve/app.mjs", find: "import \"./theme.mjs\";\n", replace: "" },
+  { name: "page: the guide gets a fourth paragraph", file: "src/render/html.ts", find: "<p><b>The hash.</b>", replace: "<p>More.</p><p><b>The hash.</b>" },
+  { name: "palette: initials don't match", file: "src/serve/rank.mjs", find: "  if (ws.map((w) => w[0]).join(\"\").startsWith(q)) return 800 - ws.length;", replace: "" },
+  { name: "palette: a verb doesn't filter by state", file: "src/serve/rank.mjs", find: "    if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;", replace: "" },
+  { name: "palette: ties lose tree order", file: "src/serve/rank.mjs", find: "  scored.sort((a, b) => b.s - a.s || a.order - b.order);", replace: "  scored.sort((a, b) => b.s - a.s || b.order - a.order);" },
+  { name: "palette: a verb needs a task word after it", file: "src/serve/rank.mjs", find: "  return verb ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };", replace: "  return verb && s.slice(cut).trim() ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };" },
+  { name: "serve: tira's closes not announced", file: "src/serve/server.ts", find: "  if (closes.length > 0) lines.push(`tira will first close", replace: "  if (false) lines.push(`tira will first close" },
+  { name: "serve: the packet judges without tira's closes", file: "src/write/write-path.ts", find: "    return this.decide(intent, await this.store.readStream(cmd.stream), false, \"preview\").verdict;", replace: "    return this.decide(intent, await this.store.readStream(cmd.stream), true, \"preview\").verdict;" },
+  { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "    if (seen !== String((await now()).r.lastSeq)) {", replace: "    if (false) {" },
+  { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"seen\" value=\"${p.seen}\">", replace: "" },
+  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
+  { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "    flashes.delete(rk); // a result shows once", replace: "" },
+  { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
+  { name: "page: refused blocks start a stretch", file: "src/render/html.ts", find: "    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;", replace: "    if (e.stream !== stream || e.type === REJECTED) continue;" },
+  { name: "palette: separators must match exactly", file: "src/serve/rank.mjs", find: String.raw`const norm = (s) => s.toLowerCase().replace(/[\s_.\-/›]+/g, " ").trim();`, replace: "const norm = (s) => s.toLowerCase();" },
+  // Versioned rules and the reason check (rulings 2026-10-20)
+  { name: "eras: replay judges every event by today's rules", file: "src/fold/fold.ts", find: "{ pairedClose: paired !== undefined, era });", replace: "{ pairedClose: paired !== undefined, era: registry.era });" },
+  { name: "eras: new writes aren't stamped", file: "src/write/write-path.ts", find: "metadata: { ...x.metadata, era: this.registry.era }", replace: "metadata: { ...x.metadata }" },
+  { name: "eras: the legacy era runs today's task table", file: "src/tables/registry.ts", find: "      eras: { [LEGACY_ERA]: { lifecycle: chart(\"eras/node-lifecycle.era1.json\") } },\n", replace: "" },
+  { name: "eras: an unknown era replays anyway", file: "src/fold/fold.ts", find: "Number.isInteger(era) && (era as number) >= LEGACY_ERA && (era as number) <= registry.era;", replace: "true;" },
+  { name: "eras: a future era is accepted", file: "src/fold/fold.ts", find: "(era as number) <= registry.era;", replace: "(era as number) <= registry.era + 1;" },
+  { name: "eras: an earlier era may change the shape", file: "src/tables/registry.ts", find: "if (table.initial !== now.initial || !same(table.states, now.states) || !same(table.events, now.events)) {", replace: "if (false) {" },
+  { name: "reason check: only spaces counts as a reason", file: "src/tables/table.ts", find: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.trim().length > 0,", replace: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.length > 0," },
+  { name: "page: a finished active parent needs you", file: "src/render/html.ts", find: "const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "const busy = nodes.filter((n) => n.row.active);" },
+  { name: "page: legacy events unlabelled", file: "src/render/html.ts", find: "legacy: e.metadata.era === undefined, key: `${type}:${d.entity.id}`", replace: "legacy: false, key: `${type}:${d.entity.id}`" },
+  { name: "serve: the reason field takes only spaces", file: "src/serve/server.ts", find: "required${field.text ? ` pattern=", replace: "required${false ? ` pattern=" },
 ];
+// Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
+// only saves memory; the 413 is the same either way.
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
 // Equivalent since 2026-10-18, so not listed: the cursor skipping closed branches
@@ -312,13 +363,13 @@ const MUTANTS: Mutant[] = [
 
 function scratchCopy(): string {
   const dir = mkdtempSync(join(tmpdir(), "tira-mutant-"));
-  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "package.json", "tsconfig.json", "README.md"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
+  for (const p of ["src", "test", "charts", "scenarios", "scripts", "docs", "tira-docs", "package.json", "tsconfig.json", "README.md"]) cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   return dir;
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));

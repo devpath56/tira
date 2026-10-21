@@ -47,7 +47,7 @@ async function dashboard(t: T) {
 }
 async function s1(t: T) {
   await ok(t.send("colors", "START"));
-  await ok(t.send("colors", "BLOCK", { blocker: "design-tokens" }));
+  await ok(t.send("colors", "BLOCK", { reason: "design-tokens" }));
   await ok(t.born("design_tokens", "improve_visual", { kind: "discovered", discovered_during: "colors" }));
   await ok(t.send("design_tokens", "START"));
   await ok(t.send("design_tokens", "COMPLETE", { evidenceRef: "token-spec.md" }));
@@ -182,7 +182,7 @@ test("one-active gate covers UNBLOCK and REOPEN into in_progress, not just START
   const t = setup();
   for (const id of ["a", "b"]) await ok(t.born(id));
   await ok(t.send("a", "START"));
-  await ok(t.send("a", "BLOCK"));
+  await ok(t.send("a", "BLOCK", { reason: "waiting" }));
   await ok(t.send("b", "START")); // a is blocked, so b may start
   assert.equal(st(await t.send("a", "UNBLOCK")), "rejected:gate"); // ruling: the gate covers UNBLOCK
   await ok(t.send("b", "COMPLETE", { evidenceRef: "e" }));
@@ -198,7 +198,7 @@ test("cursor: first open leaf in DFS order; skips blocked work", async () => {
   await dashboard(t);
   assert.equal((await t.tree())?.cursor, "node:colors");
   await ok(t.send("colors", "START"));
-  await ok(t.send("colors", "BLOCK"));
+  await ok(t.send("colors", "BLOCK", { reason: "waiting" }));
   assert.equal((await t.tree())?.cursor, "node:loading_state"); // blocked is skipped
   await ok(t.send("loading_state", "CANCEL"));
   await ok(t.send("font", "CANCEL"));
@@ -227,7 +227,7 @@ test("S1 interruption: block, discover, resume; cursor returns to loading_state;
   const t = setup();
   await dashboard(t);
   await ok(t.send("colors", "START"));
-  await ok(t.send("colors", "BLOCK", { blocker: "design-tokens" }));
+  await ok(t.send("colors", "BLOCK", { reason: "design-tokens" }));
   await ok(t.born("design_tokens", "improve_visual", { kind: "discovered", discovered_during: "colors" }));
   await ok(t.send("design_tokens", "START"));
   // mid-interruption: the active task is design_tokens; the DFS cursor is the first open leaf
@@ -354,7 +354,7 @@ test("a blocked parent's children stay workable — the cursor descends into the
   await ok(t.born("p"));
   await ok(t.born("c", "p"));
   await ok(t.send("p", "START"));
-  await ok(t.send("p", "BLOCK"));
+  await ok(t.send("p", "BLOCK", { reason: "waiting" }));
   assert.equal((await t.tree())?.cursor, "node:c");
 });
 

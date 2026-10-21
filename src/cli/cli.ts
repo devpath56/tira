@@ -13,6 +13,7 @@ import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
 import { fxKey, transitionOf } from "../write/fxkey.ts";
 import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
+import { tiraServer } from "../serve/server.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
@@ -42,6 +43,9 @@ Usage:
                                                   depths, closed parents with open work; plus tasks with no
                                                   definition or done criteria, and finished branches that
                                                   grew new work. Exits 3 when something is broken
+  tira serve --actor NAME [--port N]              the page, live, on 127.0.0.1 only (default port 4747): needs
+                                                  attention, ⌘K search, and start / unblock / complete / block,
+                                                  each through a confirm page, written as NAME. Ctrl-C stops it
 
 Options:
   --db PATH        store file (default: $TIRA_DB, else ./tira.db)
@@ -80,6 +84,7 @@ const OPTIONS = {
   hash: { type: "boolean" },
   parent: { type: "string" },
   out: { type: "string" },
+  port: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -372,6 +377,26 @@ function types(registry: Registry, values: Values, io: Io): number {
   return 0;
 }
 
+// The page, live (src/serve/server.ts). Runs until Ctrl-C; the store closes on the way out.
+async function serve(db: string, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const actor = values.actor ?? io.env.TIRA_ACTOR;
+  if (actor === undefined) throw new UsageError("tira serve needs --actor NAME: who the page's actions are written as");
+  const port = values.port === undefined ? 4747 : Number(values.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
+  const store = new SqliteEventStore({ path: db });
+  const server = tiraServer({ store, registry, stream, actor });
+  try {
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
+    const at = server.address();
+    io.out(`tira: serving ${stream} at http://127.0.0.1:${typeof at === "object" && at ? at.port : port} as ${actor} (Ctrl-C to stop)`);
+    await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
 export async function run(argv: string[], io: Io): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -394,7 +419,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -407,6 +432,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   try {
     if (cmd === "key") return key(args, values, registry, stream, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
+    if (cmd === "serve") return await serve(db, registry, stream, values, io);
     store = new SqliteEventStore({ path: db });
     switch (cmd) {
       case "create":

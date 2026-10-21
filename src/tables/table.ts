@@ -57,6 +57,9 @@ const nonEmptyString = (v: unknown) => typeof v === "string" && v.length > 0;
 export const DEFAULT_GUARDS: Record<string, GuardFn> = {
   hasEvidenceRef: ({ payload }) => nonEmptyString(payload.evidenceRef),
   hasReason: ({ payload }) => nonEmptyString(payload.reason),
+  // A reason with text, not only spaces (ruling 2026-10-20: for BLOCK and REOPEN alike, so
+  // the gate and the page agree on what a reason is). Rules era 2; era 1 used hasReason.
+  hasReasonText: ({ payload }) => typeof payload.reason === "string" && payload.reason.trim().length > 0,
 };
 
 export function validateTable(t: Table): Table {

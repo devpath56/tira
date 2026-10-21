@@ -4,6 +4,10 @@
 // Reviewed by the state-modelling seat 2026-10-16 (hand-walk; chart_check run owed).
 //
 // States: unstarted → in_progress → done | blocked → in_progress; any live state → cancelled.
+// Guarded: COMPLETE needs evidenceRef; REOPEN and BLOCK need a reason with text (not only
+// spaces: the gate and the page agree on what a reason is, ruling 2026-10-20).
+// Rules era 2 (versioned rules, 2026-10-20). Era 1, the legacy era, is frozen in
+// charts/eras/node-lifecycle.era1.json: BLOCK needed nothing then.
 // done and cancelled are final. There is deliberately NO unstarted → done path (s04).
 
 export const nodeLifecycle = {
@@ -13,7 +17,13 @@ export const nodeLifecycle = {
     unstarted: {
       on: {
         START: "in_progress",
-        BLOCK: "blocked",
+        // BLOCK needs a reason, like REOPEN (Isha's call 2026-10-20): whoever picks the
+        // work up finds why it stopped in the record, not in chat.
+        BLOCK: {
+          target: "blocked",
+          guard: ({ event }) =>
+            typeof event.reason === "string" && event.reason.trim().length > 0,
+        },
         CANCEL: "cancelled",
         // ADD_CHILD here is a no-op on lifecycle (child list is derived from events).
         ADD_CHILD: {},
@@ -24,7 +34,11 @@ export const nodeLifecycle = {
       on: {
         START: {}, // idempotent no-op. Ruled 2026-10-16 (operator-delegated):
         // duplicates stay no-ops; the event log keeps the evidence, the state doesn't lie.
-        BLOCK: "blocked",
+        BLOCK: {
+          target: "blocked",
+          guard: ({ event }) =>
+            typeof event.reason === "string" && event.reason.trim().length > 0,
+        },
         COMPLETE: {
           target: "done",
           guard: ({ event }) =>
@@ -52,7 +66,7 @@ export const nodeLifecycle = {
         REOPEN: {
           target: "in_progress",
           guard: ({ event }) =>
-            typeof event.reason === "string" && event.reason.length > 0,
+            typeof event.reason === "string" && event.reason.trim().length > 0,
         },
         COMPLETE: {}, // idempotent: already done, no-op.
         // START / BLOCK / UNBLOCK / CANCEL / ADD_CHILD: no transition.

@@ -55,6 +55,9 @@ export interface EvaluateOptions {
   // parent qualifies. The write path sets this only for its own paired START; the fold
   // sets it only after checking the pair in the log, including that the COMPLETE lands.
   pairedClose?: boolean;
+  // The rules era to judge it under (versioned rules): replay passes each event's own era;
+  // new writes leave it out and get today's.
+  era?: number;
 }
 const reject = (code: RejectCode, detail: string): Reject => ({ ok: false, code, detail });
 
@@ -114,7 +117,7 @@ export function evaluate(
       if (intent.payload.parent_id !== undefined) return reject("unknown-parent", `${def.type} has no tree; parent_id is not allowed`);
       return { ok: true, outcome: "created", key, regions };
     }
-    const birth = evaluateBirth(registry, def, def.tree, intent, view);
+    const birth = evaluateBirth(registry, def, def.tree, intent, view, opts.era);
     if ("ok" in birth) return birth;
     return { ok: true, outcome: "created", key, regions, tree: birth };
   }
@@ -124,7 +127,7 @@ export function evaluate(
   if (def.revisedAs !== undefined && current.version !== undefined && view.get({ type: def.type, id: current.id, version: current.version + 1 })) {
     return reject("superseded", `${key} was superseded by version ${current.version + 1}`);
   }
-  const hit = registry.resolve(def.type, intent.event);
+  const hit = registry.resolve(def.type, intent.event, opts.era);
   if (!hit) return reject("unknown-event", `${def.type}.${intent.event}`);
   const from = current.regions[hit.region] as string;
   const own = current.context?.[hit.region] ?? {};
@@ -196,6 +199,7 @@ function evaluateBirth(
   t: TreeConfig,
   intent: Extract<Intent, { kind: "create" }>,
   view: StateView,
+  era: number | undefined,
 ): TreeInfo | Reject {
   const p = intent.payload;
   const kind = p.kind === undefined ? "planned" : p.kind;
@@ -218,7 +222,7 @@ function evaluateBirth(
   if (!parent?.tree) return reject("unknown-parent", `${def.type}:${String(p.parent_id)} is not in this stream`);
   // The parent's own table decides whether it can take a child: done and cancelled
   // deny ADD_CHILD (ruling 4: re-open first, with a reason).
-  const table = def.regions[t.region];
+  const table = registry.tableFor(def, t.region, era);
   const parentState = parent.regions[t.region] as string;
   const res = table
     ? step(table, parentState, t.childEvent, registry.guards, { payload: p, actor: intent.actor, entity: parent, view })

@@ -24,6 +24,10 @@ const GUARD_REGISTRY = new Map([
     `({ event }) => typeof event.reason === "string" && event.reason.length > 0`,
     { name: "hasReason", description: "event.reason is a non-empty string" },
   ],
+  [
+    `({ event }) => typeof event.reason === "string" && event.reason.trim().length > 0`,
+    { name: "hasReasonText", description: "event.reason has text (not only spaces)" },
+  ],
 ]);
 
 function extract(chart) {

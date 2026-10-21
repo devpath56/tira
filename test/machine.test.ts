@@ -187,7 +187,7 @@ test("UNBLOCK into in-progress is a move too; a rejected move makes tira write n
   const t = setup();
   await drainedP(t);
   await ok(t.send("q", "START"));
-  await ok(t.send("q", "BLOCK"));
+  await ok(t.send("q", "BLOCK", { reason: "waiting" }));
   // a fresh finished branch r{s}, then UNBLOCK q elsewhere is the move that closes r
   await ok(t.born("r"));
   await ok(t.born("s", "r"));
@@ -215,7 +215,7 @@ test("UNBLOCK into in-progress is a move too; a rejected move makes tira write n
 test("only starting work counts as moving on: blocking or cancelling elsewhere writes nothing", async () => {
   const t = setup();
   await drainedP(t);
-  await ok(t.send("q", "BLOCK"));
+  await ok(t.send("q", "BLOCK", { reason: "waiting" }));
   await ok(t.send("q", "CANCEL"));
   assert.deepEqual(await t.tiraEvents(), []);
   assert.equal(await t.state("p"), "unstarted");

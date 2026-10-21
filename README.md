@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 258 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 304 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -101,6 +101,7 @@ table is unchanged (same 5-state lifecycle); tira's own closes go through it lik
 | One close, two events | tira's start + complete of an unstarted parent count as one close: the one-active rule judges the end state (the parent is done again one event later), so tira can close a finished branch while you're working elsewhere. Every other rule still applies. A close is all or nothing: if any step is refused, tira keeps none of that parent's events, logs the refusal under its own name, and your move still lands |
 | Protected name | `tira` is reserved in anything that reads as it (casing, spacing, invisible characters, accents, common lookalike letters): any caller claiming it is refused (`reserved-actor`) and logged without the name; a retry with the same eventId is a duplicate. A payload can't claim it either — only the caller's actor counts |
 | Replay check | On replay, every tira event must cite a move, and the very next non-tira event must be that move, into in progress, outside the parent tira closed — or it's an anomaly. tira may only write to finished parents. Its start gets the one-close treatment only when its complete (same node, same move) is the very next event and lands. "Closed by tira" follows whoever made the last real change, so a repeat click on a done parent doesn't wipe it |
+| **Versioned rules** | Every event the write path appends carries the rules era it was decided under (`metadata.era`), and replay judges each event by its own era's tables, so a rule change governs new writes only and never rewrites history (ruling 2026-10-20). Events with no era were written before the marker: the legacy era (1), replayed under the tables as first built (`charts/eras/`, frozen and hash-pinned); the page tags them "legacy". An era this build doesn't know is an anomaly. **Era 2** (2026-10-20): BLOCK needs a reason, and BLOCK's and REOPEN's reason must have text, not only spaces |
 | Cursor | First **open leaf** in depth-first order (birth order). Closed branches aren't entered; blocked parents are (their children stay workable); parents waiting for tira are skipped, so the cursor never parks on a parent waiting for a click |
 | Last branch | The final branch of a tree has nowhere to move on to, so it stays open until someone closes it or starts work elsewhere (decided with Isha 2026-10-18) |
 
@@ -118,6 +119,7 @@ node scripts/tira.ts send node colors COMPLETE                        # REJECTED
 node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
 node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained, closed by tira
 node scripts/tira.ts render --out tira.html                           # D1 page; re-run and reload to refresh
+node scripts/tira.ts serve --actor isha                               # the page, live, on 127.0.0.1:4747: search and actions
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
@@ -164,7 +166,7 @@ t create node fetch_metrics --parent metrics_card && t create node improve_visua
 for n in colors loading_state font; do t create node $n --parent improve_visual; done
 t create node table --parent dashboard && t create node filters --parent dashboard
 t send node fetch_metrics START && t send node fetch_metrics COMPLETE evidenceRef=api.md
-t send node colors START && t send node colors BLOCK                                       # interrupted
+t send node colors START && t send node colors BLOCK reason=design-tokens                # interrupted, with why
 t create node design_tokens --parent improve_visual kind=discovered discovered_during=colors
 t send node design_tokens START && t send node design_tokens COMPLETE evidenceRef=token-spec.md
 t send node colors UNBLOCK && t send node colors COMPLETE evidenceRef=palette.png          # resumed
@@ -176,26 +178,35 @@ t render --out d1.html && t tree && t dump --hash                     # both par
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
-same state, drain flag, cursor (the train) and active task (the pulsing stop). The chip at
+same state, drain flag, cursor (the blue marker) and active task (the ringed stop). The chip at
 the top right shows the hash; hover it, or open **Activity**, for the full value, which
 must equal `t dump --hash`. The page's `data-node-count` must equal
-`data-fold-tree-count`. Parents tira closed carry a leaf. Click any task to open its
+`data-fold-tree-count`. Parents tira closed carry tira's mark (a bolt). Click any task to open its
 drawer and history; tira's entries say why and which move they cite. Closing the branch
 took no clicks beyond moving on to `table`.
+
+Above the views, **Needs attention** lists what is blocked, grouped by the reason it was
+blocked with, and what is being worked on, each one click from its drawer. Blocking a task
+needs a reason with text, like re-opening one (2026-10-20). A finished active parent isn't
+counted: there is nothing to decide, and tira closes it when work moves on. A quiet "How to read this page" link (and
+the hash chip, now labelled "fingerprint") opens a three-paragraph guide inline.
 
 The page has four views:
 
 | View | Shows |
 |---|---|
-| **Progress** (default for a tree) | A progress train. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the train sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a leaf means tira closed it. The header counts tasks closed of all tasks, and how many are left |
+| **Progress** (default for a tree) | A progress line. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the blue marker sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a bolt means tira closed it. The header counts tasks closed of all tasks, and how many are left |
 | **Board** | Jira-style status columns of the work (the leaf tasks), with a strip of parents and their "children closed" meters above |
 | **Lanes** (default for the factory) | Each brief's regions side by side, handoff pairs, what's waiting (D2, below) |
 | **Activity** | The whole log, newest first, including rejected commands, anomalies, other entities and the full hash |
 
 Words live in the drawers, not on the canvas. The page follows the system's light or dark
-setting. It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
-are CSS), so the bytes still depend only on the fold. Motion is CSS only and turns off
-for reduced motion and for print.
+setting, or the System / Light / Dark switch at the top right (CSS only; `tira serve`
+remembers the choice per browser). The look is Jira's: white or near-black surfaces, Jira
+blue as the one accent and muted status colours (green done, blue in progress, red blocked,
+amber waiting). It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
+are CSS), so the bytes still depend only on the fold. The only motion is the drawer
+sliding in, and it turns off for reduced motion. Print is always light.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
 from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
@@ -215,8 +226,10 @@ under a done or cancelled parent, while a drained-but-open parent accepts one an
 - Several roots in one stream are allowed (D0 uses three); depth counts the root as 1.
 - Discovered work must carry an actor ("who found it"); `kind` must be planned or
   discovered when given; `parent_id` is rejected on types without a tree.
-- Replay re-checks births and gates, so changing the caps or gate rules later would turn
-  older history into anomalies. Treat them as part of the log's contract.
+- A change to a transition table ships as a new rules era (versioned rules, above): older
+  history replays under the rules it was written under. The tree's caps and gates live in
+  code, not tables, and aren't versioned yet: changing those later would still turn older
+  history into anomalies. Treat them as part of the log's contract.
 - Entities are created by an explicit `create` command at their tables' initial states;
   an `eventId` names one command (same id + same content = duplicate, same id + different
   content = error); malformed commands throw rather than being logged; `eventId` is globally
@@ -446,6 +459,50 @@ The watchdog (the divergence report) is the next step, not this one.
 - tira checks an fx: id's **hash**, not just its shape. The key covers only what tira is
   sent, so tira can recompute it, and a wrong key fails at the factory's first send.
 - Times need a zone. The factory must send `Z` or an offset.
+
+## The page, live: `tira serve` (the D1 UI brief, 2026-10-19)
+
+`tira serve --actor NAME [--port N]` serves the page on **127.0.0.1 only** (default port
+4747). Every request folds the log, as `tira render` does, and adds what only a live page can
+have:
+
+| Piece | What it does |
+|---|---|
+| **Actions on needs-attention rows** | Unblock a blocked task; complete or block the one in progress |
+| **⌘K search** | Find any task in a few letters (name, prefix, initials, a word inside it; a space matches `_`) and open its drawer. Type a verb first to act: `start`, `unblock`, `complete`, `block`; `unblock ` lists every blocked task. After ≤ 3 letters a task is among the visible matches (the first 8): first on the demo, not always first on a 100-task tree of look-alike names |
+| **Confirm page** | Every action goes through it first. **What tira says** (read-only): the move, the rule, every parent tira will close first, the record it will leave, and its check. That check is the write path's own decision (`WritePath.preview`: reserved names, tira's closes, then the rules), so the page can't say "refused" for a move the write accepts. **What you decide**: the evidence or reason, then the button. The form carries the seq it was decided on: if the log moved before you submit, nothing is written and the packet is shown again |
+| **Result** | After an action the page says what happened, a refusal included (and the refusal is in the log). It shows once |
+| **The guide** | Opens by itself on the first visit (once per browser), then only from the link or the chip |
+
+Safety:
+- Any `Host` other than 127.0.0.1 or localhost is refused (DNS rebinding).
+- A write needs this process's random token, and refuses a foreign or `null` `Origin` (cross-site forms).
+- The actor is fixed at start, and `tira` or `dispatcher` (any spelling) is refused at start.
+- Only those four verbs, on tree tasks, are accepted.
+- A strict Content-Security-Policy allows only the server's own two scripts.
+
+The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
+
+Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
+progress line, drawer, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+name exists in the build.
+
+Calls made here, for the PM:
+
+- **Every action passes the confirm page**, START included. The brief's "permission-only
+  blocks stay one click" has no case among the task verbs: each can trigger tira's closes or
+  needs a field.
+- **"Stale" is left out of needs attention** until the time limit is ruled.
+- **Blocking needs a reason with text** (Isha's call; re-signed 2026-10-20): `BLOCK` is
+  guarded from unstarted and in progress, and BLOCK's and REOPEN's reason must have text, not
+  only spaces (`hasReasonText`); the page's block form asks the same. A repeat block on a
+  blocked task stays a no-op. **Older logs don't change:** this is rules era 2, and a log
+  written before it replays under the legacy era, so its bare blocks fold as they did,
+  tagged "legacy" on the page. The idea table's reject reasons still use the legacy check
+  (`hasReason`: any non-empty string), since the ruling named BLOCK and REOPEN.
+- **Referrer-Policy is `same-origin`**, not `no-referrer`: under `no-referrer` browsers send
+  `Origin: null` on form posts, and the page's own writes were refused (found by submitting
+  a real form).
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 

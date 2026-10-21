@@ -22,7 +22,10 @@
       "do": "send",
       "type": "node",
       "id": "table",
-      "event": "BLOCK"
+      "event": "BLOCK",
+      "payload": {
+        "reason": "waiting on review"
+      }
     },
     {
       "do": "send",

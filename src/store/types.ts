@@ -15,6 +15,7 @@ export interface EventMetadata {
   actor?: string;
   causationId?: string; // the event that caused this one
   correlationId?: string; // handoffs: the first event of the pair (regions proposal R2)
+  era?: number; // the rules era the write path decided it under (registry.ts); absent: legacy
 }
 
 export interface NewEvent {

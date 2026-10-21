@@ -20,7 +20,7 @@ const run = (events) => {
 const pathTo = {
   unstarted: [],
   in_progress: ["START"],
-  blocked: ["START", "BLOCK"],
+  blocked: ["START", { type: "BLOCK", reason: "r" }],
   done: ["START", { type: "COMPLETE", evidenceRef: "e" }],
   cancelled: ["CANCEL"],
 };
@@ -88,10 +88,19 @@ check("no path to done skips in_progress", !violated);
 
 // 6. Guards: bare COMPLETE / bare REOPEN stay put
 check("bare COMPLETE stays in_progress", run(["START", "COMPLETE"]) === "in_progress");
+check("bare BLOCK stays in_progress", run(["START", "BLOCK"]) === "in_progress");
+check("reasoned BLOCK -> blocked", run(["START", { type: "BLOCK", reason: "r" }]) === "blocked");
+check("bare BLOCK stays unstarted", run(["BLOCK"]) === "unstarted");
 check("evidenced COMPLETE -> done", run(["START", { type: "COMPLETE", evidenceRef: "e" }]) === "done");
 check("bare REOPEN stays done", run(["START", { type: "COMPLETE", evidenceRef: "e" }, "REOPEN"]) === "done");
 check("reasoned REOPEN -> in_progress",
   run(["START", { type: "COMPLETE", evidenceRef: "e" }, { type: "REOPEN", reason: "r" }]) === "in_progress");
+// a reason of only spaces is no reason (rules era 2, ruling 2026-10-20)
+check("blank-reason BLOCK stays in_progress", run(["START", { type: "BLOCK", reason: "  " }]) === "in_progress");
+check("blank-reason BLOCK stays unstarted", run([{ type: "BLOCK", reason: "\t \n" }]) === "unstarted");
+check("blank-reason REOPEN stays done",
+  run(["START", { type: "COMPLETE", evidenceRef: "e" }, { type: "REOPEN", reason: " " }]) === "done");
+check("padded reason still counts", run(["START", { type: "BLOCK", reason: "  r  " }]) === "blocked");
 
 // 7. ADD_CHILD on done denied (stays done)
 check("ADD_CHILD on done denied",

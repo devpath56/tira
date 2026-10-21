@@ -17,7 +17,8 @@
       "id": "colors",
       "event": "BLOCK",
       "payload": {
-        "blocker": "design-tokens"
+        "blocker": "design-tokens",
+        "reason": "waiting on the design-token decision"
       }
     },
     {

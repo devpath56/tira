@@ -33,7 +33,7 @@ const runX = (machine, events) => {
 const nodePathTo = {
   unstarted: [],
   in_progress: ["START"],
-  blocked: ["START", "BLOCK"],
+  blocked: ["START", { type: "BLOCK", reason: "r" }],
   done: ["START", { type: "COMPLETE", evidenceRef: "e" }],
   cancelled: ["CANCEL"],
 };
