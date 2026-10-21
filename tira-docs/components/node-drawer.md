@@ -1,19 +1,31 @@
-# Task drawer
+# Task dialog
 
 **JTBD:** 11 — Verify the system isn't lying.
 
-**What / why.** Click any task for its state, its marks and its full history, rejected
-commands included. Words live here, not on the canvas.
+**What / why.** Click any task (a Kanban card, a node on the graph, a
+Needs Attention row, a ⌘K result) for its state, its marks and its full history, rejected
+commands included. It opens as a dialog over the page, never a side panel or a new page: the
+page stays where it was underneath. Words live here, not on the canvas. A parent lists its
+subtasks, each with its state and a click to its own dialog. A done task shows its **proof of
+work** (the evidence on its completion). Under `tira serve` the dialog offers what the task's
+state allows: start, complete, block, unblock, cancel, reopen, add subtask; each opens its
+decision dialog.
 
 **How to read it.** The path above the name, the state badge, marks (next, active, drained,
-closed by tira, found during X), then "N of M children closed" and the history, oldest first.
+closed by tira, found during X), the blocks link both ways ("Blocked by design_tokens" on the
+blocked task, "Blocks colors" on its ticket, each one click away, with its state), then "N of
+M children closed" and the history, oldest first.
 tira's entries say why and which move they cite. An entry written before the rules version
 marker carries a "legacy" tag: it was judged, and is replayed, under the legacy era's rules
-(versioned rules, 2026-10-20).
+(versioned rules, 2026-10-20). Close it with ×, a click on the dimmed page around it, or Esc
+under `tira serve` (which also moves focus into the dialog, and back to the task on close).
 
 ## Devtool hook
 
-- `.drawer` sections with ids `#t0`, `#t1`, … in tree order; the palette's index uses the same ids.
+- `.drawer` sections with ids `#t0`, `#t1`, … in tree order, `role="dialog"`; the palette's index uses the same ids.
+- `.modal-box` on the centred box, `.scrim` on the dimmed page behind it (a link that closes the dialog).
+- `.kids-list` on a parent's subtasks; `[data-proof]` on a done task's proof of work; `[data-links]` on the blocks link.
+- `[data-dialog-acts]` on the actions (live page only).
 - `.legacy` on the tag of each entry with no rules era (Activity counts them too).
 
 Assertion: every node is one click from its event trail.

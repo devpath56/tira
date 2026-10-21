@@ -50,6 +50,10 @@ async function scenario() {
   return { r: fold(events, registry), events };
 }
 
+// Kanban's columns: title → the cards in it, in order
+const kanbanColumns = (html: string) => Object.fromEntries((/<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(html)?.[0] ?? "").split('<div class="col">').slice(1)
+  .map((col) => [/<\/span>([A-Za-z ]+)<span class="k">/.exec(col)?.[1] ?? "", [...col.matchAll(/<div class="t">([^<]+)<\/div>/g)].map((m) => m[1])]));
+
 const attrs = (html: string) =>
   [...html.matchAll(/data-key="([^"]+)" data-state="([^"]+)" data-drained="(true|false)" data-cursor="(true|false)" data-active="(true|false)" data-depth="(\d+)"/g)]
     .map(([, key, state, drained, cursor, active, depth]) => ({ key, state, drained: drained === "true", cursor: cursor === "true", active: active === "true", depth: Number(depth) }));
@@ -82,25 +86,30 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.match(html, new RegExp(`data-dump-hash="${hash}"`));
   assert.match(html, /one active task: node:table is already active/); // the rejection is shown
   // progress counts closed = done + cancelled, overall and per parent
-  assert.match(html, /<div class="big" title="tasks closed, of all tasks">3<small>\/5<\/small><\/div>/); // tasks = the progress line's stops
+  assert.match(html, /<div class="big" title="tasks closed, of all tasks">3<small>\/5<\/small><\/div>/); // tasks = the leaves: the Kanban cards
   assert.match(html, /<b>2<\/b> left<\/li>/);
-  // the progress line: closed stops fill the track; the marker rides on the cursor
-  const stops = [...html.matchAll(/<li class="(stop [^"]*)"[^>]*><a class="stop-link"[^>]*data-key="([^"]+)"/g)];
-  assert.deepEqual(stops.filter((m) => m[1]?.split(" ").includes("closed")).map((m) => m[2]), ["node:colors", "node:font", "node:tokens"]);
-  assert.match(html, /data-key="node:table"[^>]*><svg class="marker"/);
-  // one short line per parent: closed / total and what's left
-  assert.match(html, /aria-label="dashboard: 1 of 3 closed"[^]*?<span class="ct">1 of 3 tasks closed <span class="left">· 2 left<\/span>/);
-  assert.match(html, /aria-label="improve_visual: 3 of 3 closed"[^]*?<span class="ct">3 of 3 tasks closed <span class="left">· all closed<\/span>/);
-  assert.match(html, /aria-label="improve_visual">[^]*?3 of 3 children closed/);
-  assert.match(html, /aria-label="dashboard">[^]*?1 of 3 children closed/);
-  // the board holds the work (leaves), with the cursor's card marked next; parents sit in the strip above
-  assert.equal((html.match(/<a class="card[ "]/g) ?? []).length, 5);
+  // the graph: a line turns green once its child is closed; the ◆ pin rides on the cursor
+  const green = [...html.matchAll(/<path class="e done[^"]*" data-from="[^"]+" data-to="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(green, ["node:metrics_card", "node:improve_visual", "node:colors", "node:font", "node:tokens"]);
+  assert.match(html, /data-key="node:table"[^>]*><span class="here">◆ now<\/span>/);
+  // each parent node: closed / total and what's left
+  assert.match(html, /aria-label="dashboard, [a-z ]+, 1 of 3 subtasks closed"[^>]*>[^]*?<span class="gm">1\/3 closed · 2 left<\/span>/);
+  assert.match(html, /aria-label="improve_visual, done, 3 of 3 subtasks closed"[^>]*>[^]*?<span class="gm"><span class="tira-mark"[^]*?<\/span>3\/3 closed<\/span>/);
+  // tokens was found while working on colors, its sibling: a dotted line joins them, and its node says so
+  assert.deepEqual([...html.matchAll(/<path class="e found" data-from="node:colors" data-found="([^"]+)"/g)].map((m) => m[1]), ["node:tokens"]);
+  assert.match(html, /data-key="node:tokens"[^>]*>[^]*?<span class="gm">done · ✦ found<\/span>/);
+  assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?3 of 3 subtasks closed/);
+  assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?1 of 3 subtasks closed/);
+  // Kanban holds the work (leaves), with the cursor's card marked next; no strip of parents above
+  // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards
+  assert.deepEqual(kanbanColumns(html), { "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "colors", "tokens"], Dropped: ["font"] });
+  assert.match(html, /<div class="t">improve_visual<\/div><div class="row"><span class="chip">metrics_card<\/span><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
   assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
   // the halo marks the active task only; payloads read as words, not JSON
-  assert.equal((html.match(/<li class="stop [^"]*is-active/g) ?? []).length, 1);
+  assert.equal((html.match(/<a class="gn [^"]*is-active/g) ?? []).length, 1);
   assert.match(html, /<div class="ev-detail">under dashboard<\/div>/);
   assert.doesNotMatch(html, /\{&#34;parent_id&#34;/);
-  assert.equal((html.match(/<a class="br" /g) ?? []).length, 3);
+  assert.doesNotMatch(html, /class="strip"|<a class="br"/);
   assert.match(html, /idea:7/); // non-tree entities are listed too
 });
 
@@ -109,11 +118,11 @@ test("proof 4: tira-closed parents carry a quiet mark; every node is one click f
   const html = renderHtml(r, S, "h", events);
   const closed = [...html.matchAll(/data-key="([^"]+)"[^>]*data-closed-by-tira="true"/g)].map((m) => m[1]);
   assert.deepEqual(closed, ["node:metrics_card", "node:improve_visual"]);
-  assert.equal((html.match(/<span class="tira-mark"/g) ?? []).length, 2); // tira's mark on each, on its branch line
+  assert.equal((html.match(/<span class="tira-mark"/g) ?? []).length, 2); // tira's mark on each, on its graph node
   assert.equal((html.match(/<span class="mark tira">closed by tira<\/span>/g) ?? []).length, 2); // and said in words in their drawers
   assert.match(html, /<b>2<\/b> by tira<\/li>/);
   // one click: every tree node links to a drawer that exists and holds its history
-  const links = [...html.matchAll(/<a class="(?:stop-link|route)" href="#(t\d+)"/g)].map((m) => m[1] as string);
+  const links = [...html.matchAll(/<a class="gn[^"]*" href="#(t\d+)"/g)].map((m) => m[1] as string);
   assert.equal(links.length, r.entities.filter((e) => e.tree).length);
   for (const id of links) assert.match(html, new RegExp(`<section class="drawer" id="${id}"[^]*?history \\(\\d+\\)`));
   // every tree node has a history with at least its birth
@@ -140,11 +149,11 @@ test("a finished-but-open parent is tagged: tira closes it when you move on", as
   assert.match(html, /data-key="node:p"[^>]*data-awaiting-close="true"/);
   assert.match(html, /data-key="node:q"[^>]*data-awaiting-close="false"/);
   assert.equal((html.match(/<span class="mark wait">tira closes it when you move on<\/span>/g) ?? []).length, 1);
-  assert.equal((html.match(/<span class="wait-ring"/g) ?? []).length, 1); // the dashed ring on its branch line
+  assert.equal((html.match(/<span class="wait-ring"/g) ?? []).length, 1); // the dashed ring on its graph node
   assert.match(textTree(streamView(r, S)).join("\n"), /^p\s+unstarted\s+drained {2}\(tira closes when you move on\)$/m);
   // the tree marks the cursor (q), not the active task (none here), with ◆ next
-  assert.equal((html.match(/<svg class="marker"/g) ?? []).length, 1);
-  assert.match(html, /data-key="node:q"[^>]*><svg class="marker"[^]*?<span class="here">next<\/span>/);
+  assert.equal((html.match(/<span class="here">/g) ?? []).length, 1);
+  assert.match(html, /data-key="node:q"[^>]*><span class="here">◆ next<\/span>/);
 });
 
 test("render --at N shows nothing from after N; tira's mark only shows on closes that still stand", async () => {
@@ -178,7 +187,7 @@ test("render --at N shows nothing from after N; tira's mark only shows on closes
   assert.doesNotMatch(after, /class="tira-mark"/);
 });
 
-test("only the active task is marked active; long names are shortened on the progress line, full in the drawer", async () => {
+test("only the active task is marked active; long names are shortened on the graph, full in the dialog", async () => {
   const store = new SqliteEventStore();
   const registry = defaultRegistry();
   const wp = new WritePath(store, registry);
@@ -192,7 +201,7 @@ test("only the active task is marked active; long names are shortened on the pro
   await send("c", "START"); // ...but c, below it, is the active task
   const events = await store.readStream(S);
   const html = renderHtml(fold(events, registry), S, "h", events);
-  const pulsing = [...html.matchAll(/<li class="(stop [^"]*)"[^>]*><a class="stop-link"[^>]*data-key="([^"]+)"/g)].filter((m) => m[1]?.includes("is-active")).map((m) => m[2]);
+  const pulsing = [...html.matchAll(/<a class="(gn [^"]*)"[^>]*data-key="([^"]+)"/g)].filter((m) => m[1]?.includes("is-active")).map((m) => m[2]);
   assert.deepEqual(pulsing, ["node:c"]); // p is in progress too, but c (below it) is the active task
   assert.match(html, /<span class="name" title="a_really_long_task_name_for_the_tree_view">a_really_long_task_na…<\/span>/);
   assert.match(html, new RegExp(`<h2>${long}</h2>`));
@@ -239,10 +248,10 @@ test("needs attention: blocked work grouped by its reason, then the active task,
   assert.deepEqual([...section.matchAll(/data-reason="([^"]*)"/g)].map((m) => m[1]), ["waiting on tokens", "waiting on review"]);
   assert.deepEqual([...section.matchAll(/data-attention-key="([^"]*)"/g)].map((m) => m[1]), ["node:b", "node:c", "node:a", "node:d"]);
   assert.deepEqual([...section.matchAll(/<span class="since">([^<]*)</g)].map((m) => m[1]), ["blocked at seq 7", "blocked at seq 9", "blocked at seq 8", "started at seq 11"]);
-  // each row opens the same drawer as the task on the progress line
+  // each row opens the same dialog as the task on the board
   for (const id of ["a", "b", "c", "d"]) {
     const href = new RegExp(`<a class="name" href="#(t\\d+)">${id}</a>`).exec(section)?.[1];
-    assert.ok(href && html.includes(`<section class="drawer" id="${href}" aria-label="${id}">`), id);
+    assert.ok(href && html.includes(`<section class="drawer" id="${href}" aria-label="${id}" role="dialog" aria-modal="true">`), id);
   }
   // the M1 count is untouched: rows carry data-attention-key, never data-key
   assert.equal((html.match(/ data-key="/g) ?? []).length, 6);
@@ -325,7 +334,7 @@ test("trust and reading aids: the hash chip says what it is and opens the guide;
   assert.match(html, /<a class="how" href="#guide">How to read this page<\/a><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a>/);
   const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
   assert.equal((guide.match(/<p>/g) ?? []).length, 3); // the brief: three short paragraphs
-  for (const topic of ["The progress line.", "By tira.", "The hash."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
+  for (const topic of ["The board.", "By tira.", "The hash."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
   assert.ok(guide.includes(`<code>${"a".repeat(64)}</code>`));
   // a factory stream: the lanes say what each block is
   const store = new SqliteEventStore();
@@ -535,4 +544,145 @@ test("divergence panel: one read + render at ~2,800 tira events costs under 1 s"
   assert.deepEqual(panelOf(html).counts, Object.fromEntries(VERDICTS.map((v) => [v, one.counts[v] * K])));
   console.log(`divergence read+render: ${tlOut.length} tira events, ${facOut.length} factory records, ${report.population.ids} ids: ${ms.toFixed(1)} ms`);
   assert.ok(ms < 1000, `read+render took ${ms.toFixed(1)} ms at ${tlOut.length} events: continuous-at-read is falsified`);
+});
+
+test("a task opens as a dialog over the page, never a side panel or a new page: centred box, dimmed page behind it that closes it, a close button", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "h", events);
+  const dialogs = [...html.matchAll(/<section class="drawer( guide)?" id="([^"]+)"[^>]*>/g)];
+  assert.ok(dialogs.length > 1);
+  for (const [tag, , id] of dialogs) {
+    assert.match(tag, /role="dialog" aria-modal="true"/, String(id));
+    const body = new RegExp(`id="${id}"[^>]*><a class="scrim" href="#_" tabindex="-1" aria-hidden="true"></a><div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`);
+    assert.match(html, body, String(id));
+  }
+  // every way to a task stays on the page: links to its dialog, no target, no other page
+  const links = [...html.matchAll(/<a class="(?:gn[^"]*|card[^"]*|name)" href="([^"]+)"/g)].map((m) => m[1] as string);
+  assert.ok(links.length > 0 && links.every((h) => /^#t\d+$/.test(h)), links.join(" "));
+  assert.doesNotMatch(html, /target="_blank"/);
+  // the box is centred over a dimmed page; the page behind doesn't scroll while it's open
+  assert.match(html, /\.drawer\{position:fixed;inset:0;[^}]*display:grid;place-items:center/);
+  assert.match(html, /body:has\(\.drawer:target\)\{overflow:hidden\}/);
+  assert.doesNotMatch(html, /translateX\(100%\)/); // no side panel sliding in
+});
+
+test("a task's dialog lists its subtasks with their states, shows proof of work on a done task, and offers actions only on the live page", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "h", events);
+  const dialog = (id: string, page = html) => new RegExp(`<section class="drawer" id="t\\d+" aria-label="${id}"[^]*?</section>`).exec(page)?.[0] ?? "";
+  const parent = dialog("improve_visual");
+  const kids = [...parent.matchAll(/<li><a href="#(t\d+)">([^<]+)<\/a><span class="state s-([a-z_]+)">/g)].map((m) => [m[2], m[3]]);
+  assert.deepEqual(kids, [["colors", "done"], ["font", "cancelled"], ["tokens", "done"]]);
+  for (const [, href] of parent.matchAll(/<li><a href="#(t\d+)">/g)) assert.match(html, new RegExp(`<section class="drawer" id="${href}"`));
+  // proof: the evidence on the completion, for a done task; none for open work
+  assert.match(dialog("colors"), /<div class="proof" data-proof><span class="proof-k">Proof of work<\/span><span class="proof-v">[^<]+<\/span><span class="ev-seq">isha · seq \d+<\/span><\/div>/);
+  assert.doesNotMatch(dialog("table"), /data-proof/);
+  // actions: none in a rendered file; live, by state
+  assert.doesNotMatch(html, /data-dialog-acts/);
+  const live = renderHtml(r, S, "h", events, { live: {} });
+  const acts = (id: string) => [...(/data-dialog-acts>(.*?)<\/div>/.exec(dialog(id, live))?.[1] ?? "").matchAll(/data-act="([A-Z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(acts("table"), ["COMPLETE", "BLOCK", "ADD_SUBTASK", "CANCEL"]); // in progress
+  assert.deepEqual(acts("colors"), ["REOPEN"]); // done
+  assert.deepEqual(acts("filters"), ["START", "BLOCK", "ADD_SUBTASK", "CANCEL"]); // unstarted
+});
+
+test("Lanes shows only when the stream has something for it; the whole log is called History", async () => {
+  const labels = (page: string) => [...page.matchAll(/<label for="v-(\w+)">([^<]+)<\/label>/g)].map((m) => m[2]);
+  // a plain task tree: nothing for Lanes
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  await new WritePath(store, registry).submit({ stream: "plain", kind: "create", entity: { type: "node", id: "a" }, actor: "isha" });
+  const pe = await store.readStream("plain");
+  const tree = renderHtml(fold(pe, registry), "plain", "h", pe);
+  assert.deepEqual(labels(tree), ["Board", "History"]);
+  assert.doesNotMatch(tree, /id="v-lanes"|class="view view-lanes"/);
+  assert.match(tree, /<section class="view view-log" aria-label="History">/);
+  // a tree with an idea in its stream: the idea lives in Lanes, so the tab shows
+  const { r, events } = await scenario();
+  assert.deepEqual(labels(renderHtml(r, S, "h", events)), ["Board", "Lanes", "History"]);
+  const d = new (await import("../src/write/dispatcher.ts")).Dispatcher(store, registry);
+  await d.submit({ stream: "f", kind: "create", entity: { type: "session", id: "s1" }, actor: "s1" });
+  const fe = await store.readStream("f");
+  const factory = renderHtml(fold(fe, registry), "f", "h", fe);
+  assert.deepEqual([...factory.matchAll(/<label for="v-(\w+)">([^<]+)<\/label>/g)].map((m) => m[2]), ["Board", "Lanes", "History"]);
+});
+
+test("one Board view, two styles: Kanban by default, Graph a click away, switched with CSS alone", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "h", events);
+  assert.doesNotMatch(html, /v-train|view-train|Progress/); // no separate progress view
+  const radios = [...html.matchAll(/<input class="view-radio" type="radio" name="board-style" id="bv-(\w+)"( checked)?/g)].map((m) => [m[1], m[2] !== undefined]);
+  assert.deepEqual(radios, [["kanban", true], ["graph", false]]);
+  assert.match(html, /<span class="seg" role="group" aria-label="Board style"><label for="bv-kanban">[^]*?Kanban<\/label><label for="bv-graph">[^]*?Graph<\/label><\/span>/);
+  assert.match(html, /#bv-kanban:checked~\.bv-kanban,#bv-graph:checked~\.bv-graph\{display:block\}/);
+  // the cards live in the Kanban style, every task's node in the Graph style
+  const kanban = /<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(html)?.[0] ?? "";
+  const graph = /<div class="bv bv-graph">[^]*?<\/section>/.exec(html)?.[0] ?? "";
+  assert.equal((kanban.match(/<a class="card[ "]/g) ?? []).length, 7); // 5 leaf tasks and the 2 parents tira closed
+  assert.equal((graph.match(/<a class="gn[ "]/g) ?? []).length, r.entities.filter((e) => e.tree).length);
+  assert.doesNotMatch(kanban, /data-key=/); // the fold's flags are on the graph's nodes only (M1)
+  // a parent sits a row above its children, centred over them; no two nodes on a row overlap
+  const at = new Map([...graph.matchAll(/style="left:([\d.]+)px;top:(\d+)px"[^>]*data-key="([^"]+)"/g)].map((m) => [m[3], { left: Number(m[1]), top: Number(m[2]) }]));
+  const pos = (k: string) => at.get(`node:${k}`) ?? { left: NaN, top: NaN };
+  for (const kid of ["colors", "font", "tokens"]) assert.equal(pos(kid).top - pos("improve_visual").top, 104, kid);
+  assert.equal(pos("improve_visual").left, pos("font").left); // the middle of three
+  assert.equal(pos("dashboard").left, (pos("metrics_card").left + pos("filters").left) / 2);
+  for (const row of new Set([...at.values()].map((p) => p.top))) {
+    const xs = [...at].filter(([, p]) => p.top === row).map(([k, p]) => [k, p.left] as const);
+    assert.deepEqual(xs.map(([, x]) => x), xs.map(([, x]) => x).sort((a, b) => a - b), `row ${row}: tree order, left to right`);
+    for (let i = 1; i < xs.length; i++) assert.ok((xs[i]?.[1] ?? 0) - (xs[i - 1]?.[1] ?? 0) >= 168, `${xs[i]?.[0]} overlaps ${xs[i - 1]?.[0]}`);
+  }
+});
+
+test("150+ tasks: every task on the graph once with the fold's flags, none overlapping, in a tree narrow enough to fit", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const node = (id: string, parent_id?: string) => wp.submit({ stream: "big", kind: "create", entity: { type: "node", id }, actor: "isha", payload: parent_id ? { parent_id } : {} });
+  await node("root");
+  for (let e = 0; e < 5; e++) {
+    await node(`e${e}`, "root");
+    for (let f = 0; f < 4; f++) {
+      await node(`e${e}f${f}`, `e${e}`);
+      for (let t = 0; t < 7; t++) await node(`e${e}f${f}t${t}`, `e${e}f${f}`);
+    }
+  }
+  const events = await store.readStream("big");
+  const r = fold(events, registry);
+  const html = renderHtml(r, "big", "h", events);
+  const tree = r.entities.filter((e) => e.stream === "big" && e.tree);
+  assert.ok(tree.length > 150);
+  assert.equal(attrs(html).length, tree.length);
+  assert.equal(new Set(attrs(html).map((n) => n.key)).size, tree.length);
+  const at = [...html.matchAll(/style="left:([\d.]+)px;top:(\d+)px"[^>]*data-key="([^"]+)"/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]), key: m[3] }));
+  assert.equal(at.length, tree.length);
+  for (let i = 0; i < at.length; i++) {
+    for (let j = i + 1; j < at.length; j++) {
+      const [a, b] = [at[i], at[j]] as [(typeof at)[0], (typeof at)[0]];
+      assert.ok(Math.abs(a.x - b.x) >= 168 - 0.01 || Math.abs(a.y - b.y) >= 56, `${a.key} overlaps ${b.key}`);
+    }
+  }
+  const width = Number(/<div class="graph" [^>]*style="width:([\d.]+)px/.exec(html)?.[1]);
+  assert.ok(width < 140 * 168 / 4, `${width}px across for 140 leaf tasks`);
+});
+
+test("proof of work follows the task: a re-open clears it, the next completion's evidence replaces it", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const send = (event: string, payload: Record<string, unknown> = {}) => wp.submit({ stream: "p", kind: "event", entity: { type: "node", id: "x" }, event, actor: "isha", payload });
+  await wp.submit({ stream: "p", kind: "create", entity: { type: "node", id: "x" }, actor: "isha" });
+  const proof = async () => {
+    const e = await store.readStream("p");
+    return /<span class="proof-v">([^<]*)<\/span>/.exec(renderHtml(fold(e, registry), "p", "h", e))?.[1];
+  };
+  await send("START");
+  await send("COMPLETE", { evidenceRef: "v1.md" });
+  assert.equal(await proof(), "v1.md");
+  await send("COMPLETE", { evidenceRef: "again.md" }); // a repeat on a done task changes nothing
+  assert.equal(await proof(), "v1.md");
+  await send("REOPEN", { reason: "the check was wrong" });
+  assert.equal(await proof(), undefined); // in progress again: no proof shown
+  await send("COMPLETE", { evidenceRef: "v2.md" });
+  assert.equal(await proof(), "v2.md");
 });

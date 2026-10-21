@@ -5,6 +5,7 @@
 // shared with the tests. Untrusted text is only ever set with textContent.
 import { rank, parse } from "./rank.mjs";
 import "./theme.mjs";
+import "./graph.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -54,7 +55,7 @@ function go() {
   const task = shown[sel];
   if (!task) return;
   close();
-  if (verb) location.href = `/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`;
+  if (verb) openConfirm(`/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`);
   else location.hash = `#${task.drawer}`;
 }
 
@@ -81,6 +82,148 @@ document.addEventListener("keydown", (e) => {
 });
 for (const b of document.querySelectorAll("[data-open-palette]")) b.addEventListener("click", open);
 load().catch(() => {}); // the first ⌘K loads it again
+
+// Task dialogs open over the page with CSS alone (:target). Live, Esc closes the open one
+// (unless the palette took that Esc), focus moves into a dialog when it opens, and back to
+// whatever opened it when it closes.
+let opener = null;
+const openDialog = () => document.querySelector(".drawer:target");
+document.addEventListener("click", (e) => {
+  const link = e.target instanceof Element ? e.target.closest('a[href^="#t"], a[href="#guide"]') : null;
+  if (link) opener = link;
+});
+window.addEventListener("hashchange", () => {
+  const dialog = openDialog();
+  if (dialog) dialog.querySelector(".close")?.focus();
+  else if (opener) { opener.focus(); opener = null; }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !e.defaultPrevented && root.hidden && !confirmBox.open && openDialog()) { location.hash = "_"; e.preventDefault(); }
+});
+
+// Every action opens its decision in a dialog over the page, never a new page: the server
+// sends just the packet (?fragment=1), parsed here without running anything in it. Left, what
+// tira recommends; right, the command it will run, editable. Running it posts from here: a
+// value missing, an edited-into-another action or a moved log comes back into the dialog;
+// otherwise the page comes back with the result. Esc or a click outside closes it. If the
+// packet can't be fetched, the confirm page opens instead.
+const confirmBox = document.createElement("dialog");
+confirmBox.className = "confirm-dialog";
+confirmBox.setAttribute("aria-label", "Confirm the action");
+document.body.append(confirmBox);
+const packetOf = (html) => new DOMParser().parseFromString(html, "text/html").querySelector("[data-packet]");
+function show(packet) {
+  confirmBox.replaceChildren(document.importNode(packet, true));
+  if (!confirmBox.open) confirmBox.showModal();
+  const box = confirmBox.querySelector("textarea[data-command]");
+  if (!box) return;
+  const name = confirmBox.querySelector("[data-blocked-by] input"); // to block: what it waits on first
+  if (name) return name.focus();
+  box.focus();
+  const at = box.value.indexOf('""'); // the first value to fill in
+  const caret = at < 0 ? box.value.length : at + 1;
+  box.setSelectionRange(caret, caret);
+}
+async function openConfirm(href) {
+  try {
+    const packet = packetOf(await (await fetch(`${href}&fragment=1`, { headers: { accept: "text/html" } })).text());
+    if (!packet) throw new Error("no packet");
+    show(packet);
+  } catch {
+    location.href = href;
+  }
+}
+// key="value" in a command: replaced if it's there, else added
+const quoted = (v) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+function fill(box, key, value) {
+  const re = new RegExp(`(^|\\s)${key}=("(?:[^"\\\\]|\\\\.)*"|\\S*)`);
+  box.value = re.test(box.value) ? box.value.replace(re, (_m, pre) => `${pre}${key}=${quoted(value)}`) : `${box.value.trimEnd()} ${key}=${quoted(value)}`;
+  box.focus();
+}
+// Blocking: name what it waits on, and the command becomes two lines (a new ticket under the
+// task, found while working on it, then the block on it), or one line for an open task picked
+// from the chips. A note you added is kept.
+const bare = (s) => (/^[\w.:/@+-]+$/.test(s) ? s : quoted(s));
+function composeBlock(name) {
+  const holder = confirmBox.querySelector("[data-blocked-by]");
+  const box = confirmBox.querySelector("textarea[data-command]");
+  if (!holder || !box) return;
+  const id = bare(holder.dataset.blockedBy ?? "");
+  const type = bare(holder.dataset.type ?? "node");
+  const open = [...confirmBox.querySelectorAll("[data-fill-blocker]")].map((b) => b.dataset.fillBlocker);
+  const note = /(?:^|\s)note=("(?:[^"\\]|\\.)*"|\S*)/.exec(box.value)?.[1];
+  const n = name.trim();
+  const block = `tira send ${type} ${id} BLOCK blocker=${quoted(n)} reason=${quoted(n ? `waiting on ${n}` : "")}${note ? ` note=${note}` : ""}`;
+  const ticket = `tira create ${type} ${n ? bare(n) : '""'} --parent ${id} kind=discovered discovered_during=${id}`;
+  box.value = n !== "" && open.includes(n) ? block : `${ticket}\n${block}`;
+}
+confirmBox.addEventListener("input", (e) => {
+  if (e.target instanceof HTMLInputElement && e.target.closest("[data-blocked-by]")) composeBlock(e.target.value);
+});
+confirmBox.addEventListener("click", (e) => {
+  const el = e.target instanceof Element ? e.target : null;
+  if (e.target === confirmBox || el?.closest("[data-close-confirm]")) return confirmBox.close();
+  const box = confirmBox.querySelector("textarea[data-command]");
+  const pick = el?.closest("[data-fill-blocker]");
+  if (pick) {
+    const name = confirmBox.querySelector("[data-blocked-by] input");
+    if (name) name.value = pick.dataset.fillBlocker ?? "";
+    return composeBlock(pick.dataset.fillBlocker ?? "");
+  }
+  const chip = el?.closest("[data-fill], [data-fill-found]");
+  if (!box || !chip) return;
+  if (chip.dataset.fill) fill(box, chip.dataset.fill, chip.dataset.value ?? "");
+  else { fill(box, "kind", "discovered"); fill(box, "discovered_during", chip.dataset.fillFound ?? ""); chip.remove(); }
+});
+confirmBox.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target instanceof HTMLTextAreaElement) {
+    e.preventDefault();
+    e.target.form?.requestSubmit();
+  }
+});
+confirmBox.addEventListener("submit", async (e) => {
+  const form = e.target;
+  if (!(form instanceof HTMLFormElement)) return;
+  e.preventDefault();
+  const body = new URLSearchParams(new FormData(form));
+  body.set("fragment", "1");
+  try {
+    const doc = new DOMParser().parseFromString(await (await fetch("/act", { method: "POST", body })).text(), "text/html");
+    const go = doc.querySelector("[data-go]")?.getAttribute("data-go");
+    const packet = doc.querySelector("[data-packet]");
+    if (go) location.href = go;
+    else if (packet) show(packet);
+    else form.submit();
+  } catch {
+    form.submit(); // no answer: post it the plain way
+  }
+});
+document.addEventListener("click", (e) => {
+  const link = e.target instanceof Element ? e.target.closest('a.act[href^="/confirm"]') : null;
+  if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // a new tab still opens the page
+  e.preventDefault();
+  openConfirm(link.getAttribute("href"));
+});
+
+// The board's style (Kanban or Graph) is CSS only, like the theme. Live, the choice is
+// remembered per browser, so it survives the reload after every action.
+const BOARD_KEY = "tira-board-style";
+const styles = [...document.querySelectorAll('input[name="board-style"]')];
+try {
+  const pick = styles.find((r) => r.dataset.boardStyle === localStorage.getItem(BOARD_KEY));
+  if (pick) pick.checked = true;
+} catch {
+  // storage blocked: the board opens as Kanban
+}
+for (const r of styles) {
+  r.addEventListener("change", () => {
+    try {
+      localStorage.setItem(BOARD_KEY, r.dataset.boardStyle);
+    } catch {
+      // storage blocked: the choice lasts until the page is left
+    }
+  });
+}
 
 // Onboarding, one time: the guide opens by itself on the first visit, then only on demand.
 try {
