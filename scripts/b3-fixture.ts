@@ -9,8 +9,9 @@
 //   node scripts/b3-fixture.ts fixtures/b3     rewrite the fixture and its manifest (the folder
 //                                              must be inside the one you run it from)
 //
-// Deterministic except two things tira stamps itself: the store time (`recordedAt`) and
-// the ids of the handoff events its dispatcher writes (random, not fx:).
+// Deterministic except three things tira stamps itself: the store time (`recordedAt`), the
+// ids of the handoff events its dispatcher writes (random, not fx:), and the rules era
+// (`metadata.era`, versioned rules). The committed log predates the era marker: legacy era.
 // test/fixture-b3.test.ts rebuilds the fixture and compares everything else.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

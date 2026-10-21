@@ -90,8 +90,9 @@ positives on the clean transitions.
 `test/fixture-b3.test.ts` checks the files keep this format, that tira's side is a genuine
 log (it folds with no anomalies, and every fx: id is its own transition's key), that the
 manifest has exactly one entry per event id in either file, and that the generator rebuilds
-both files and the manifest (apart from what tira stamps itself: store times and its
-dispatcher's own handoff ids). It re-scores round 1, and checks the scorer can't pass a
+both files and the manifest (apart from what tira stamps itself: store times, its
+dispatcher's own handoff ids, and the rules era: `tira-log.jsonl` was written before the era
+marker, so it replays as the legacy era, unchanged). It re-scores round 1, and checks the scorer can't pass a
 plant called by the wrong kind or a clean transition called anything but OK.
 
 A next round needs a fresh fixture: this one's key is public.

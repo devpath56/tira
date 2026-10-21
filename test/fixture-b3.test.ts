@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultRegistry } from "../src/tables/registry.ts";
+import { defaultRegistry, RULES_ERA } from "../src/tables/registry.ts";
 import { fold } from "../src/fold/fold.ts";
 import { storedName, tableEventName } from "../src/fold/events.ts";
 import { fxKey, transitionOf } from "../src/write/fxkey.ts";
@@ -119,8 +119,15 @@ test("the manifest is the key to these files: one entry per event id in either f
   assert.deepEqual(built.records, records);
   assert.deepEqual(built.manifest, m);
   assert.equal(built.manifestMd, readFileSync(new URL("manifest.md", DIR), "utf8"));
-  // tira stamps two things itself: the store time, and the ids of its dispatcher's own handoff writes
-  const comparable = (e: StoredEvent) => ({ ...e, recordedAt: "", eventId: e.eventId.startsWith("fx:") ? e.eventId : "(dispatcher)" });
+  // tira stamps three things itself: the store time, the ids of its dispatcher's own handoff
+  // writes, and the rules era (versioned rules). The committed log was written before the era
+  // marker, so it is the legacy era; a rebuild today is decided under today's rules era.
+  assert.ok(events.every((e) => e.metadata.era === undefined), "the committed log is legacy era");
+  assert.ok(built.events.every((e) => e.metadata.era === RULES_ERA), "a rebuild carries today's era");
+  const comparable = (e: StoredEvent) => {
+    const { era: _stamped, ...metadata } = e.metadata;
+    return { ...e, metadata, recordedAt: "", eventId: e.eventId.startsWith("fx:") ? e.eventId : "(dispatcher)" };
+  };
   assert.deepEqual(built.events.map(comparable), events.map(comparable));
 });
 
