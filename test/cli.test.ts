@@ -2,12 +2,13 @@
 // end-to-end spawn of the real entry script.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { run } from "../src/cli/cli.ts";
+import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 
 function sandbox() {
   const dir = mkdtempSync(join(tmpdir(), "tira-cli-"));
@@ -406,5 +407,141 @@ test("end to end: plain `node scripts/tira.ts` (no flags) prints no SQLite warni
     assert.equal(r.stderr, "");
   } finally {
     s.done();
+  }
+});
+
+// --- the divergence panel's callers (B3 watchdog, the wiring slice) --------------------------
+// render and serve compute the report in-process, at render time, from the factory file and the
+// stream the page shows. The run log (docs/divergence-run-log.jsonl, or $TIRA_DIVERGENCE_LOG) is
+// a record the divergence command appends; no page reads it back.
+
+const B3 = fileURLToPath(new URL("../fixtures/b3/", import.meta.url));
+const B3_FACTORY = join(B3, "factory-state.jsonl");
+const B3_TIRA = join(B3, "tira-log.jsonl");
+const B3_COUNTS = { OK: 39, MISSING: 2, PHANTOM: 2, "WRONG-ENTITY": 2, DUPLICATE: 1, ORPHAN: 1 };
+
+async function b3Db(dir: string): Promise<string> {
+  const db = join(dir, "b3.db");
+  const store = new SqliteEventStore({ path: db });
+  try {
+    for (const l of readFileSync(B3_TIRA, "utf8").trim().split("\n")) {
+      const e = JSON.parse(l) as { stream: string; eventId: string; type: string; data: Record<string, unknown>; metadata: Record<string, string> };
+      await store.append(e.stream, [{ eventId: e.eventId, type: e.type, data: e.data, metadata: e.metadata }]);
+    }
+  } finally {
+    store.close();
+  }
+  return db;
+}
+
+const panelCounts = (html: string) => {
+  const sec = html.match(/<section class="divergence[^"]*"[\s\S]*?<\/section>/)?.[0] ?? "";
+  return { sec, state: sec.match(/data-divergence-state="([^"]+)"/)?.[1], counts: Object.fromEntries([...sec.matchAll(/data-verdict="([A-Z-]+)" data-count="(\d+)"/g)].map(([, v, c]) => [v, Number(c)])) };
+};
+
+async function cliRun(argv: string[], env: Record<string, string>) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env });
+  return { code, out: out.join("\n"), err: err.join("\n") };
+}
+
+test("divergence wiring: the CLI report and the rendered page agree on the B3 pair; tira divergence also takes $TIRA_FACTORY", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-cli-wired-"));
+  try {
+    const db = await b3Db(dir);
+    const env = { TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") };
+    const flag = await cliRun(["--db", db, "divergence", "--factory", B3_FACTORY, "--stream", "factory-b3", "--json"], env);
+    const viaEnv = await cliRun(["--db", db, "divergence", "--stream", "factory-b3", "--json"], { ...env, TIRA_FACTORY: B3_FACTORY });
+    assert.equal(flag.code, 0, flag.err);
+    assert.equal(viaEnv.code, 0, viaEnv.err);
+    const report = JSON.parse(flag.out) as { counts: Record<string, number> };
+    assert.deepEqual(report.counts, B3_COUNTS);
+    assert.deepEqual((JSON.parse(viaEnv.out) as { counts: Record<string, number> }).counts, B3_COUNTS);
+    const out = join(dir, "page.html");
+    assert.equal((await cliRun(["--db", db, "--stream", "factory-b3", "render", "--factory", B3_FACTORY, "--out", out], env)).code, 0);
+    assert.deepEqual(panelCounts(readFileSync(out, "utf8")).counts, report.counts);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("divergence wiring: tira serve recomputes the section on every page load, UNEVALUABLE without a factory file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-serve-wired-"));
+  const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+  const serveOnce = async (flags: string[], before?: (port: number) => Promise<void>) => {
+    const db = join(dir, "b3.db");
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--db", db, "--stream", "factory-b3", "serve", "--actor", "isha", "--port", "0", ...flags], { env: { ...process.env, TIRA_FACTORY: "", TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") } });
+    try {
+      const port = await new Promise<number>((resolve, reject) => {
+        let buf = "";
+        child.stdout.on("data", (d: Buffer) => { buf += d.toString(); const m = buf.match(/127\.0\.0\.1:(\d+)/); if (m) resolve(Number(m[1])); });
+        child.once("exit", (c) => reject(new Error(`serve exited ${c} before listening`)));
+      });
+      await before?.(port);
+      return await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    } finally {
+      const exited = new Promise((r) => child.once("exit", r));
+      child.kill("SIGTERM");
+      await exited;
+    }
+  };
+  try {
+    await b3Db(dir);
+    const live = panelCounts(await serveOnce(["--factory", B3_FACTORY]));
+    assert.equal(live.state, "divergent");
+    assert.deepEqual(live.counts, B3_COUNTS);
+    // a changed factory file shows on the next load of the same server: nothing was kept
+    const fac = join(dir, "factory.jsonl");
+    const first = readFileSync(B3_FACTORY, "utf8").split("\n")[0] as string;
+    writeFileSync(fac, `${first}\n`);
+    let firstLoad = "";
+    const reload = panelCounts(await serveOnce(["--factory", fac], async (port) => {
+      firstLoad = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+      writeFileSync(fac, readFileSync(B3_FACTORY));
+    }));
+    assert.equal(panelCounts(firstLoad).counts.OK, 1);
+    assert.deepEqual(reload.counts, B3_COUNTS);
+    const none = panelCounts(await serveOnce([]));
+    assert.equal(none.state, "unevaluable");
+    assert.match(none.sec, /no factory file/);
+    assert.doesNotMatch(none.sec, /data-count=/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("divergence wiring: no page reads a stored report — a poisoned run log changes nothing, and only the divergence command touches it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-cli-stored-"));
+  try {
+    const db = await b3Db(dir);
+    // a run-log row that disagrees with every live count
+    const log = join(dir, "run-log.jsonl");
+    const poison = { ts: "2026-10-20T00:00:00.000Z", factorySnapshot: "0".repeat(64), stream: "factory-b3", atSeq: 65, population: { factoryRecords: 46, tiraFxEvents: 45, ids: 47 }, counts: { OK: 47, MISSING: 0, PHANTOM: 0, "WRONG-ENTITY": 0, DUPLICATE: 0, ORPHAN: 0 }, severityPolicy: "v1" };
+    appendFileSync(log, `${JSON.stringify(poison)}\n`);
+    const before = readFileSync(log, "utf8");
+    const env = { TIRA_DIVERGENCE_LOG: log };
+    const out = join(dir, "page.html");
+    assert.equal((await cliRun(["--db", db, "--stream", "factory-b3", "render", "--factory", B3_FACTORY, "--out", out], env)).code, 0);
+    const p = panelCounts(readFileSync(out, "utf8"));
+    assert.deepEqual(p.counts, B3_COUNTS);
+    assert.doesNotMatch(p.sec, new RegExp("0".repeat(64)));
+    // no factory file: the stored row is right there, and the page still claims nothing
+    assert.equal((await cliRun(["--db", db, "--stream", "factory-b3", "render", "--out", out], env)).code, 0);
+    assert.equal(panelCounts(readFileSync(out, "utf8")).state, "unevaluable");
+    // rendering is not a run: it appends nothing to the log
+    assert.equal(readFileSync(log, "utf8"), before);
+    // structurally: the page path never names the log, and cli.ts only appends to it
+    const src = (f: string) => readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), "utf8");
+    for (const f of ["render/html.ts", "serve/server.ts", "divergence/divergence.ts"]) {
+      assert.doesNotMatch(src(f), /divergence-run-log|TIRA_DIVERGENCE_LOG|RUN_LOG/, f);
+    }
+    const uses = src("cli/cli.ts").split("\n").filter((l) => /\bRUN_LOG\b|TIRA_DIVERGENCE_LOG/.test(l) && !l.trimStart().startsWith("//"));
+    assert.deepEqual(uses.map((l) => l.trim()), [
+      `const RUN_LOG = fileURLToPath(new URL("../../docs/divergence-run-log.jsonl", import.meta.url));`,
+      "appendFileSync(io.env.TIRA_DIVERGENCE_LOG ?? RUN_LOG, `${JSON.stringify(row)}\\n`);",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

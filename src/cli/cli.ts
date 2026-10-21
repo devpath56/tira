@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { execFileSync } from "node:child_process";
 import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderHtml } from "../render/html.ts";
+import { renderHtml, type DivergencePanel } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
@@ -38,7 +38,11 @@ Usage:
   tira state [--at N] [--now ISO] [--vantage V]   derived state, plus rejections and anomalies
   tira replay <N>                                 state as of event N (same as: tira state --at N)
   tira tree [--at N]                              the tree with cursor (◆), active task (●) and drain flags
-  tira render [--out FILE] [--at N]               write the read-only HTML page (D1); reload it after re-rendering
+  tira render [--out FILE] [--at N] [--factory FILE]
+                                                  write the read-only HTML page (D1); reload it after re-rendering.
+                                                  Its divergence section is computed in this run from the factory
+                                                  file and the events the page shows; no factory file, or one that
+                                                  cannot be read, renders it UNEVALUABLE
   tira dump [--at N] [--hash]                     full derived state as canonical JSON (same log => same bytes);
                                                   --hash prints its sha256 instead
   tira key <type> <id> [EVENT] [key=value ...]    the fx: event id a factory transition uses (B2): the same
@@ -47,10 +51,12 @@ Usage:
                                                   depths, closed parents with open work; plus tasks with no
                                                   definition or done criteria, and finished branches that
                                                   grew new work. Exits 3 when something is broken
-  tira serve --actor NAME [--port N]              the page, live, on 127.0.0.1 only (default port 4747): needs
+  tira serve --actor NAME [--port N] [--factory FILE]
+                                                  the page, live, on 127.0.0.1 only (default port 4747): needs
                                                   attention, ⌘K search, and start / unblock / complete / block /
-                                                  cancel / reopen / add subtask, each through a confirm
-                                                  dialog, written as NAME. Ctrl-C stops it
+                                                  cancel / reopen / add subtask, each through a decision dialog,
+                                                  written as NAME; the divergence section is recomputed on every
+                                                  page load. Ctrl-C stops it
   tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]
                                                   the factory's file state against tira's log, one verdict per
                                                   fx: event id (B3): OK, MISSING, PHANTOM, WRONG-ENTITY,
@@ -72,7 +78,7 @@ Options:
   --hash           (dump) print sha256 of the canonical JSON
   --parent ID      (create) the parent node; discovered work: kind=discovered discovered_during=ID
   --out FILE       (render) output path (default: tira.html)
-  --factory FILE   (divergence) the factory's file state, JSONL
+  --factory FILE   (divergence, render, serve) the factory's file state, JSONL (default: $TIRA_FACTORY)
   --tira-log FILE  (divergence) tira's log as JSONL, instead of the store
   -h, --help       this help
 
@@ -367,10 +373,12 @@ async function tree(store: SqliteEventStore, registry: Registry, stream: string,
 
 // D1: a static page from the same fold `dump` hashes, stamped with that hash (M1 oracle).
 async function render(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
-  const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
+  const events = await store.readStream(stream);
+  const r = fold(events, registry, foldOptions(upTo, values));
   const hash = sha256(canonicalJson(r));
   const out = values.out ?? "tira.html";
-  writeFileSync(out, renderHtml(r, stream, hash, await store.readStream(stream)));
+  const shown = events.filter((e) => e.seq <= r.lastSeq); // render --at N: the panel judges what the page shows
+  writeFileSync(out, renderHtml(r, stream, hash, events, { divergence: divergencePanel(factoryFile(values, io), shown, stream) }));
   const nodes = streamView(r, stream).nodeCount;
   io.out(values.json ? JSON.stringify({ out, nodes, sha256: hash, lastSeq: r.lastSeq }) : `wrote ${out}  ${nodes} node(s) · seq ${r.lastSeq} · sha256:${hash}`);
   return 0;
@@ -486,15 +494,37 @@ function printDivergence(r: DivergenceReport, io: Io): void {
   io.out(`severity policy ${r.severityPolicy}: divergences are attention findings; the exit code stays 0`);
 }
 
-async function divergenceCmd(values: Values, db: string, io: Io): Promise<number> {
-  const file = values.factory;
-  if (file === undefined) throw new UsageError("usage: tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]");
-  let bytes: Buffer;
+// An empty $TIRA_FACTORY is unset, not a file named "".
+const factoryFile = (values: Values, io: Io) => values.factory ?? (io.env.TIRA_FACTORY || undefined);
+
+function factoryBytes(file: string): Buffer {
   try {
-    bytes = readFileSync(file);
+    return readFileSync(file);
   } catch (err) {
     throw new UsageError(`cannot read factory file ${file}, so it cannot be hashed: ${(err as Error).message}`);
   }
+}
+
+// The page's divergence section (render and serve): the same adapters, pin and differ as a
+// live `tira divergence`, run in this process on the events the page renders. The report is
+// never read back from the run log or any stored artifact, and the page appends nothing to
+// it. Whatever would make the command exit 1 makes the section UNEVALUABLE, with the reason.
+export function divergencePanel(file: string | undefined, events: StoredEvent[], stream: string): DivergencePanel {
+  if (file === undefined) return { unevaluable: "no factory file: pass --factory FILE or set TIRA_FACTORY" };
+  try {
+    const pin = livePin(file, factoryBytes(file));
+    const factory = readFactory(file);
+    if (events.length === 0) throw new UsageError(`stream ${stream} has no events`);
+    return { report: divergence({ factory, tira: events, factorySnapshot: pin, stream }) };
+  } catch (err) {
+    return { unevaluable: (err as Error).message };
+  }
+}
+
+async function divergenceCmd(values: Values, db: string, io: Io): Promise<number> {
+  const file = factoryFile(values, io);
+  if (file === undefined) throw new UsageError("usage: tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]");
+  const bytes = factoryBytes(file);
   const live = values["tira-log"] === undefined;
   const pin = live ? livePin(file, bytes) : fixturePin(file, bytes);
   const factory = readFactory(file);
@@ -563,7 +593,8 @@ async function serve(db: string, registry: Registry, stream: string, values: Val
   const port = values.port === undefined ? 4747 : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
   const store = new SqliteEventStore({ path: db });
-  const server = tiraServer({ store, registry, stream, actor });
+  const file = factoryFile(values, io);
+  const server = tiraServer({ store, registry, stream, actor, divergence: (events) => divergencePanel(file, events, stream) });
   try {
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
     const at = server.address();
