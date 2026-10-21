@@ -3,7 +3,15 @@
 // big trees stay narrow; the canvas's zoom keeps the point under the pointer still.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { G, STACK, centreOn, finishedBranches, fitView, foundPath, layout, subtree, treePath, zoomAt, type LayoutNode, type Point } from "../src/serve/layout.mjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { G, STACK, centreOn, finishedBranches, fitView, foundPath, fx, layout, subtree, treePath, zoomAt, type LayoutNode, type Point } from "../src/serve/layout.mjs";
+import { SqliteEventStore } from "../src/store/sqlite-store.ts";
+import { defaultRegistry } from "../src/tables/registry.ts";
+import { WritePath } from "../src/write/write-path.ts";
+import { fold } from "../src/fold/fold.ts";
+import { renderHtml } from "../src/render/html.ts";
 
 // A random tree in preorder (a seeded generator, so a failure replays), up to `depth` deep.
 function randomTree(seed: number, count: number, depth = 5): LayoutNode[] {
@@ -155,4 +163,46 @@ test("the canvas: zoom keeps the point under the pointer still and stays within 
   const c = centreOn({ x: 1000, y: 500 }, 1, 1200, 600);
   assert.equal(c.x + 1000, 600);
   assert.equal(c.y + 500 + G.box / 2, 200);
+});
+
+// ---------- one numeric formatter (convention fx-display-format, conventions/conventions.jsonl) ----------
+
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+  .flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.(ts|mjs)$/.test(e.name) ? [join(dir, e.name)] : []));
+
+test("fx-display-format: layout.mjs fx is the one numeric formatter; nothing else in src calls toFixed", () => {
+  const calls = sources(join(ROOT, "src")).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/\.toFixed\(/g)].map(() => relative(ROOT, f)));
+  assert.deepEqual(calls, ["src/serve/layout.mjs"]);
+  assert.equal(fx(12.345), "12.3");
+  // the rendered page, the live canvas and the palette each take it from there
+  for (const f of ["src/render/html.ts", "src/serve/graph.mjs", "src/serve/app.mjs"]) {
+    assert.match(readFileSync(join(ROOT, f), "utf8"), /import \{[^}]*\bfx\b[^}]*\} from "(?:\.\.\/serve\/|\.\/)layout\.mjs";/, f);
+  }
+});
+
+test("fx-display-format: the rendered graph prints its layout through fx (node places, canvas size, every line)", async () => {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const born = (id: string, parent_id?: string) => wp.submit({ stream: "fx", kind: "create", entity: { type: "node", id }, actor: "isha", payload: parent_id ? { parent_id } : {} });
+  await born("root");
+  for (const [id, up] of [["a", "root"], ["b", "root"], ["c", "root"], ["a1", "a"], ["a2", "a"], ["b1", "b"]] as const) await born(id, up);
+  const events = await store.readStream("fx");
+  const html = renderHtml(fold(events, registry), "fx", "h", events);
+  // the tree as the page lists it (preorder, with each node's parent), laid out again here
+  const placed = [...html.matchAll(/<a class="gn[^"]*" href="#t\d+" style="left:([^;]+)px;top:(\d+)px"[^>]*?(?: data-parent="([^"]+)")? data-key="([^"]+)"/g)]
+    .map((m) => ({ left: m[1] as string, top: Number(m[2]), parent: m[3], key: m[4] as string }));
+  assert.equal(placed.length, 7);
+  const L = layout(placed.map((n) => (n.parent === undefined ? { key: n.key } : { key: n.key, parent: n.parent })));
+  for (const n of placed) {
+    const p = L.at.get(n.key) as Point;
+    assert.equal(n.left, fx(p.x), n.key);
+    assert.equal(n.top, p.y, n.key);
+  }
+  assert.ok(html.includes(`aria-label="Tasks as a tree" style="width:${fx(L.width)}px;height:${L.height}px"`), "the canvas size");
+  for (const n of placed.filter((x) => x.parent !== undefined)) {
+    const d = treePath(L.at.get(n.parent as string) as Point, L.at.get(n.key) as Point);
+    assert.ok(html.includes(`data-to="${n.key}" d="${d}"`), `${n.key}: ${d}`);
+  }
 });

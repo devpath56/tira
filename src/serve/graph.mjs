@@ -10,7 +10,7 @@
 //   lines can be hidden.
 // Folds are remembered per browser and stream, the view per tab, so both survive the reload
 // after every action. Places come from layout.mjs, the code the page was rendered with.
-import { G, layout, treePath, foundPath, subtree, finishedBranches, zoomAt, fitView, centreOn } from "./layout.mjs";
+import { G, fx, layout, treePath, foundPath, subtree, finishedBranches, zoomAt, fitView, centreOn } from "./layout.mjs";
 
 const read = (area, key, fallback) => {
   try {
@@ -159,7 +159,7 @@ function canvas(wrap) {
     last = layout(nodes, folded);
     world.style.width = `${last.width}px`;
     world.style.height = `${last.height}px`;
-    svg.setAttribute("viewBox", `0 0 ${last.width.toFixed(1)} ${last.height}`);
+    svg.setAttribute("viewBox", `0 0 ${fx(last.width)} ${last.height}`);
     drawNodes();
     drawLines();
     wrap.classList.toggle("hide-found", !showFound);
@@ -171,7 +171,7 @@ function canvas(wrap) {
       const p = last.at.get(n.key);
       n.el.hidden = p === undefined;
       n.el.classList.toggle("folded", folded.has(n.key));
-      if (p) { n.el.style.left = `${p.x.toFixed(1)}px`; n.el.style.top = `${p.y}px`; }
+      if (p) { n.el.style.left = `${fx(p.x)}px`; n.el.style.top = `${p.y}px`; }
     }
   }
   function drawLines() {
@@ -191,7 +191,7 @@ function canvas(wrap) {
     const p = last.at.get(key);
     b.hidden = p === undefined;
     if (!p) return;
-    b.style.left = `${p.x.toFixed(1)}px`;
+    b.style.left = `${fx(p.x)}px`;
     b.style.top = `${p.y + G.box}px`;
     const isFolded = folded.has(key);
     const kids = inside.get(key) ?? [];

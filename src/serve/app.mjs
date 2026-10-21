@@ -6,6 +6,7 @@
 import { rank, parse } from "./rank.mjs";
 import "./theme.mjs";
 import "./graph.mjs";
+import { fx } from "./layout.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -48,7 +49,7 @@ function draw() {
     li.textContent = parse(input.value).verb ? "No task in a state that allows that" : "No task matches";
     list.append(li);
   }
-  root.dataset.ms = (performance.now() - t0).toFixed(1); // the brief's latency budget: under 100 ms
+  root.dataset.ms = fx(performance.now() - t0); // the brief's latency budget: under 100 ms
 }
 
 function go() {

@@ -17,13 +17,12 @@ import type { StoredEvent } from "../store/types.ts";
 import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
-import { foundPath, layout, treePath } from "../serve/layout.mjs";
+import { foundPath, fx, layout, treePath } from "../serve/layout.mjs";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.codePointAt(0)};`);
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
 const CLOSED = new Set(["done", "cancelled"]);
-const fx = (n: number) => n.toFixed(1);
 // Tree labels stay inside their column; the SVG title, aria-label and drawer keep the full id.
 const MAX_LABEL = 22;
 const short = (id: string) => ([...id].length > MAX_LABEL ? `${[...id].slice(0, MAX_LABEL - 1).join("")}…` : id);

@@ -4,6 +4,7 @@ export interface Point { x: number; y: number; stack?: boolean }
 export interface View { x: number; y: number; s: number }
 export declare const STACK: { dx: number; top: number; pitch: number; spine: number; compact: number; few: number; most: number; many: number };
 export declare const G: { node: number; box: number; gap: number; level: number; top: number; side: number; bottom: number };
+export declare const fx: (n: number) => string;
 export declare function layout(nodes: readonly LayoutNode[], folded?: ReadonlySet<string>): { at: Map<string, Point>; width: number; height: number };
 export declare const treePath: (p: Point, c: Point) => string;
 export declare const foundPath: (a: Point, b: Point) => string;
