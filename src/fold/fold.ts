@@ -381,7 +381,7 @@ function canonical(value: unknown): string | undefined {
   if (Array.isArray(v)) return `[${Array.from(v, (x) => canonical(x) ?? "null").join(",")}]`;
   if (v === null || typeof v !== "object") return JSON.stringify(v);
   const o = v as Record<string, unknown>;
-  const members = Object.keys(o).sort(compareCodeUnits).flatMap((k) => {
+  const members = Object.keys(o).flatMap((k) => {
     const s = canonical(o[k]);
     return s === undefined ? [] : [`${JSON.stringify(k)}:${s}`];
   });
