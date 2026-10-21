@@ -546,6 +546,18 @@ npm run -s tira -- divergence --factory fixtures/b3/factory-state.jsonl --tira-l
 node scripts/b3-score.ts fixtures/b3/manifest.json b3-run.json   # 47/47, bar met
 ```
 
+**The panel (PR-B).** `renderHtml(..., { divergence })` in `src/render/html.ts` shows a
+divergence section: the report the command emits, passed in by the caller that just
+computed it (`{ report }`), or why it could not be (`{ unevaluable: reason }`). The renderer
+never diffs, stores or caches — html.ts imports no differ. Three explicit states: divergences
+(per-verdict counts plus the non-OK rows with their detail), clean (an explicit
+"0 divergences"), and UNEVALUABLE (unreadable input, or a report missing its coordinates or
+population, or one whose counts do not add up) — never a blank, never a bare 0. Coordinates
+and population print with the counts. On the fixture pair the panel's counts and rows equal
+the `--json` report (test/render.test.ts). One read + render at 2,795 tira events measured
+17.8 ms against the spec's 1 s/read bar. Not wired yet: `tira render` and `tira serve` take
+no factory input, so no page carries the section until a caller passes one (CLI scope).
+
 ## Scenario suite (build order C2): the plan's tests as event scripts
 
 `scenarios/*.json` holds one event script per scenario in build-plan §5 (S1–S9, T1–T8,
