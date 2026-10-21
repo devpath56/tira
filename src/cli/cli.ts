@@ -3,9 +3,9 @@
 // never touches state directly, so what you see here is what the core decides.
 import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderHtml } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
@@ -428,7 +428,14 @@ function readTiraLog(file: string): StoredEvent[] {
   });
 }
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+// git is run from a fixed system directory, never resolved through PATH (Sonar S4036): a
+// writable PATH entry could otherwise substitute the binary that pins a fixture run. No git
+// there means no pin, the same fall-through as an untracked file.
+const GIT = ["/usr/bin/git", "/usr/local/bin/git"].find((p) => existsSync(p));
+const git = (cwd: string, ...args: string[]) => {
+  if (!GIT) throw new Error("git not found in a fixed system directory");
+  return execFileSync(GIT, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+};
 
 // A fixture run is pinned by git: the commit whose tree holds these exact bytes. A copy git
 // does not hold (or holds with edits) is reported unpinned, with the bytes' sha256.
