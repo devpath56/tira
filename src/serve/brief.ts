@@ -49,82 +49,92 @@ export const KIND: Record<string, string> = {
   ADD_SUBTASK: "a change of scope",
 };
 
-function decisionOf(f: BriefFacts): string {
-  let s = `${f.id} is ${word(f.state)}${f.parent ? ` under ${f.parent.id}` : ""}`;
-  if (f.state === "blocked" && f.since) s += ` since seq ${f.since.seq}: "${f.since.reason?.trim() ? f.since.reason : "no reason given"}"`;
-  else if (f.state === "in_progress" && f.since) s += ` since seq ${f.since.seq}`;
-  else if (f.state === "done" && f.proof !== undefined) s += ` (proof: ${f.proof})`;
-  s += ".";
-  if (f.kids.length > 0) {
-    const open = f.kids.filter((k) => !CLOSED.has(k.state)).map((k) => k.id);
-    s += ` ${f.kids.length - open.length} of ${f.kids.length} subtasks closed${open.length > 0 ? ` (open: ${list(open)})` : ""}.`;
-  }
-  const pv = f.preview;
-  if (f.event === "ADD_SUBTASK") s += ` This adds a new task at the end of its subtasks${f.found ? ", marked as found while working on it" : ""}.`;
-  else if (pv.ok && pv.noop) s += " Nothing would change.";
-  else if (pv.ok && pv.to !== undefined) s += ` ${DOING[f.event] ?? f.event} it moves it ${word(f.state)} → ${word(pv.to)}.`;
-  if (pv.ok && pv.closes.length > 0) s += ` First, tira closes ${pv.closes.join(", then ")} (every child closed), citing this move.`;
-  return `${s} Recorded as ${f.actor}.`;
+const openKids = (f: BriefFacts) => f.kids.filter((k) => !CLOSED.has(k.state)).map((k) => k.id);
+
+// where it stands: its state and parent, then why and since when, or its proof
+function standing(f: BriefFacts): string {
+  const where = f.parent ? " under " + f.parent.id : "";
+  const reason = f.since?.reason?.trim() ? f.since.reason : "no reason given";
+  if (f.state === "blocked" && f.since) return `${f.id} is ${word(f.state)}${where} since seq ${f.since.seq}: "${reason}".`;
+  if (f.state === "in_progress" && f.since) return `${f.id} is ${word(f.state)}${where} since seq ${f.since.seq}.`;
+  if (f.state === "done" && f.proof !== undefined) return `${f.id} is ${word(f.state)}${where} (proof: ${f.proof}).`;
+  return `${f.id} is ${word(f.state)}${where}.`;
 }
+
+function subtasksLine(f: BriefFacts): string {
+  if (f.kids.length === 0) return "";
+  const open = openKids(f);
+  const which = open.length > 0 ? " (open: " + list(open) + ")" : "";
+  return ` ${f.kids.length - open.length} of ${f.kids.length} subtasks closed${which}.`;
+}
+
+// what the move does, then what tira closes first
+function moveLine(f: BriefFacts): string {
+  const pv = f.preview;
+  let s = "";
+  if (f.event === "ADD_SUBTASK") s = " This adds a new task at the end of its subtasks" + (f.found ? ", marked as found while working on it." : ".");
+  else if (pv.ok && pv.noop) s = " Nothing would change.";
+  else if (pv.ok && pv.to !== undefined) s = ` ${DOING[f.event] ?? f.event} it moves it ${word(f.state)} → ${word(pv.to)}.`;
+  if (pv.ok && pv.closes.length > 0) s += ` First, tira closes ${pv.closes.join(", then ")} (every child closed), citing this move.`;
+  return s;
+}
+
+const decisionOf = (f: BriefFacts) => `${standing(f)}${subtasksLine(f)}${moveLine(f)} Recorded as ${f.actor}.`;
+
+// when it is its parent's last open subtask: whether tira will close the parent
+function lastOf(f: BriefFacts): string {
+  const p = f.parent;
+  if (!p || p.othersOpen > 0) return "";
+  if (p.closable) return ` It's the last open subtask of ${p.id}, so tira closes ${p.id} when you move on.`;
+  return ` It's the last open subtask of ${p.id}, which is ${word(p.state)}: tira won't close it until it's unblocked.`;
+}
+
+function startAdvice(f: BriefFacts): string {
+  if (f.next === f.id) return "Start it: it's the next task in order." + (f.preview.closes.length > 0 ? " Moving on lets tira close the finished branch behind you." : "");
+  return f.next === undefined ? "Start it." : `Start it only if the order should change: next in order is ${f.next}.`;
+}
+
+// is the wait over? the ticket it waits on, else the reason it gave; then what's still open under it
+function unblockAdvice(f: BriefFacts): string {
+  const w = f.waitingOn;
+  const open = openKids(f);
+  const then = open.length > 0 ? ` Then ${list(open)} still ${open.length === 1 ? "needs" : "need"} doing before it can be completed.` : "";
+  if (w && CLOSED.has(w.state)) return `Unblock it: ${w.id} is ${word(w.state)} now, so the wait looks over.${then}`;
+  if (w) return `Wait, unless you no longer need ${w.id}: it is still ${word(w.state)}.`;
+  const why = f.since?.reason?.trim();
+  return (why ? `Unblock it once "${why}" is resolved.` : "Unblock it once what it waited on is resolved.") + then;
+}
+
+const ADVICE: Record<string, (f: BriefFacts) => string> = {
+  START: startAdvice,
+  UNBLOCK: unblockAdvice,
+  COMPLETE: (f) => "Complete it with proof anyone can re-check." + lastOf(f),
+  BLOCK: (f) => `Block it on a ticket for what you're waiting on: a new one is created under ${f.id} and linked as blocking it, so the wait is tracked like any task (or name an open task).`
+    + (f.active.length === 0 && f.state === "in_progress" ? " It frees the slot for one task in progress, so you can start another." : ""),
+  CANCEL: (f) => "Cancel it only if it won't be done." + lastOf(f),
+  REOPEN: (f) => "Re-open it only if something about the result is wrong, and say what." + (f.proof === undefined ? "" : ` Its proof now: ${f.proof}.`),
+  ADD_SUBTASK: (f) => f.found
+    ? `Add it if ${f.id} can't be finished without it. It's marked as found while working on ${f.id}; take kind=discovered out if it was planned.`
+    : `Add it if ${f.id} can't be finished without it. If you found it while working on ${f.id}, add kind=discovered discovered_during=${f.id}.`,
+};
 
 function recommendationOf(f: BriefFacts): string {
   const pv = f.preview;
   if (!pv.ok) return `Don't run it: tira will refuse (${pv.code}: ${pv.detail}).`;
   if (pv.noop) return "Nothing to do: it's already so.";
-  const p = f.parent;
-  const lastOf = !p || p.othersOpen > 0 ? ""
-    : p.closable ? ` It's the last open subtask of ${p.id}, so tira closes ${p.id} when you move on.`
-    : ` It's the last open subtask of ${p.id}, which is ${word(p.state)}: tira won't close it until it's unblocked.`;
-  switch (f.event) {
-    case "START":
-      if (f.next === f.id) return `Start it: it's the next task in order.${pv.closes.length > 0 ? " Moving on lets tira close the finished branch behind you." : ""}`;
-      return f.next !== undefined ? `Start it only if the order should change: next in order is ${f.next}.` : "Start it.";
-    case "UNBLOCK": {
-      const w = f.waitingOn;
-      const open = f.kids.filter((k) => !CLOSED.has(k.state)).map((k) => k.id);
-      const then = open.length > 0 ? ` Then ${list(open)} still ${open.length === 1 ? "needs" : "need"} doing before it can be completed.` : "";
-      if (w && CLOSED.has(w.state)) return `Unblock it: ${w.id} is ${word(w.state)} now, so the wait looks over.${then}`;
-      if (w) return `Wait, unless you no longer need ${w.id}: it is still ${word(w.state)}.`;
-      const why = f.since?.reason?.trim();
-      return `${why ? `Unblock it once "${why}" is resolved.` : "Unblock it once what it waited on is resolved."}${then}`;
-    }
-    case "COMPLETE":
-      return `Complete it with proof anyone can re-check.${lastOf}`;
-    case "BLOCK":
-      return `Block it on a ticket for what you're waiting on: a new one is created under ${f.id} and linked as blocking it, so the wait is tracked like any task (or name an open task).${f.active.length === 0 && f.state === "in_progress" ? " It frees the slot for one task in progress, so you can start another." : ""}`;
-    case "CANCEL":
-      return `Cancel it only if it won't be done.${lastOf}`;
-    case "REOPEN":
-      return `Re-open it only if something about the result is wrong, and say what.${f.proof !== undefined ? ` Its proof now: ${f.proof}.` : ""}`;
-    case "ADD_SUBTASK":
-      return f.found
-        ? `Add it if ${f.id} can't be finished without it. It's marked as found while working on ${f.id}; take kind=discovered out if it was planned.`
-        : `Add it if ${f.id} can't be finished without it. If you found it while working on ${f.id}, add kind=discovered discovered_during=${f.id}.`;
-    default:
-      return "";
-  }
+  return ADVICE[f.event]?.(f) ?? "";
 }
 
-function tradeoffsOf(f: BriefFacts): string {
-  switch (f.event) {
-    case "START":
-      return `One task is in progress at a time: you stay on ${f.id} until you complete or block it.${f.preview.closes.length > 0 ? " Undoing tira's closes takes a re-open, with a reason." : ""}`;
-    case "UNBLOCK":
-      return "If the wait isn't over, it gets blocked again and the history shows the round trip; left blocked, it stays in Needs attention.";
-    case "COMPLETE":
-      return "Done stays done until someone re-opens it with a reason; a vague proof can't be re-checked later.";
-    case "BLOCK":
-      return `It stays in Needs attention until unblocked; a new blocker ticket sits under ${f.id}, so ${f.id} can't be completed until that ticket is closed.`;
-    case "CANCEL":
-      return "It counts as finished, so its parent can close, but it can't be re-opened: if the work comes back, it's a new task.";
-    case "REOPEN":
-      return `Its proof is cleared and the history keeps both completions;${f.parent ? ` ${f.parent.id} stays open until it's done again.` : " it's open work again."}`;
-    case "ADD_SUBTASK":
-      return `More scope: ${f.id} can't close until the new subtask is closed or cancelled.`;
-    default:
-      return "";
-  }
-}
+const TRADEOFFS: Record<string, (f: BriefFacts) => string> = {
+  START: (f) => `One task is in progress at a time: you stay on ${f.id} until you complete or block it.` + (f.preview.closes.length > 0 ? " Undoing tira's closes takes a re-open, with a reason." : ""),
+  UNBLOCK: () => "If the wait isn't over, it gets blocked again and the history shows the round trip; left blocked, it stays in Needs attention.",
+  COMPLETE: () => "Done stays done until someone re-opens it with a reason; a vague proof can't be re-checked later.",
+  BLOCK: (f) => `It stays in Needs attention until unblocked; a new blocker ticket sits under ${f.id}, so ${f.id} can't be completed until that ticket is closed.`,
+  CANCEL: () => "It counts as finished, so its parent can close, but it can't be re-opened: if the work comes back, it's a new task.",
+  REOPEN: (f) => "Its proof is cleared and the history keeps both completions;" + (f.parent ? ` ${f.parent.id} stays open until it's done again.` : " it's open work again."),
+  ADD_SUBTASK: (f) => `More scope: ${f.id} can't close until the new subtask is closed or cancelled.`,
+};
+const tradeoffsOf = (f: BriefFacts) => TRADEOFFS[f.event]?.(f) ?? "";
 
 export function briefFor(f: BriefFacts): Brief {
   const kind = f.preview.ok ? KIND[f.event] ?? f.event : "refused by the rules";

@@ -380,14 +380,25 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       "gn", `st-${r.state}`, ks.length > 0 ? "parent" : "",
       r.cursor ? "is-next" : "", r.active ? "is-active" : "",
     ].filter(Boolean).join(" ");
-    const marks = `${r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : ""}${r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : ""}`;
-    const meta = (ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed${left === 0 ? "" : " · " + left + " left"}`) + (r.discoveredDuring ? " · ✦ found" : "");
+    const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
+    const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
+    const marks = tiraMark + waitRing;
+    const leftText = left === 0 ? "" : " · " + left + " left";
+    const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
+    const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
     const blocks = (links.blocks.get(r.key) ?? []).map((k) => byKey.get(k)?.row.id ?? k);
     const by = links.blockedBy.get(r.key);
-    const label = `${r.id}, ${word(r.state)}${ks.length > 0 ? `, ${closed} of ${ks.length} subtasks closed` : ""}${by === undefined ? "" : `, blocked by ${byKey.get(by)?.row.id ?? by}`}${blocks.length > 0 ? `, blocks ${blocks.join(", ")}` : ""}${r.cursor ? ", next" : ""}${r.active ? ", active" : ""}`;
+    const said = [r.id, word(r.state)];
+    if (ks.length > 0) said.push(`${closed} of ${ks.length} subtasks closed`);
+    if (by !== undefined) said.push("blocked by " + (byKey.get(by)?.row.id ?? by));
+    if (blocks.length > 0) said.push("blocks " + blocks.join(", "));
+    if (r.cursor) said.push("next");
+    if (r.active) said.push("active");
     const p = at(n);
-    return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(label)}"${n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : ""} ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
-      + `${r.cursor ? `<span class="here">◆ ${r.active ? "now" : "next"}</span>` : ""}`
+    const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
+    const pin = r.cursor ? `<span class="here">◆ ${r.active ? "now" : "next"}</span>` : "";
+    return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(said.join(", "))}"${parentAttr} ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
+      + pin
       + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
       + `<span class="gm">${marks}${meta}</span></a>`;
   };
@@ -512,9 +523,8 @@ const linkTo = (key: string, ctx: Pick<DialogContext, "indexOf" | "rowOf">) => {
   return row ? `<a href="#t${ctx.indexOf.get(key)}">${esc(row.id)}</a>${stateBadge(row.state)}` : "";
 };
 
-function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
-  const r = n.row;
-  const marks = [
+function marksHtml(r: TreeRow): string {
+  return [
     r.cursor ? `<span class="mark cursor">◆ next</span>` : "",
     r.active ? `<span class="mark active">● active</span>` : "",
     r.drained ? `<span class="mark drained">drained</span>` : "",
@@ -522,25 +532,37 @@ function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogCon
     r.awaitingClose ? `<span class="mark wait">tira closes it when you move on</span>` : "",
     r.discoveredDuring ? `<span class="mark">found during ${esc(bare(r.discoveredDuring))}</span>` : "",
   ].filter(Boolean).join("");
+}
+
+// which subtasks, not just how many: each with its state, one click to its own dialog
+function kidsHtml(r: TreeRow, ctx: DialogContext): string {
+  if (r.children.length === 0) return "";
   const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
   const kidNoun = r.children.length === 1 ? "subtask" : "subtasks";
-  // which subtasks, not just how many: each with its state, one click to its own dialog
   const kidsList = r.children.map((c) => `<li><a href="#t${ctx.indexOf.get(c.key)}">${esc(c.id)}</a>${stateBadge(c.state)}</li>`).join("");
-  const kids = r.children.length > 0
-    ? `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div><ul class="kids-list" aria-label="Subtasks">${kidsList}</ul>`
-    : "";
-  const proof = r.state === "done" && ctx.proof
-    ? `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${esc(ctx.proof.ref)}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`
-    : "";
-  // the blocks link, both ways: a blocked task names its blocker ticket, the ticket what it blocks
+  return `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div><ul class="kids-list" aria-label="Subtasks">${kidsList}</ul>`;
+}
+
+function proofHtml(r: TreeRow, ctx: DialogContext): string {
+  if (r.state !== "done" || !ctx.proof) return "";
+  return `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${esc(ctx.proof.ref)}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`;
+}
+
+// the blocks link, both ways: a blocked task names its blocker ticket, the ticket what it blocks
+function linksHtml(r: TreeRow, ctx: DialogContext): string {
   const by = ctx.links.blockedBy.get(r.key);
   const blocks = ctx.links.blocks.get(r.key) ?? [];
-  const links = by === undefined && blocks.length === 0 ? ""
-    : `<div class="links" data-links>${by === undefined ? "" : `<p><span class="lk">Blocked by</span>${linkTo(by, ctx)}</p>`}${blocks.length === 0 ? "" : `<p><span class="lk">Blocks</span>${blocks.map((k) => linkTo(k, ctx)).join("")}</p>`}</div>`;
+  const byLine = by === undefined ? "" : `<p><span class="lk">Blocked by</span>${linkTo(by, ctx)}</p>`;
+  const blocksLine = blocks.length === 0 ? "" : `<p><span class="lk">Blocks</span>${blocks.map((k) => linkTo(k, ctx)).join("")}</p>`;
+  return (byLine + blocksLine) === "" ? "" : `<div class="links" data-links>${byLine}${blocksLine}</div>`;
+}
+
+function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
+  const r = n.row;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
   const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label)).join("")}</div>` : "";
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marks}</div>${links}${acts}${proof}${kids}`
+    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>${linksHtml(r, ctx)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
@@ -614,8 +636,8 @@ function attentionRow(n: Placed, since: Since | undefined, path: string, verb: s
   const acts = live ? `<span class="acts">${links}</span>` : "";
   // a block on a ticket: which one, and once it's closed, that the wait looks over
   const blocker = n.row.state === "blocked" && since?.blocker !== undefined ? ctx.rowOf.get(since.blocker) : undefined;
-  const waits = blocker === undefined ? ""
-    : `<span class="by" data-blocked-by>waiting on ${linkTo(blocker.key, ctx)}</span>${CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : ""}`;
+  const ready = blocker !== undefined && CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : "";
+  const waits = blocker === undefined ? "" : `<span class="by" data-blocked-by>waiting on ${linkTo(blocker.key, ctx)}</span>` + ready;
   return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
     + `<span class="path">${path}</span>${waits}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
 }
@@ -909,7 +931,10 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const lanes = lanesHtml(r, stream, events);
   const views = VIEWS.filter(([t]) => t !== "lanes" || lanes !== "");
   // Open on the view that has something: the tree, else the lanes, else the history.
-  const first = v.roots.length > 0 ? "board" : lanes !== "" && (multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0) ? "lanes" : "log";
+  const lanesFirst = lanes !== "" && (multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0);
+  let first = "log";
+  if (v.roots.length > 0) first = "board";
+  else if (lanesFirst) first = "lanes";
   const skip = new Set(anomalies.map((a) => a.seq));
   const proofs = proofsOf(events, stream, skip);
   const indexOf = new Map(nodes.map((n) => [n.row.key, n.i]));

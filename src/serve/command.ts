@@ -36,52 +36,38 @@ export const subtaskName = (v: string | null | undefined): string | undefined =>
 };
 
 const PLAIN = /^[\w.:/@+-]+$/;
+const BACKSLASH = "\\";
+// inside double quotes, a backslash and a quote are written with a backslash before them
+const escaped = (s: string) => s.replaceAll(BACKSLASH, BACKSLASH + BACKSLASH).replaceAll('"', BACKSLASH + '"');
 // A word as the command shows it: bare when it can be, else in double quotes.
-export const quote = (s: string) => (PLAIN.test(s) ? s : `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+export const quote = (s: string) => (PLAIN.test(s) ? s : '"' + escaped(s) + '"');
 // key="value", always quoted, so an empty value reads as one to fill in
-const pair = (key: string, value: string) => `${key}="${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+const pair = (key: string, value: string) => key + '="' + escaped(value) + '"';
 
 // The command a decision opens with: complete for a verb with no field, with empty quotes
 // where a value is yours to fill in. A subtask found while working on its parent (the parent
 // is under way) says so; remove it for planned work.
 export function commandFor(type: string, id: string, event: string, found = false): string {
   const verb = PAGE_VERBS[event];
-  if (verb?.creates) return `tira create ${quote(type)} "" --parent ${quote(id)}${found ? ` kind=discovered discovered_during=${quote(id)}` : ""}`;
+  if (verb?.creates) {
+    const foundWork = found ? " kind=discovered discovered_during=" + quote(id) : "";
+    return `tira create ${quote(type)} "" --parent ${quote(id)}` + foundWork;
+  }
   // a block opens on a new ticket for what it waits on, created under the blocked task
-  if (event === "BLOCK") return `${commandFor(type, id, "ADD_SUBTASK", true)}\ntira send ${quote(type)} ${quote(id)} BLOCK blocker="" reason=""`;
-  return `tira send ${quote(type)} ${quote(id)} ${quote(event)}${verb?.field ? " " + pair(verb.field.name, "") : ""}`;
+  if (event === "BLOCK") return commandFor(type, id, "ADD_SUBTASK", true) + `\ntira send ${quote(type)} ${quote(id)} BLOCK blocker="" reason=""`;
+  const toFill = verb?.field ? " " + pair(verb.field.name, "") : "";
+  return `tira send ${quote(type)} ${quote(id)} ${quote(event)}` + toFill;
 }
 
 // Words, as a shell splits them: spaces separate; "…" keeps spaces (\" and \\ inside); '…' is literal.
+// A word is a run of plain characters and quoted parts; each alternative starts differently, so
+// matching is linear. Anything left over is a quote that never closes.
+const WORD = /(?:[^\s"']|"(?:[^"\\]|\\.)*"|'[^']*')+/g;
+const PART = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^"']+)/g;
+const unquote = (_m: string, dq?: string, sq?: string, plain?: string) => (dq === undefined ? sq ?? plain ?? "" : dq.replaceAll(/\\(.)/g, "$1"));
 export function words(text: string): string[] | { why: string } {
-  const out: string[] = [];
-  let cur = "";
-  let started = false;
-  let quoteChar: string | undefined;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i] as string;
-    if (quoteChar === '"') {
-      if (c === "\\" && i + 1 < text.length) cur += text[++i];
-      else if (c === '"') quoteChar = undefined;
-      else cur += c;
-    } else if (quoteChar === "'") {
-      if (c === "'") quoteChar = undefined;
-      else cur += c;
-    } else if (/\s/.test(c)) {
-      if (started) out.push(cur);
-      cur = "";
-      started = false;
-    } else if (c === '"' || c === "'") {
-      quoteChar = c;
-      started = true;
-    } else {
-      cur += c;
-      started = true;
-    }
-  }
-  if (quoteChar !== undefined) return { why: "a quote is never closed" };
-  if (started) out.push(cur);
-  return out;
+  if (text.replaceAll(WORD, "").trim() !== "") return { why: "a quote is never closed" };
+  return (text.match(WORD) ?? []).map((w) => w.replaceAll(PART, unquote));
 }
 
 // `ticket`: the new blocker ticket a block's line above creates, written first.
@@ -97,7 +83,7 @@ function pairsOf(rest: string[], allowed: string[], what: string): Record<string
     const eq = w.indexOf("=");
     if (eq <= 0) return { why: `expected key="value", got ${quote(w)}` };
     const key = w.slice(0, eq);
-    if (!allowed.includes(key)) return { why: `${what} takes ${allowed.map((k) => `${k}="…"`).join(" and ")}, not ${key}` };
+    if (!allowed.includes(key)) return { why: `${what} takes ${allowed.map((k) => k + '="…"').join(" and ")}, not ${key}` };
     if (key in out) return { why: `${key} is given twice` };
     out[key] = w.slice(eq + 1);
   }
@@ -127,37 +113,46 @@ function parseLine(text: string, isTreeType: (type: string) => boolean): Parsed 
   const w = words(text);
   if (!Array.isArray(w)) return no(w.why);
   if (w[0] !== "tira") return no('start with "tira": tira send … or tira create …');
-  if (w[1] === "send") {
-    const [, , type, id, event, ...rest] = w;
-    if (type === undefined || id === undefined || event === undefined) return no('write it as: tira send node <task> <EVENT>, then any key="value"');
-    const verb = PAGE_VERBS[event];
-    if (!verb || verb.creates) return no(`the page sends ${SENDS.join(", ")}, not ${event}`);
-    if (!isTreeType(type)) return no(`the page acts on tasks (node), not ${type}`);
-    if (id.trim() === "") return no("name the task");
-    const kv = pairsOf(rest, [...(verb.field ? [verb.field.name] : []), ...(verb.extra ?? []), "note"], event);
-    if ("why" in kv) return no(kv.why as string);
-    const { note, blocker, ...fields } = kv;
-    if (blocker !== undefined && blocker.trim() === id.trim()) return no(`${id} can't be blocked by itself`);
-    return { ok: true, action: { type, id, event, payload: { ...fields, ...(blocker?.trim() ? { blocker: blocker.trim() } : {}), ...(note?.trim() ? { note } : {}) } } };
-  }
-  if (w[1] === "create") {
-    const [, , type, name, ...rest] = w;
-    if (type === undefined || name === undefined) return no('write it as: tira create node "<name>" --parent <task>');
-    if (!isTreeType(type)) return no(`the page acts on tasks (node), not ${type}`);
-    const at = rest.indexOf("--parent");
-    const parent = at < 0 ? undefined : rest[at + 1];
-    if (parent === undefined || parent.trim() === "") return no("say where it goes: --parent <task>");
-    const others = rest.filter((_, i) => i !== at && i !== at + 1);
-    const kv = pairsOf(others, ["kind", "discovered_during", "note"], "Add subtask");
-    if ("why" in kv) return no(kv.why as string);
-    const child = subtaskName(name);
-    if (child === undefined) return no('give the new subtask a name: tira create node "<name>" (1 to 80 characters)');
-    const found = kv.kind !== undefined || kv.discovered_during !== undefined;
-    if (found && (kv.kind !== "discovered" || kv.discovered_during !== parent)) return no(`found work is marked kind=discovered discovered_during=${quote(parent)} (the task it was found under)`);
-    const note = kv.note?.trim() ? { note: kv.note } : {};
-    return { ok: true, action: { type, id: parent, event: "ADD_SUBTASK", child, payload: { parent_id: parent, ...(found ? { kind: "discovered", discovered_during: parent } : {}), ...note } } };
-  }
+  if (w[1] === "send") return parseSend(w, isTreeType);
+  if (w[1] === "create") return parseCreate(w, isTreeType);
   return no('the page runs tira send … or tira create …');
+}
+
+// an optional value, kept only when it has text
+const given = (key: string, value: string | undefined) => (value?.trim() ? { [key]: value } : {});
+
+// tira send <type> <id> <EVENT> [key="value" ...]
+function parseSend(w: string[], isTreeType: (type: string) => boolean): Parsed {
+  const [, , type, id, event, ...rest] = w;
+  if (type === undefined || id === undefined || event === undefined) return no('write it as: tira send node <task> <EVENT>, then any key="value"');
+  const verb = PAGE_VERBS[event];
+  if (!verb || verb.creates) return no(`the page sends ${SENDS.join(", ")}, not ${event}`);
+  if (!isTreeType(type)) return no(`the page acts on tasks (node), not ${type}`);
+  if (id.trim() === "") return no("name the task");
+  const keys = [...(verb.field ? [verb.field.name] : []), ...(verb.extra ?? []), "note"];
+  const kv = pairsOf(rest, keys, event);
+  if ("why" in kv) return no(kv.why as string);
+  const { note, blocker, ...fields } = kv;
+  if (blocker?.trim() === id.trim()) return no(`${id} can't be blocked by itself`);
+  return { ok: true, action: { type, id, event, payload: { ...fields, ...given("blocker", blocker?.trim()), ...given("note", note) } } };
+}
+
+// tira create <type> <name> --parent <id> [kind=discovered discovered_during=<id>] [note="…"]
+function parseCreate(w: string[], isTreeType: (type: string) => boolean): Parsed {
+  const [, , type, name, ...rest] = w;
+  if (type === undefined || name === undefined) return no('write it as: tira create node "<name>" --parent <task>');
+  if (!isTreeType(type)) return no(`the page acts on tasks (node), not ${type}`);
+  const at = rest.indexOf("--parent");
+  const parent = at < 0 ? undefined : rest[at + 1];
+  if (parent === undefined || parent.trim() === "") return no("say where it goes: --parent <task>");
+  const kv = pairsOf(rest.filter((_, i) => i !== at && i !== at + 1), ["kind", "discovered_during", "note"], "Add subtask");
+  if ("why" in kv) return no(kv.why as string);
+  const child = subtaskName(name);
+  if (child === undefined) return no('give the new subtask a name: tira create node "<name>" (1 to 80 characters)');
+  const found = kv.kind !== undefined || kv.discovered_during !== undefined;
+  if (found && (kv.kind !== "discovered" || kv.discovered_during !== parent)) return no(`found work is marked kind=discovered discovered_during=${quote(parent)} (the task it was found under)`);
+  const discovered = found ? { kind: "discovered", discovered_during: parent } : {};
+  return { ok: true, action: { type, id: parent, event: "ADD_SUBTASK", child, payload: { parent_id: parent, ...discovered, ...given("note", kv.note) } } };
 }
 
 // A value the verb needs and the command left empty: said before anything is written. A

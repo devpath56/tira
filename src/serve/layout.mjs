@@ -52,21 +52,39 @@ export const STACK = { dx: 20, top: 24, pitch: 72, spine: 64, compact: 40, few: 
  */
 export function layout(nodes, folded = new Set()) {
   const { kids, roots } = kidsOf(nodes);
-  const half = G.node / 2;
   const shownKids = (k) => (folded.has(k) ? [] : kids.get(k) ?? []);
-  // what shows: every task not under a fold
-  const shown = new Set();
-  for (const n of nodes) if (n.parent === undefined || !kids.has(n.parent) || (shown.has(n.parent) && !folded.has(n.parent))) shown.add(n.key);
+  const shown = shownOf(nodes, kids, folded);
   const compact = shown.size > STACK.compact;
-  // a column's tasks, depth first, each [key, x and y from the column's parent]
-  const hang = (k, dx, y, out) => {
-    for (const c of shownKids(k)) {
-      out.push([c, dx + STACK.dx, y]);
-      y = hang(c, dx + STACK.dx, y + STACK.pitch, out);
-    }
-    return y;
-  };
-  // children before parents: every branch's height, size, outline and children's offsets
+  const { shapes, rel, columns } = outlines(nodes, shownKids, compact);
+  const top = pack(roots, shapes);
+  roots.forEach((k, i) => rel.set(k, top.offs[i]));
+  return framed(place(nodes, shown, rel, columns));
+}
+
+// what shows: every task not under a fold
+function shownOf(nodes, kids, folded) {
+  const shown = new Set();
+  for (const n of nodes) {
+    if (n.parent === undefined || !kids.has(n.parent) || (shown.has(n.parent) && !folded.has(n.parent))) shown.add(n.key);
+  }
+  return shown;
+}
+
+// a column's tasks, depth first, each [key, x and y from the column's parent]; returns the next y
+function hang(shownKids, k, dx, y, out) {
+  for (const c of shownKids(k)) {
+    out.push([c, dx + STACK.dx, y]);
+    y = hang(shownKids, c, dx + STACK.dx, y + STACK.pitch, out);
+  }
+  return y;
+}
+
+// does this branch hang as a column? (see STACK)
+const hangs = (compact, h, tasks, kidCount) => (compact ? tasks >= STACK.few && (h === 1 || (h === 2 && tasks <= STACK.most)) : h === 1 && kidCount >= STACK.many);
+
+// children before parents: every branch's height, size, outline and children's offsets
+function outlines(nodes, shownKids, compact) {
+  const half = G.node / 2;
   const height = new Map();
   const size = new Map();
   const columns = new Map();
@@ -76,26 +94,28 @@ export function layout(nodes, folded = new Set()) {
     const ks = shownKids(n.key);
     height.set(n.key, ks.length === 0 ? 0 : 1 + Math.max(...ks.map((k) => height.get(k) ?? 0)));
     size.set(n.key, ks.reduce((t, k) => t + 1 + (size.get(k) ?? 0), 0));
-    if (ks.length === 0) { shapes.set(n.key, { left: [-half], right: [half] }); continue; }
-    const h = height.get(n.key) ?? 0;
-    const tasks = size.get(n.key) ?? 0;
-    if (compact ? tasks >= STACK.few && (h === 1 || (h === 2 && tasks <= STACK.most)) : h === 1 && ks.length >= STACK.many) {
+    if (ks.length === 0) {
+      shapes.set(n.key, { left: [-half], right: [half] });
+    } else if (hangs(compact, height.get(n.key) ?? 0, size.get(n.key) ?? 0, ks.length)) {
+      // a column under the parent, the bracket's spine to its left: it covers every row it reaches
       const col = [];
-      const end = hang(n.key, 0, G.box + STACK.top, col);
+      const end = hang(shownKids, n.key, 0, G.box + STACK.top, col);
       columns.set(n.key, col);
       const rows = Math.floor((end - STACK.pitch + G.box - 1) / G.level); // every row the column reaches
       const right = Math.max(...col.map(([, dx]) => dx)) + half;
-      shapes.set(n.key, { left: [-half, ...Array(rows).fill(-STACK.spine - 2)], right: [half, ...Array(rows).fill(right)] });
-      continue;
+      shapes.set(n.key, { left: [-half, ...new Array(rows).fill(-STACK.spine - 2)], right: [half, ...new Array(rows).fill(right)] });
+    } else {
+      const p = pack(ks, shapes);
+      const centre = (p.offs[0] + p.offs.at(-1)) / 2;
+      ks.forEach((k, i) => rel.set(k, p.offs[i] - centre));
+      shapes.set(n.key, { left: [-half, ...p.left.map((v) => v - centre)], right: [half, ...p.right.map((v) => v - centre)] });
     }
-    const p = pack(ks, shapes);
-    const centre = (p.offs[0] + p.offs[p.offs.length - 1]) / 2;
-    ks.forEach((k, i) => rel.set(k, p.offs[i] - centre));
-    shapes.set(n.key, { left: [-half, ...p.left.map((v) => v - centre)], right: [half, ...p.right.map((v) => v - centre)] });
   }
-  const top = pack(roots, shapes);
-  roots.forEach((k, i) => rel.set(k, top.offs[i]));
-  // parents before children: absolute places, for the shown nodes only
+  return { shapes, rel, columns };
+}
+
+// parents before children: absolute places, for the shown nodes only
+function place(nodes, shown, rel, columns) {
   const at = new Map();
   for (const n of nodes) {
     if (!shown.has(n.key) || at.has(n.key)) continue; // hidden, or placed in its column
@@ -104,11 +124,21 @@ export function layout(nodes, folded = new Set()) {
     at.set(n.key, p);
     for (const [k, dx, dy] of columns.get(n.key) ?? []) at.set(k, { x: p.x + dx, y: p.y + dy, stack: true });
   }
+  return at;
+}
+
+// shifted so the leftmost node sits at the side margin; the size of the whole
+function framed(at) {
   if (at.size === 0) return { at, width: 0, height: 0 };
+  const half = G.node / 2;
   let min = Infinity;
   let max = -Infinity;
   let low = 0;
-  for (const p of at.values()) { min = Math.min(min, p.x - half); max = Math.max(max, p.x + half); low = Math.max(low, p.y); }
+  for (const p of at.values()) {
+    min = Math.min(min, p.x - half);
+    max = Math.max(max, p.x + half);
+    low = Math.max(low, p.y);
+  }
   const shift = G.side - min;
   for (const p of at.values()) p.x += shift;
   return { at, width: max - min + 2 * G.side, height: low + G.box + G.bottom };
@@ -149,7 +179,7 @@ export function subtree(nodes, key) {
 // The parents whose whole branch is finished: every task under them is closed.
 export function finishedBranches(nodes, isClosed) {
   const { kids } = kidsOf(nodes);
-  return nodes.filter((n) => (kids.get(n.key)?.length ?? 0) > 0 && subtree(nodes, n.key).every(isClosed)).map((n) => n.key);
+  return nodes.filter((n) => (kids.get(n.key)?.length ?? 0) > 0 && subtree(nodes, n.key).every((k) => isClosed(k))).map((n) => n.key);
 }
 
 // ---------- the canvas's view: where the world sits and how big ----------

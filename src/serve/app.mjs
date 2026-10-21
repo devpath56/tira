@@ -134,9 +134,10 @@ async function openConfirm(href) {
   }
 }
 // key="value" in a command: replaced if it's there, else added
-const quoted = (v) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+const BACKSLASH = "\\";
+const quoted = (v) => '"' + v.replaceAll(BACKSLASH, BACKSLASH + BACKSLASH).replaceAll('"', BACKSLASH + '"') + '"';
 function fill(box, key, value) {
-  const re = new RegExp(`(^|\\s)${key}=("(?:[^"\\\\]|\\\\.)*"|\\S*)`);
+  const re = new RegExp(String.raw`(^|\s)${key}=("(?:[^"\\]|\\.)*"|\S*)`);
   box.value = re.test(box.value) ? box.value.replace(re, (_m, pre) => `${pre}${key}=${quoted(value)}`) : `${box.value.trimEnd()} ${key}=${quoted(value)}`;
   box.focus();
 }
@@ -202,7 +203,7 @@ document.addEventListener("click", (e) => {
   const link = e.target instanceof Element ? e.target.closest('a.act[href^="/confirm"]') : null;
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // a new tab still opens the page
   e.preventDefault();
-  openConfirm(link.getAttribute("href"));
+  void openConfirm(link.getAttribute("href")); // it handles its own failure (the confirm page)
 });
 
 // The board's style (Kanban or Graph) is CSS only, like the theme. Live, the choice is

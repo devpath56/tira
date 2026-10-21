@@ -117,11 +117,12 @@ function factsFor(ask: PacketAsk, state: string, region: string, pv: Preview, fo
   const idOf = (k: string) => rows.find((x) => x.key === k)?.id ?? bareKey(k);
   const skip = new Set(r.anomalies.map((a) => a.seq));
   const stretch = attentionSince(events, stream, skip);
-  const since = state === "blocked" ? stretch.blocked.get(key) : state === "in_progress" ? stretch.working.get(key) : undefined;
+  const since = (state === "blocked" ? stretch.blocked : stretch.working).get(key);
   // what it waits on: the blocker ticket the block named, else a reason "waiting on <task>"
   const waiting = state === "blocked" ? /^waiting on (.+)$/.exec(since?.reason?.trim() ?? "")?.[1] : undefined;
   const ticket = state === "blocked" ? since?.blocker : undefined;
-  const waitRow = ticket !== undefined ? rows.find((x) => x.key === ticket) : waiting === undefined ? undefined : rows.find((x) => x.id === waiting);
+  const byTicket = ticket === undefined ? undefined : rows.find((x) => x.key === ticket);
+  const waitRow = byTicket ?? rows.find((x) => waiting !== undefined && x.id === waiting);
   const hit = ask.registry.resolve(type, event);
   const guard = hit?.table.pairs.find((x) => x.from === state && x.event === event)?.guard;
   const rule = guard === undefined ? undefined : hit?.table.guards[guard] ?? guard;
@@ -204,49 +205,73 @@ interface ConfirmOpts { type: string; id: string; event: string; token: string; 
 // The decision: tira recommends (read-only) beside your action (the command, editable), then
 // the button. The same body serves the confirm page and, under `tira serve`, the dialog the
 // live page opens over itself (?fragment=1): there the way out closes the dialog, and the
-// suggested reasons are buttons that fill the command in.
-function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
-  const verb = PAGE_VERBS[opts.event];
-  const leave = (label: string) => (fragment ? `<button class="how" type="button" data-close-confirm>${label}</button>` : `<a class="how" href="/">${label}</a>`);
+// suggested reasons and tasks are buttons that fill the command in.
+function briefHtml(p: Packet): string {
   const b = p.brief;
   const lines: [string, string][] = b ? [["Decision", b.decision], ["Recommendation", b.recommendation], ["Tradeoffs", b.tradeoffs], ["Best practice", b.practice], ["Kind", b.kind]] : [];
   const hint = p.hint ? `<p class="hint" data-hint><b>What to do:</b> ${esc(p.hint)}</p>` : "";
-  const left = `<section class="brief" aria-label="tira recommends (read-only)" data-brief><h2>tira recommends</h2>`
+  return `<section class="brief" aria-label="tira recommends (read-only)" data-brief><h2>tira recommends</h2>`
     + lines.filter(([, t]) => t !== "").map(([k, t]) => `<p><b>${k}:</b> ${esc(t)}</p>`).join("")
     + `<p class="verdict ${p.ok ? "ok" : "no"}">${esc(p.verdict)}</p>${hint}</section>`;
-  const notices = (opts.moved ? `<p class="flash no" role="status" data-moved>The log changed since you opened this, so nothing was written. This is what tira says now.</p>` : "")
-    + (opts.notice ? `<p class="flash no" role="status" data-notice>${esc(opts.notice)}</p>` : "")
-    + (opts.error ? `<p class="flash no" role="alert" data-error>${esc(opts.error)} Nothing was written.</p>` : "");
-  const command = opts.command ?? p.command ?? "";
-  const head = `<div class="packet" data-packet data-ok="${p.ok && verb !== undefined}"><h1>${esc(p.title)}</h1>${notices}`;
+}
+
+// why nothing was written, or what changed since it opened
+function noticesHtml(opts: ConfirmOpts): string {
+  const moved = opts.moved ? `<p class="flash no" role="status" data-moved>The log changed since you opened this, so nothing was written. This is what tira says now.</p>` : "";
+  const notice = opts.notice ? `<p class="flash no" role="status" data-notice>${esc(opts.notice)}</p>` : "";
+  const error = opts.error ? `<p class="flash no" role="alert" data-error>${esc(opts.error)} Nothing was written.</p>` : "";
+  return moved + notice + error;
+}
+
+const NOTE_HELP = `Any command can take note="…": the history keeps it. The same command runs in a terminal.`;
+function helpText(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  if (!p.ok) return "tira would refuse this as it stands: edit it (another task or verb) and check again, or close.";
+  if (opts.event === "BLOCK" && fragment) return `Name what it waits on: a new ticket is created under ${opts.id} and linked as blocking it, or pick an open task. The command updates as you type and runs exactly as written.`;
+  if (opts.event === "BLOCK") return `Name the new ticket on line 1 and as blocker= on line 2 (the reason defaults to "waiting on" it). To wait on an open task instead, delete line 1 and set blocker= to it.`;
+  return (PAGE_VERBS[opts.event]?.field ? "Fill in the empty quotes. " : "Ready to run as it is. ") + NOTE_HELP;
+}
+
+// values the command can be filled with: buttons live, a plain list on the confirm page
+function choicesHtml(values: string[], fragment: boolean, caption: string, plainCaption: string, attrs: (v: string) => string): string {
+  if (values.length === 0) return "";
+  if (!fragment) return `<p class="cmd-help">${plainCaption}: ${values.map(esc).join(" · ")}</p>`;
+  const buttons = values.map((v) => `<button type="button" class="fill" ${attrs(v)}>${esc(v)}</button>`).join("");
+  return `<div class="fills" data-fills><span>${caption}</span>${buttons}</div>`;
+}
+
+// to block: what it waits on, a new ticket by name or an open task
+function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  if (opts.event !== "BLOCK" || !p.ok) return "";
+  const open = (p.waitables ?? []).slice(0, 12);
+  const tasks = choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (v) => `data-fill-blocker="${esc(v)}"`);
+  if (!fragment) return tasks;
+  return `<label class="blocked-by" data-blocked-by="${esc(opts.id)}" data-type="${esc(opts.type)}"><span>Blocked by</span><input type="text" placeholder="a new ticket, e.g. design_tokens" autocomplete="off" spellcheck="false" aria-label="Blocked by: name a new ticket, or pick an open task"></label>` + tasks;
+}
+
+function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  if (!p.ok) return "";
+  const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`);
+  const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
+    ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
+    : "";
+  return reasons + found;
+}
+
+function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  const verb = PAGE_VERBS[opts.event];
+  const leave = (label: string) => (fragment ? `<button class="how" type="button" data-close-confirm>${label}</button>` : `<a class="how" href="/">${label}</a>`);
+  const close = leave(fragment ? "Close" : "Back to the page");
+  const head = `<div class="packet" data-packet data-ok="${p.ok && verb !== undefined}"><h1>${esc(p.title)}</h1>${noticesHtml(opts)}`;
   // no such verb or task: nothing to edit from
-  if (!verb || p.brief === undefined) return `${head}<div class="split">${left}</div><div class="run">${leave(fragment ? "Close" : "Back to the page")}</div></div>`;
-  const blockHelp = fragment
-    ? `Name what it waits on: a new ticket is created under ${opts.id} and linked as blocking it, or pick an open task. The command updates as you type and runs exactly as written.`
-    : `Name the new ticket on line 1 and as blocker= on line 2 (the reason defaults to "waiting on" it). To wait on an open task instead, delete line 1 and set blocker= to it.`;
-  const help = !p.ok
-    ? "tira would refuse this as it stands: edit it (another task or verb) and check again, or close."
-    : opts.event === "BLOCK" ? blockHelp
-    : verb.field
-      ? `Fill in the empty quotes. Any command can take note="…": the history keeps it. The same command runs in a terminal.`
-      : `Ready to run as it is. Any command can take note="…": the history keeps it. The same command runs in a terminal.`;
-  const used = p.suggestions;
-  const fills = used.length === 0 ? "" : fragment
-    ? `<div class="fills" data-fills><span>Used before:</span>${used.map((v) => `<button type="button" class="fill" data-fill="reason" data-value="${esc(v)}">${esc(v)}</button>`).join("")}</div>`
-    : `<p class="cmd-help">Reasons used before: ${used.map(esc).join(" · ")}</p>`;
-  const open = p.waitables ?? [];
-  const blockedBy = opts.event !== "BLOCK" || !p.ok ? "" : fragment
-    ? `<label class="blocked-by" data-blocked-by="${esc(opts.id)}" data-type="${esc(opts.type)}"><span>Blocked by</span><input type="text" placeholder="a new ticket, e.g. design_tokens" autocomplete="off" spellcheck="false" aria-label="Blocked by: name a new ticket, or pick an open task"></label>`
-      + (open.length === 0 ? "" : `<div class="fills" data-fills><span>Or an open task:</span>${open.slice(0, 12).map((t) => `<button type="button" class="fill" data-fill-blocker="${esc(t)}">${esc(t)}</button>`).join("")}</div>`)
-    : open.length === 0 ? "" : `<p class="cmd-help">Open tasks it could wait on: ${open.slice(0, 12).map(esc).join(" · ")}</p>`;
-  const foundFill = verb.creates && !p.found && fragment ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>` : "";
+  if (!verb || p.brief === undefined) return `${head}<div class="split">${briefHtml(p)}</div><div class="run">${close}</div></div>`;
+  const command = opts.command ?? p.command ?? "";
   const hidden = [["token", opts.token], ["type", opts.type], ["id", opts.id], ["event", opts.event], ["seen", String(p.seen)]]
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v as string)}">`).join("");
   const right = `<section class="your-action" aria-label="Your action, edit before sending"><h2>Your action — edit before sending</h2>`
-    + blockedBy + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
-    + `<p class="cmd-help">${esc(help)}</p>${p.ok ? fills + foundFill : ""}</section>`;
-  const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)} — run it</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${leave(fragment ? "Close" : "Back to the page")}`;
-  return `${head}<form method="post" action="/act" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${left}${right}</div>`
+    + blockedByHtml(p, opts, fragment) + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
+    + `<p class="cmd-help">${esc(helpText(p, opts, fragment))}</p>${fillsHtml(p, opts, fragment)}</section>`;
+  const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)} — run it</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
+  return `${head}<form method="post" action="/act" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${briefHtml(p)}${right}</div>`
     + `<div class="run">${button}</div></form></div>`;
 }
 
@@ -394,76 +419,105 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     await decide(res, at, { moved: url.searchParams.get("moved") === "1" }, url.searchParams.get("fragment") === "1");
   };
 
-  // POST /act: checks, then the write, then back to the page with its result. The dialog's
-  // own posts (fragment=1) get the decision back to show in place, or where to go next.
-  const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+  // POST /act, in stages: the form (from this page only), what it asks for, what stops it
+  // before anything is written, then the write and back to the page with its result. The
+  // dialog's own posts (fragment=1) get the decision back to show in place, or where to go next.
+  interface Target { type: string; id: string; event: string }
+  interface Asked { fragment: boolean; typed: string | null; seen: string | null; ask: PageAction; ticket: PageAction | undefined; target: Target }
+  const targetOf = (a: PageAction): Target => ({ type: a.type, id: a.id, event: a.event });
+
+  // the same origin, within the size cap, with this process's token
+  const formOf = async (req: IncomingMessage, res: ServerResponse, host: string): Promise<URLSearchParams | undefined> => {
     const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `http://${host}`) return send(res, 403, text, "cross-origin writes are refused\n");
+    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
     let form: URLSearchParams;
-    try { form = new URLSearchParams(await readBody(req)); } catch { return send(res, 413, text, "too large\n"); }
-    if (!safeEqual(form.get("token") ?? "", token)) return send(res, 403, text, "missing or wrong token\n");
+    try {
+      form = new URLSearchParams(await readBody(req));
+    } catch {
+      send(res, 413, text, "too large\n");
+      return undefined;
+    }
+    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "missing or wrong token\n"); return undefined; }
+    return form;
+  };
+
+  // what it asks for: the command as you left it, read strictly; without one, the posted fields
+  const askedOf = async (res: ServerResponse, form: URLSearchParams): Promise<Asked | undefined> => {
     const fragment = form.get("fragment") === "1";
-    const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
-    // the command as you left it, read strictly; without one, the posted fields
+    const seen = form.get("seen");
     const typed = form.get("command");
-    let ask: PageAction | undefined;
-    let ticket: PageAction | undefined; // a new blocker ticket, created before the block
-    if (typed === null) ask = actionFrom(form, opts.registry);
-    else {
-      const parsed = parseCommand(typed, (t) => opts.registry.get(t)?.tree !== undefined);
-      if (!parsed.ok) return decide(res, opened, { command: typed, error: `tira can't run that: ${parsed.why}.` }, fragment, 422);
-      ask = parsed.action;
-      ticket = parsed.ticket;
+    if (typed === null) {
+      const ask = actionFrom(form, opts.registry);
+      if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, or add a subtask with a name\n"); return undefined; }
+      return { fragment, typed, seen, ask, ticket: undefined, target: targetOf(ask) };
     }
-    if (!ask) return send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, or add a subtask with a name\n");
-    const target = { type: ask.type, id: ask.id, event: ask.event };
+    const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
+    const parsed = parseCommand(typed, (t) => opts.registry.get(t)?.tree !== undefined);
+    if (!parsed.ok) { await decide(res, opened, { command: typed, error: `tira can't run that: ${parsed.why}.` }, fragment, 422); return undefined; }
+    const target = targetOf(parsed.action);
     // edited into another action (another task or verb): what tira says about that one first
-    if (typed !== null && (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event)) {
-      return decide(res, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment);
+    if (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event) {
+      { await decide(res, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment); return undefined; }
     }
-    const lacking = missing(ask);
-    if (lacking !== undefined) return typed === null ? send(res, 400, text, `${lacking}\n`) : decide(res, target, { command: typed, error: lacking }, fragment, 422);
-    const blocker = blockerOf(ask);
-    if (typed !== null && blocker !== undefined && ticket === undefined) {
-      const problem = blockerProblem((await now()).r, opts.stream, ask, blocker);
-      if (problem) return decide(res, target, { command: typed, error: `tira can't run that: ${problem}.` }, fragment, 422);
-    }
-    ask = withDefaults(ask);
+    return { fragment, typed, seen, ask: withDefaults(parsed.action), ticket: parsed.ticket, target };
+  };
+
+  // what stops it before anything is written (true: it answered): a value missing, a blocker
+  // that can't be, a moved log, or, for a typed command, tira's refusal of the ticket or the move
+  const heldBack = async (res: ServerResponse, a: Asked, cmd: Command, first: Command | undefined): Promise<boolean> => {
+    const back = async (o: Partial<ConfirmOpts>, status?: number) => { await decide(res, a.target, { command: a.typed ?? "", ...o }, a.fragment, status); return true; };
+    const lacking = missing(a.ask);
+    if (lacking !== undefined && a.typed === null) { send(res, 400, text, `${lacking}\n`); return true; }
+    if (lacking !== undefined) return back({ error: lacking }, 422);
+    const blocker = blockerOf(a.ask);
+    const problem = a.typed === null || blocker === undefined || a.ticket !== undefined ? undefined : blockerProblem((await now()).r, opts.stream, a.ask, blocker);
+    if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
     // decided on one log, written on another? show the decision again instead
     // (a post without `seen` didn't come from a decision: it gets one first)
-    const seen = form.get("seen");
-    if (seen !== String((await now()).r.lastSeq)) {
-      if (typed !== null) return decide(res, target, { command: typed, moved: seen !== null }, fragment, 409);
-      const again = `/confirm?type=${encodeURIComponent(ask.type)}&id=${encodeURIComponent(ask.id)}&event=${encodeURIComponent(ask.event)}`;
-      return send(res, 303, text, "", { Location: seen === null ? again : again + "&moved=1" });
+    if (a.seen !== String((await now()).r.lastSeq)) {
+      if (a.typed !== null) return back({ moved: a.seen !== null }, 409);
+      const again = `/confirm?type=${encodeURIComponent(a.ask.type)}&id=${encodeURIComponent(a.ask.id)}&event=${encodeURIComponent(a.ask.event)}`;
+      send(res, 303, text, "", { Location: a.seen === null ? again : again + "&moved=1" });
+      return true;
     }
-    const cmd = commandOf(ask, opts.stream, opts.actor);
-    const first = ticket === undefined ? undefined : commandOf(ticket, opts.stream, opts.actor);
+    if (a.typed === null) return false;
     // a typed command tira would refuse goes back into the dialog, not into the log; a new
     // ticket and its block are both checked before either is written
-    if (typed !== null) {
-      for (const c of first === undefined ? [cmd] : [first, cmd]) {
-        const pv = await previews.preview(c);
-        if (!pv.ok) return decide(res, target, { command: typed, error: `tira would still refuse ${c === first ? `the new ticket ${ticket?.child}` : "this"}: ${pv.code}: ${pv.detail}.` }, fragment, 409);
-      }
+    for (const c of first === undefined ? [cmd] : [first, cmd]) {
+      const pv = await previews.preview(c);
+      const what = c === first ? "the new ticket " + (a.ticket?.child ?? "") : "this";
+      if (!pv.ok) return back({ error: `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.` }, 409);
     }
-    const label = (a: PageAction) => (a.child === undefined ? a.id : `${a.child} under ${a.id}`);
-    const write = async (a: PageAction, c: Command) => {
-      try {
-        return flashFor(a.event, label(a), (await dispatcher.submit(c)).result);
-      } catch (err) {
-        return { ok: false, text: `${PAGE_VERBS[a.event]?.label ?? a.event} ${label(a)}: not sent (${(err as Error).message}).` };
-      }
-    };
-    const main = ask;
+    return false;
+  };
+
+  const label = (a: PageAction) => (a.child === undefined ? a.id : a.child + " under " + a.id);
+  const write = async (a: PageAction, c: Command) => {
+    try {
+      return flashFor(a.event, label(a), (await dispatcher.submit(c)).result);
+    } catch (err) {
+      return { ok: false, text: `${PAGE_VERBS[a.event]?.label ?? a.event} ${label(a)}: not sent (${(err as Error).message}).` };
+    }
+  };
+
+  const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const a = await askedOf(res, form);
+    if (a === undefined) return;
+    const ask = a.ask;
+    const ticket = a.ticket;
+    const cmd = commandOf(ask, opts.stream, opts.actor);
+    const first = ticket === undefined ? undefined : commandOf(ticket, opts.stream, opts.actor);
+    if (await heldBack(res, a, cmd, first)) return;
     const flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
-      () => write(main, cmd),
+      () => write(ask, cmd),
     ]);
     const key = String(++flashSeq);
     flashes.set(key, flash);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
-    if (fragment) return send(res, 200, html, `<div data-go="/?r=${key}"></div>`);
+    if (a.fragment) return send(res, 200, html, `<div data-go="/?r=${key}"></div>`);
     send(res, 303, text, "", { Location: `/?r=${key}` });
   };
 

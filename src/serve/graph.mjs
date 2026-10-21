@@ -141,8 +141,15 @@ function canvas(wrap) {
   function foldDone() {
     const closed = (k) => ["done", "cancelled"].includes(byKey.get(k)?.el.dataset.state ?? "");
     const done = new Set(finishedBranches(nodes, closed));
-    const outer = (k) => { for (let up = byKey.get(k)?.parent; up !== undefined; up = byKey.get(up)?.parent) if (done.has(up)) return false; return true; };
-    for (const k of done) if (outer(k)) folded.add(k);
+    const outer = (k) => {
+      for (let up = byKey.get(k)?.parent; up !== undefined; up = byKey.get(up)?.parent) {
+        if (done.has(up)) return false;
+      }
+      return true;
+    };
+    for (const k of done) {
+      if (outer(k)) folded.add(k);
+    }
     saveFolds();
     draw();
   }
@@ -290,7 +297,7 @@ function canvas(wrap) {
   wrap.addEventListener("dragstart", (e) => e.preventDefault()); // links would drag their address
   wrap.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? wrap.clientHeight : 1;
+    const unit = [1, 16, wrap.clientHeight][e.deltaMode] ?? 1; // pixels, lines, pages
     if (e.ctrlKey || e.metaKey) {
       const dy = Math.max(-60, Math.min(60, e.deltaY * unit)); // a pinch sends small steps, a wheel big ones
       setView(zoomAt(view, Math.exp(-dy * 0.01), ...local(e)));
