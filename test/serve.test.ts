@@ -2,6 +2,7 @@
 // palette's ranking. Requests go over real HTTP to a server on 127.0.0.1:0.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
@@ -9,7 +10,7 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
-import { CSP, taskIndex, tiraServer } from "../src/serve/server.ts";
+import { CSP, hintFor, inOrder, taskIndex, tiraServer } from "../src/serve/server.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
 import { rank, score } from "../src/serve/rank.mjs";
 
@@ -85,12 +86,24 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.equal(app.status, 200);
     assert.match(String(app.headers["content-type"]), /^text\/javascript/);
     assert.match(app.body, /from "\.\/rank\.mjs"/);
+    // live, Esc closes an open task dialog (unless the palette took it), and focus follows the dialog
+    assert.match(app.body, /e\.key === "Escape" && !e\.defaultPrevented && root\.hidden && !confirmBox\.open && openDialog\(\)\) \{ location\.hash = "_";/);
+    assert.match(app.body, /dialog\.querySelector\("\.close"\)\?\.focus\(\)/);
     assert.equal((await s.http("GET", "/rank.mjs")).status, 200);
     // the theme choice, remembered per browser: app.mjs loads it on the page
     assert.match(app.body, /import "\.\/theme\.mjs";/);
     const theme = await s.http("GET", "/theme.mjs");
     assert.equal(theme.status, 200);
     assert.match(theme.body, /localStorage\.setItem\(KEY, r\.dataset\.themeChoice\)/);
+    // the graph's canvas (pan, zoom, folds), on the same layout code the page was rendered with
+    assert.match(app.body, /import "\.\/graph\.mjs";/);
+    const graph = await s.http("GET", "/graph.mjs");
+    assert.equal(graph.status, 200);
+    assert.match(graph.body, /from "\.\/layout\.mjs";/);
+    const layout = await s.http("GET", "/layout.mjs");
+    assert.equal(layout.status, 200);
+    assert.match(String(layout.headers["content-type"]), /^text\/javascript/);
+    assert.equal(layout.body, readFileSync(new URL("../src/serve/layout.mjs", import.meta.url), "utf8"));
     assert.equal((await s.http("GET", "/nope")).status, 404);
   } finally {
     await s.done();
@@ -114,13 +127,13 @@ test("the palette's index lists every task in drawer order, with its path", asyn
     assert.deepEqual(tasks.map((t) => t.id), ["dashboard", "metrics_card", "fetch_metrics", "improve_visual", "colors", "loading_state", "font", "table", "filters"]);
     assert.deepEqual(tasks.find((t) => t.id === "colors"), { key: "node:colors", type: "node", id: "colors", state: "blocked", path: "dashboard › metrics_card › improve_visual", drawer: "t4" });
     const page = (await s.http("GET", "/")).body;
-    for (const t of tasks) assert.ok(page.includes(`<section class="drawer" id="${t.drawer}" aria-label="${t.id}">`), t.id);
+    for (const t of tasks) assert.ok(page.includes(`<section class="drawer" id="${t.drawer}" aria-label="${t.id}" role="dialog" aria-modal="true">`), t.id);
   } finally {
     await s.done();
   }
 });
 
-test("confirm pages say what will happen before anything is written: the move, the rule, the record, tira's next close, or the refusal", async () => {
+test("every decision has two views: the work in a nutshell with tira's recommendation, and the command it will run, filled in", async () => {
   const s = await serving();
   try {
     const before = (await s.store.readStream(S)).length;
@@ -128,18 +141,29 @@ test("confirm pages say what will happen before anything is written: the move, t
     assert.equal(unblock.status, 409); // loading_state is in progress: one active task at a time
     assert.match(unblock.body, /data-ok="false"/);
     assert.match(unblock.body, /tira would refuse this: gate: one active task: node:loading_state is already active\./);
-    assert.match(unblock.body, /Blocked because: waiting on the design-token decision/);
+    assert.match(unblock.body, /<section class="brief" aria-label="tira recommends \(read-only\)" data-brief><h2>tira recommends<\/h2><p><b>Decision:<\/b> colors is blocked under improve_visual since seq 10: &#34;waiting on the design-token decision&#34;\. Recorded as isha\.<\/p><p><b>Recommendation:<\/b> Don&#39;t run it: tira will refuse \(gate: /);
+    assert.match(unblock.body, /<p><b>Kind:<\/b> refused by the rules\.<\/p>/);
+    // refused: the command shows, read-only, with nothing to run
+    assert.match(unblock.body, /data-command>tira send node colors UNBLOCK<\/textarea><p class="cmd-help">tira would refuse this as it stands: edit it \(another task or verb\) and check again, or close\./);
+    // still editable (into another task or verb), checked again before anything runs
+    assert.match(unblock.body, /<button class="act" type="submit">Check again<\/button>/);
+    assert.doesNotMatch(unblock.body, /— run it/);
+    // a refusal says what to do instead
+    assert.match(unblock.body, /<p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p>/);
     // the same theme switch as the page, and the script that remembers the choice
-    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet"[^]*?data-theme-switch[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/);
+    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?data-theme-switch[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/);
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(complete.status, 200);
-    assert.match(complete.body, /<li>loading_state: in progress → done<\/li>/);
-    assert.match(complete.body, /<li>The rule: event\.evidenceRef is a non-empty string\.<\/li>/);
-    assert.match(complete.body, /<li>Recorded as isha, in tasktree-dash\.<\/li>/);
+    assert.match(complete.body, /<p><b>Decision:<\/b> loading_state is in progress under improve_visual since seq 11\. Completing it moves it in progress → done\. Recorded as isha\.<\/p>/);
+    assert.match(complete.body, /<p><b>Recommendation:<\/b> Complete it with proof anyone can re-check\.<\/p>/); // colors and font are still open
+    assert.match(complete.body, /<p><b>Kind:<\/b> a finish \(needs proof\)\. The rule: event\.evidenceRef is a non-empty string\.<\/p>/);
+    for (const k of ["Tradeoffs", "Best practice"]) assert.match(complete.body, new RegExp(`<p><b>${k}:</b> [^<]+</p>`), k);
     assert.match(complete.body, /<input type="hidden" name="seen" value="11">/);
     assert.match(complete.body, /tira&#39;s check: allowed\./);
     assert.match(complete.body, /<input type="hidden" name="token" value="t0k3n">/);
-    assert.match(complete.body, /<input name="evidenceRef" aria-label="Evidence \(a file, link or note anyone can re-check\)" required/);
+    // your action: the command, editable, with the proof to fill in, then the button
+    assert.match(complete.body, /<h2>Your action — edit before sending<\/h2><textarea name="command" [^>]*data-command>tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/);
+    assert.match(complete.body, /<button class="act primary" type="submit">Complete — run it<\/button>/);
     // starting fetch_metrics would leave nothing for tira to close yet; after the dashboard's
     // visual branch drains, moving on names the parent tira will close
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" });
@@ -148,13 +172,13 @@ test("confirm pages say what will happen before anything is written: the move, t
     await s.send("colors", "COMPLETE", { evidenceRef: "palette.png" });
     // the block form asks for what the gate checks: a reason with text, not only spaces (2026-10-20)
     const block = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK");
-    assert.match(block.body, /<input name="reason" aria-label="Why is it blocked\?" required pattern="\.\*\\S\.\*" title="Write the reason \(not only spaces\)" autocomplete="off" autofocus>/);
-    assert.match(block.body, /The rule: event\.reason has text \(not only spaces\)\./);
+    assert.match(block.body, /data-command>tira create node &#34;&#34; --parent table kind=discovered discovered_during=table\ntira send node table BLOCK blocker=&#34;&#34; reason=&#34;&#34;<\/textarea>/);
+    assert.match(block.body, /<p><b>Kind:<\/b> a pause \(needs a reason\)\. The rule: event\.reason has text \(not only spaces\)\.<\/p>/);
     const start = await s.http("GET", "/confirm?type=node&id=table&event=START");
-    assert.match(start.body, /<li>tira will first close improve_visual \(every child is done or cancelled\), citing this move\.<\/li>/);
-    assert.match(start.body, /<li>Recorded as isha, in tasktree-dash, after tira&#39;s closes\.<\/li>/);
+    assert.match(start.body, /Starting it moves it to do → in progress\. First, tira closes improve_visual \(every child closed\), citing this move\. Recorded as isha\./);
+    assert.match(start.body, /<p><b>Recommendation:<\/b> Start it only if the order should change: next in order is fetch_metrics\.<\/p>/);
     // unknown verbs and tasks are explained, not offered
-    assert.match((await s.http("GET", "/confirm?type=node&id=table&event=REOPEN")).body, /tira doesn&#39;t take REOPEN from the page\./);
+    assert.match((await s.http("GET", "/confirm?type=node&id=table&event=ADD_CHILD")).body, /tira doesn&#39;t take ADD_CHILD from the page\./);
     assert.match((await s.http("GET", "/confirm?type=node&id=ghost&event=START")).body, /There is no task ghost\./);
     assert.match((await s.http("GET", `/confirm?type=node&id=${encodeURIComponent("<b>")}&event=START`)).body, /There is no task &#60;b&#62;\./);
     assert.equal((await s.store.readStream(S)).length, before + 4); // only the four sends above wrote anything
@@ -172,7 +196,8 @@ test("writes need the token and a same-origin request, accept only the page's ve
     assert.equal((await s.form({ token: "wrong!", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" })).status, 403);
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" }, "https://evil.example")).status, 403);
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" }, "null")).status, 403); // an opaque origin
-    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "REOPEN", reason: "x" })).status, 400);
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "ADD_CHILD" })).status, 400); // a table event the page doesn't offer
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "  " })).status, 400); // a subtask needs a name
     assert.equal((await s.form({ token: "t0k3n", type: "brief", id: "b", event: "START" })).status, 400);
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x", actor: "tira" })).status, 303); // a posted actor is ignored
     assert.equal(await count(), n0 + 1);
@@ -190,9 +215,10 @@ test("after an action the page says what happened, a refusal included (and the r
     assert.equal(ok.status, 303);
     const okPage = await s.http("GET", String(ok.headers.location));
     assert.match(okPage.body, /<div class="flash ok" role="status" data-flash>Complete loading_state: done \(seq 12\)\.<\/div>/);
-    const no = await s.form({ token: "t0k3n", type: "node", id: "table", event: "BLOCK", reason: "" });
+    await s.send("filters", "START"); // filters is now the one task in progress
+    const no = await s.form({ token: "t0k3n", type: "node", id: "table", event: "START" }); // posted straight, past the decision
     const noPage = await s.http("GET", String(no.headers.location));
-    assert.match(noPage.body, /<div class="flash no" role="status" data-flash>Block table: refused \(guard-failed: /);
+    assert.match(noPage.body, /<div class="flash no" role="status" data-flash>Start table: refused \(gate: one active task: /);
     assert.equal((await s.store.readStream(S)).at(-1)?.type, "command.rejected");
     // a flash shows once per link, and an unknown one shows nothing
     assert.ok(!(await s.http("GET", "/?r=999")).body.includes("data-flash"));
@@ -215,7 +241,7 @@ test("the confirm page is the write path's own decision: a drained active parent
     await s.send("c1", "COMPLETE", { evidenceRef: "e" });
     const page = await s.http("GET", "/confirm?type=node&id=filters&event=START");
     assert.equal(page.status, 200, page.body.match(/tira would refuse[^<]*/)?.[0]);
-    assert.match(page.body, /tira will first close p, then table \(/); // closing p drains table: the whole chain is named
+    assert.match(page.body, /First, tira closes p, then table \(/); // closing p drains table: the whole chain is named
     const done = await s.form({ token: "t0k3n", type: "node", id: "filters", event: "START" });
     const flash = await s.http("GET", String(done.headers.location));
     assert.match(flash.body, /Start filters: done \(seq \d+\)\. tira closed p, table, citing it\./);
@@ -301,9 +327,254 @@ test("the palette finds every task of the demo in ≤ 3 keystrokes, filters by v
     assert.deepEqual(rank("a", twins).results.map((t: { id: string }) => t.id), ["ab", "ac"]);
     assert.deepEqual(rank("a", [...twins].reverse()).results.map((t: { id: string }) => t.id), ["ac", "ab"]);
     const many = Array.from({ length: 1000 }, (_, i) => ({ key: `node:t${i}`, type: "node", id: `task_${i}_${["ui", "api", "docs"][i % 3]}`, state: "unstarted", path: "app", drawer: `t${i}` }));
-    const t0 = performance.now();
-    for (const q of ["t", "ta", "task_9", "api", "d"]) rank(q, many);
-    assert.ok(performance.now() - t0 < 100, `${(performance.now() - t0).toFixed(1)} ms for 5 queries`);
+    // the best of three: the palette's speed, not whatever else the machine runs (other test files in parallel)
+    const timed = () => {
+      const t0 = performance.now();
+      for (const q of ["t", "ta", "task_9", "api", "d"]) rank(q, many);
+      return performance.now() - t0;
+    };
+    const best = Math.min(timed(), timed(), timed());
+    assert.ok(best < 100, `${best.toFixed(1)} ms for 5 queries`);
+  } finally {
+    await s.done();
+  }
+});
+
+test("a confirm opens as a dialog over the page: ?fragment=1 is just the packet, its way out closes the dialog, and the page's script opens every action in it", async () => {
+  const s = await serving();
+  try {
+    const frag = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1");
+    assert.equal(frag.status, 200);
+    assert.match(frag.body, /^<div class="packet" data-packet data-ok="true"><h1>Block table\?<\/h1>/);
+    assert.doesNotMatch(frag.body, /<html|<nav|<script/); // no page around it
+    assert.match(frag.body, /<button class="act primary" type="submit">Block — run it<\/button> <button class="how" type="button" data-close-confirm>Not now<\/button><\/div><\/form><\/div>$/);
+    assert.equal(frag.headers["content-security-policy"], CSP);
+    const refused = await s.http("GET", "/confirm?type=node&id=colors&event=UNBLOCK&fragment=1");
+    assert.equal(refused.status, 409);
+    assert.match(refused.body, /data-hint[^]*<button class="how" type="button" data-close-confirm>Close<\/button>/);
+    // the full page keeps working for a direct link, and leaves by a link back to the page
+    assert.match((await s.http("GET", "/confirm?type=node&id=table&event=BLOCK")).body, /<a class="how" href="\/">Not now<\/a><\/div><\/form>/);
+    const app = (await s.http("GET", "/app.mjs")).body;
+    assert.match(app, /closest\('a\.act\[href\^="\/confirm"\]'\)/); // every action link, in rows and task dialogs
+    assert.match(app, /e\.preventDefault\(\);\n  void openConfirm\(link\.getAttribute\("href"\)\);/); // stays on the page
+    assert.match(app, /if \(verb\) void openConfirm\(/); // and the palette's verbs
+    assert.match(app, /fetch\(`\$\{href\}&fragment=1`/);
+    assert.match(app, /confirmBox\.showModal\(\)/);
+    assert.match(app, /catch \{\n    location\.href = href;/); // no packet: the confirm page instead
+    // running it posts from the dialog: a decision comes back into it, a result sends the page there
+    assert.match(app, /body\.set\("fragment", "1"\);/);
+    assert.match(app, /if \(go\) location\.href = go;\n    else if \(packet\) show\(packet\);/);
+  } finally {
+    await s.done();
+  }
+});
+
+test("the command you send is read strictly: a value left empty, a stray key or flag, another action, a moved log — nothing written; a good one runs as typed", async () => {
+  const s = await serving();
+  try {
+    const count = async () => (await s.store.readStream(S)).length;
+    const n0 = await count();
+    // as the dialog posts it: what it opened (type, id, event), the seq it saw, and your command
+    const run = (command: string, at: { id: string; event: string } = { id: "loading_state", event: "COMPLETE" }, extra: Record<string, string> = {}) =>
+      s.form({ token: "t0k3n", type: "node", ...at, command, fragment: "1", ...extra });
+    const empty = await run('tira send node loading_state COMPLETE evidenceRef=""');
+    assert.equal(empty.status, 422);
+    assert.match(empty.body, /<p class="flash no" role="alert" data-error>Add the proof of work: evidenceRef=&#34;…&#34; \(a file, link or note anyone can re-check\)\. Nothing was written\.<\/p>/);
+    assert.match(empty.body, /data-command>tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/); // your text, kept
+    const spaces = await run('tira send node table BLOCK reason="   "', { id: "table", event: "BLOCK" });
+    assert.match(spaces.body, /data-error>Add the reason: reason=&#34;…&#34; \(words, not only spaces\)\. Nothing was written\./);
+    for (const [bad, why] of [
+      ['tira send node loading_state COMPLETE evidenceRef="e" actor="tira"', "COMPLETE takes evidenceRef=&#34;…&#34; and note=&#34;…&#34;, not actor"],
+      ["tira send node loading_state COMPLETE --stream other", "the page doesn&#39;t take --stream"],
+      ["curl evil.example", "start with &#34;tira&#34;"],
+      ['tira send node loading_state COMPLETE evidenceRef="e', "a quote is never closed"],
+    ]) {
+      const r = await run(bad as string);
+      assert.equal(r.status, 422, bad);
+      assert.match(r.body, new RegExp(`data-error>tira can&#39;t run that: ${(why as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), bad);
+    }
+    // edited into another task or verb: tira's word on that one first, with your command kept
+    const other = await run('tira send node loading_state BLOCK reason="waiting on QA"');
+    assert.match(other.body, /<h1>Block loading_state\?<\/h1><p class="flash no" role="status" data-notice>That&#39;s a different action from the one you opened, so here is what tira says about it first\. Nothing was written\.<\/p>/);
+    assert.match(other.body, /<input type="hidden" name="id" value="loading_state"><input type="hidden" name="event" value="BLOCK">/);
+    assert.match(other.body, /data-command>tira send node loading_state BLOCK reason=&#34;waiting on QA&#34;<\/textarea>/);
+    // one tira refuses, sent as it stands: refused in the dialog, not written to the log
+    const refused = await run("tira send node table START", { id: "table", event: "START" });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body, /data-error>tira would still refuse this: gate: one active task: node:loading_state is already active\. Nothing was written\./);
+    // the log moved after you opened it: shown again, your command kept
+    const late = await run('tira send node loading_state COMPLETE evidenceRef="e"', undefined, { seen: "3" });
+    assert.equal(late.status, 409);
+    assert.match(late.body, /data-moved>The log changed since you opened this[^]*data-command>tira send node loading_state COMPLETE evidenceRef=&#34;e&#34;<\/textarea>/);
+    assert.equal(await count(), n0); // none of it wrote anything
+    // a good one runs exactly as typed, quotes and a note included; the dialog is told where to go
+    const ok = await run('tira send node loading_state COMPLETE evidenceRef="spinner \\"v2\\".mp4" note="checked on a slow network"');
+    assert.equal(ok.status, 200);
+    const go = /^<div data-go="(\/\?r=\d+)"><\/div>$/.exec(ok.body)?.[1];
+    assert.ok(go, ok.body);
+    assert.match((await s.http("GET", go)).body, /data-flash>Complete loading_state: done \(seq 12\)\./);
+    const last = (await s.store.readStream(S)).at(-1);
+    assert.deepEqual([last?.type, last?.metadata.actor, last?.data.payload], ["node.complete", "isha", { evidenceRef: 'spinner "v2".mp4', note: "checked on a slow network" }]);
+    // a subtask by command; found work must be found under the task it goes under
+    const wrong = await run("tira create node charts --parent dashboard kind=discovered discovered_during=table", { id: "dashboard", event: "ADD_SUBTASK" });
+    assert.match(wrong.body, /data-error>tira can&#39;t run that: found work is marked kind=discovered discovered_during=dashboard/);
+    const born = await run('tira create node "charts v2" --parent dashboard kind=discovered discovered_during=dashboard', { id: "dashboard", event: "ADD_SUBTASK" });
+    assert.match(born.body, /^<div data-go=/);
+    const charts = fold(await s.store.readStream(S), s.registry).entities.find((e) => e.id === "charts v2");
+    assert.deepEqual([charts?.tree?.parent, charts?.tree?.kind], ["node:dashboard", "discovered"]);
+    // without the dialog (no fragment): errors get the confirm page, a run goes back to the page
+    const page = await s.form({ token: "t0k3n", type: "node", id: "table", event: "START", command: "tira send node table START" });
+    assert.equal(page.status, 303);
+  } finally {
+    await s.done();
+  }
+});
+
+test("writes run in order, each only if the one before it was written: no block without its ticket", async () => {
+  const ran: string[] = [];
+  const step = (name: string, ok: boolean) => async () => { ran.push(name); return { ok, text: `${name}: ${ok ? "done" : "refused"}.` }; };
+  assert.deepEqual(await inOrder([step("ticket", true), step("block", true)]), { ok: true, text: "ticket: done. block: done." });
+  ran.length = 0;
+  assert.deepEqual(await inOrder([step("ticket", false), step("block", true)]), { ok: false, text: "ticket: refused." });
+  assert.deepEqual(ran, ["ticket"]); // the block never ran
+  assert.deepEqual(await inOrder([step("block", false)]), { ok: false, text: "block: refused." });
+});
+
+test("refusals say what to do instead", () => {
+  const hint = (code: string, detail: string, event: string, id: string, state: string) => hintFor(code, detail, event, id, state);
+  assert.equal(hint("gate", "one active task: node:font, node:table is already active", "START", "colors", "unstarted"), "Only one task can be in progress. Complete or block font, table first, then start colors.");
+  assert.equal(hint("gate", "subtree not drained: node:p has open children node:a, node:b", "COMPLETE", "p", "in_progress"), "Close its open subtasks first (complete or cancel them): a, b.");
+  assert.equal(hint("gate", "can't cancel node:p while children are open: node:a (close them first)", "CANCEL", "p", "unstarted"), "Close its open subtasks first (complete or cancel them): a.");
+  assert.equal(hint("gate", "re-open node:p first: node:c sits under a closed parent (node:p is done; only a done parent can be re-opened)", "REOPEN", "c", "done"), "Re-open p first, with a reason.");
+  assert.equal(hint("denied", "node-lifecycle: done + ADD_CHILD (re-open node:p first)", "ADD_SUBTASK", "p", "done"), "Re-open p first, with a reason.");
+  assert.equal(hint("denied", "node-lifecycle: blocked + START", "START", "c", "blocked"), "c is blocked: unblock it instead.");
+  assert.equal(hint("denied", "node-lifecycle: unstarted + COMPLETE", "COMPLETE", "c", "unstarted"), "Start c first.");
+  assert.equal(hint("denied", "node-lifecycle: cancelled + REOPEN", "REOPEN", "c", "cancelled"), "Cancelled is final: add a new task instead.");
+  assert.equal(hint("denied", "node-lifecycle: in_progress + REOPEN", "REOPEN", "c", "in_progress"), "Only a done task can be re-opened; c is in progress.");
+  assert.equal(hint("guard-failed", "node-lifecycle: in_progress + BLOCK needs hasReasonText", "BLOCK", "c", "in_progress"), undefined);
+});
+
+test("to block, the dialog asks what it waits on: a new ticket, or an open task (not itself, not one it sits under, not a closed one); a re-open suggests reasons used before", async () => {
+  const s = await serving();
+  try {
+    const block = (await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body;
+    assert.match(block, /<label class="blocked-by" data-blocked-by="table" data-type="node"><span>Blocked by<\/span><input type="text" placeholder="a new ticket, e\.g\. design_tokens"/);
+    const open = () => [...block.matchAll(/data-fill-blocker="([^"]*)"/g)].map((m) => m[1]);
+    for (const id of ["colors", "loading_state", "font", "filters", "fetch_metrics"]) assert.ok(open().includes(id), id);
+    assert.ok(!open().includes("table"), "not itself");
+    assert.ok(!open().includes("dashboard"), "not a task it sits under");
+    assert.match(block, /<div class="fills" data-fills><span>Or an open task:<\/span>/);
+    // the confirm page (no script) lists them as text
+    assert.match((await s.http("GET", "/confirm?type=node&id=table&event=BLOCK")).body, /<p class="cmd-help">Open tasks it could wait on: metrics_card · fetch_metrics · improve_visual · colors · loading_state · font · filters<\/p>/);
+    await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time
+    await s.send("fetch_metrics", "START");
+    await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
+    assert.ok(!(await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body.includes('data-fill-blocker="fetch_metrics"'), "done tasks aren't waited on");
+    // a re-open: nothing re-opened yet, no suggestions; then the reason used before
+    assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=REOPEN&fragment=1")).body, /data-fills/);
+    await s.send("fetch_metrics", "REOPEN", { reason: "numbers were wrong" });
+    await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api-v2.md" });
+    assert.match((await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=REOPEN&fragment=1")).body, /<button type="button" class="fill" data-fill="reason" data-value="numbers were wrong">/);
+  } finally {
+    await s.done();
+  }
+});
+
+test("blocking on a new ticket creates it under the blocked task and links the two everywhere: dialogs, needs attention, Kanban, Graph", async () => {
+  const s = await serving();
+  try {
+    const count = async () => (await s.store.readStream(S)).length;
+    const run = (command: string, id: string) => s.form({ token: "t0k3n", type: "node", id, event: "BLOCK", command, fragment: "1" });
+    // the dialog's own default, filled in by the page's script: a ticket, then the block on it
+    const ok = await run('tira create node qa_signoff --parent loading_state kind=discovered discovered_during=loading_state\ntira send node loading_state BLOCK blocker="qa_signoff" reason="QA hasn\'t signed off"', "loading_state");
+    const go = /^<div data-go="(\/\?r=\d+)"><\/div>$/.exec(ok.body)?.[1] as string;
+    assert.ok(go, ok.body);
+    const page = (await s.http("GET", go)).body;
+    assert.match(page, /data-flash>Add subtask qa_signoff under loading_state: done \(seq 12\)\. Block loading_state: done \(seq 13\)\.<\/div>/);
+    const events = await s.store.readStream(S);
+    const r = fold(events, s.registry);
+    const qa = r.entities.find((e) => e.id === "qa_signoff");
+    assert.deepEqual([qa?.tree?.parent, qa?.tree?.kind, qa?.regions.lifecycle], ["node:loading_state", "discovered", "unstarted"]);
+    assert.deepEqual(events.at(-1)?.data.payload, { blocker: "qa_signoff", reason: "QA hasn't signed off" });
+    // the link, both ways
+    const dialog = (id: string) => new RegExp(`<section class="drawer" id="t\\d+" aria-label="${id}"[^]*?</section>`).exec(page)?.[0] ?? "";
+    assert.match(dialog("loading_state"), /<div class="links" data-links><p><span class="lk">Blocked by<\/span><a href="#t\d+">qa_signoff<\/a><span class="state s-unstarted">/);
+    assert.match(dialog("qa_signoff"), /<div class="links" data-links><p><span class="lk">Blocks<\/span><a href="#t\d+">loading_state<\/a><span class="state s-blocked">/);
+    assert.match(page, /data-attention-key="node:loading_state"[^>]*>[^]*?<span class="by" data-blocked-by>waiting on <a href="#t\d+">qa_signoff<\/a>/);
+    assert.match(page, /<div class="t">qa_signoff<\/div><div class="row">[^]*?<span class="chip blocks" data-blocks>[^]*?blocks loading_state<\/span>/);
+    assert.match(page, /<path class="e blocks" data-from="node:loading_state" data-to="node:qa_signoff"/); // its own subtask: the tree line is the link
+    // both stay tickets on Kanban: the blocked task (now a parent) in Blocked, its new ticket in To do
+    const kanban = /<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(page)?.[0] ?? "";
+    assert.match(kanban, /Blocked<span class="k">2<\/span><\/div>[^]*?<div class="t">colors<\/div>[^]*?<div class="t">loading_state<\/div><div class="row"><span class="chip">improve_visual<\/span><span class="chip" data-subtasks>0\/1 subtasks<\/span>[^]*?blocked by qa_signoff/);
+    assert.match(kanban, /To do<span class="k">\d+<\/span><\/div>[^]*?<div class="t">qa_signoff<\/div>/);
+    assert.match(page, /aria-label="qa_signoff, to do, blocks loading_state/);
+    // once the ticket is done, the wait looks over: said in needs attention and in the decision
+    await s.send("qa_signoff", "START");
+    await s.send("qa_signoff", "COMPLETE", { evidenceRef: "qa-report.pdf" });
+    assert.match((await s.http("GET", "/")).body, /waiting on <a href="#t\d+">qa_signoff<\/a><span class="state s-done">done<\/span><\/span><span class="ready" data-ready>ready to unblock<\/span>/);
+    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=UNBLOCK")).body, /Recommendation:<\/b> Unblock it: qa_signoff is done now, so the wait looks over\./);
+    // an open task elsewhere: linked, nothing created, the reason waits on it; drawn as an arc
+    const n0 = await count();
+    const onTask = await run("tira send node table BLOCK blocker=filters", "table");
+    assert.match(onTask.body, /^<div data-go=/);
+    assert.equal(await count(), n0 + 1);
+    assert.deepEqual((await s.store.readStream(S)).at(-1)?.data.payload, { blocker: "filters", reason: "waiting on filters" });
+    assert.match((await s.http("GET", "/")).body, /<path class="e blocks" data-from="node:filters" data-blocks="node:table"/);
+    // what a block can't wait on, said in the dialog, nothing written
+    const n1 = await count();
+    for (const [command, id, why] of [
+      ["tira send node font BLOCK blocker=ghost", "font", "there is no task ghost to wait on"],
+      ["tira send node font BLOCK blocker=improve_visual", "font", "font sits under improve_visual: a task can&#39;t wait on what it is part of"],
+      ["tira send node font BLOCK blocker=qa_signoff", "font", "qa_signoff is already done: there&#39;s nothing to wait on"],
+    ] as const) {
+      const r = await run(command, id);
+      assert.equal(r.status, 422, command);
+      assert.match(r.body, new RegExp(`data-error>tira can&#39;t run that: ${why}`), command);
+    }
+    // a new ticket tira would refuse (the name is taken): neither the ticket nor the block is written
+    const taken = await run("tira create node filters --parent font\ntira send node font BLOCK blocker=filters", "font");
+    assert.equal(taken.status, 409);
+    assert.match(taken.body, /data-error>tira would still refuse the new ticket filters: /);
+    assert.equal(await count(), n1);
+    // without the page's script (no reason written), the block waits on its ticket
+    const plain = await run('tira create node fonts_licence --parent font kind=discovered discovered_during=font\ntira send node font BLOCK blocker="fonts_licence" reason=""', "font");
+    assert.match(plain.body, /^<div data-go=/);
+    assert.deepEqual((await s.store.readStream(S)).at(-1)?.data.payload, { blocker: "fonts_licence", reason: "waiting on fonts_licence" });
+  } finally {
+    await s.done();
+  }
+});
+
+test("Cancel, Reopen and Add subtask go through the page like the other verbs", async () => {
+  const s = await serving();
+  try {
+    const state = async (id: string) => fold(await s.store.readStream(S), s.registry).entities.find((e) => e.id === id);
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "table", event: "CANCEL" })).status, 303);
+    assert.equal((await state("table"))?.regions.lifecycle, "cancelled");
+    await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "REOPEN", reason: "the spinner flickers" })).status, 303);
+    assert.equal((await state("loading_state"))?.regions.lifecycle, "in_progress");
+    // a subtask: born under the task, marked as discovered work when the box is ticked
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "  charts ", discovered: "1" })).status, 303);
+    const charts = await state("charts");
+    assert.equal(charts?.tree?.parent, "node:dashboard");
+    assert.equal(charts?.tree?.kind, "discovered");
+    assert.equal(charts?.tree?.discoveredDuring, "node:dashboard");
+    await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "legend" });
+    assert.equal((await state("legend"))?.tree?.kind, "planned");
+    // the packet for a subtask says where it goes; under a done task it says to re-open first
+    const add = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK")).body;
+    assert.match(add, /This adds a new task at the end of its subtasks\./);
+    assert.match(add, /data-command>tira create node &#34;&#34; --parent dashboard<\/textarea>/); // dashboard isn't under way: planned, unless you say found
+    const addLive = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK&fragment=1")).body;
+    assert.match(addLive, /<button type="button" class="fill" data-fill-found="dashboard">Mark as found while working on dashboard<\/button>/);
+    // under a task in progress, a new subtask is marked as found while working on it
+    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=ADD_SUBTASK")).body, /data-command>tira create node &#34;&#34; --parent loading_state kind=discovered discovered_during=loading_state<\/textarea>/);
+    await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time
+    await s.send("fetch_metrics", "START");
+    await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
+    const underDone = (await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=ADD_SUBTASK")).body;
+    assert.match(underDone, /What to do:<\/b> Re-open fetch_metrics first, with a reason\./);
   } finally {
     await s.done();
   }

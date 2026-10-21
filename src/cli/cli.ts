@@ -53,9 +53,10 @@ Usage:
                                                   grew new work. Exits 3 when something is broken
   tira serve --actor NAME [--port N] [--factory FILE]
                                                   the page, live, on 127.0.0.1 only (default port 4747): needs
-                                                  attention, ⌘K search, and start / unblock / complete / block,
-                                                  each through a confirm page, written as NAME; the divergence
-                                                  section is recomputed on every page load. Ctrl-C stops it
+                                                  attention, ⌘K search, and start / unblock / complete / block /
+                                                  cancel / reopen / add subtask, each through a decision dialog,
+                                                  written as NAME; the divergence section is recomputed on every
+                                                  page load. Ctrl-C stops it
   tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]
                                                   the factory's file state against tira's log, one verdict per
                                                   fx: event id (B3): OK, MISSING, PHANTOM, WRONG-ENTITY,

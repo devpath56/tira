@@ -5,16 +5,16 @@
 **What / why.** Exposition one time and on demand, never on the worksurface (no pop-up). Under
 `tira serve` the guide opens by itself on the first visit (once per browser); after that, and
 always on the rendered page, a quiet "How to read this page" link next to the hash chip opens
-it inline, and the chip opens it too.
+it as a dialog over the page, and the chip opens it too.
 
-**How to read it.** Three short paragraphs: the progress line, "by tira", and the hash.
+**How to read it.** Three short paragraphs: the board (Kanban and Graph), "by tira", and the hash.
 
 ## Devtool hook
 
 - `[data-guide]` on the guide, with id `#guide`.
 - `.how` on the link that opens it.
 
-Assertion: exactly three paragraphs, on the progress line, by tira and the hash.
+Assertion: exactly three paragraphs, on the board, by tira and the hash.
 
-**Falsifier.** A first-time reader can't say what the progress line, the bolt and the hash mean after
+**Falsifier.** A first-time reader can't say what the board's two styles, the bolt and the hash mean after
 reading it.

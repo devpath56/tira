@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 333 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 404 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -167,8 +167,9 @@ t create node fetch_metrics --parent metrics_card && t create node improve_visua
 for n in colors loading_state font; do t create node $n --parent improve_visual; done
 t create node table --parent dashboard && t create node filters --parent dashboard
 t send node fetch_metrics START && t send node fetch_metrics COMPLETE evidenceRef=api.md
-t send node colors START && t send node colors BLOCK reason=design-tokens                # interrupted, with why
-t create node design_tokens --parent improve_visual kind=discovered discovered_during=colors
+t send node colors START                                                                    # interrupted: the wait becomes a ticket
+t create node design_tokens --parent colors kind=discovered discovered_during=colors
+t send node colors BLOCK blocker=design_tokens "reason=waiting on the design-token decision"
 t send node design_tokens START && t send node design_tokens COMPLETE evidenceRef=token-spec.md
 t send node colors UNBLOCK && t send node colors COMPLETE evidenceRef=palette.png          # resumed
 t send node loading_state START && t send node loading_state COMPLETE evidenceRef=spinner.mp4
@@ -179,35 +180,37 @@ t render --out d1.html && t tree && t dump --hash                     # both par
 ```
 
 M1 passes when the page (`d1.html`) shows every node from `t dump` exactly once with the
-same state, drain flag, cursor (the blue marker) and active task (the ringed stop). The chip at
-the top right shows the hash; hover it, or open **Activity**, for the full value, which
+same state, drain flag, cursor (the ◆ pin) and active task (the ringed node), on the board's
+Graph style. The chip at
+the top right shows the hash; hover it, or open **History**, for the full value, which
 must equal `t dump --hash`. The page's `data-node-count` must equal
 `data-fold-tree-count`. Parents tira closed carry tira's mark (a bolt). Click any task to open its
-drawer and history; tira's entries say why and which move they cite. Closing the branch
+dialog and history; tira's entries say why and which move they cite. Closing the branch
 took no clicks beyond moving on to `table`.
 
 Above the views, **Needs attention** lists what is blocked, grouped by the reason it was
-blocked with, and what is being worked on, each one click from its drawer. Blocking a task
+blocked with, and what is being worked on, each one click from its dialog. Blocking a task
 needs a reason with text, like re-opening one (2026-10-20). A finished active parent isn't
 counted: there is nothing to decide, and tira closes it when work moves on. A quiet "How to read this page" link (and
 the hash chip, now labelled "fingerprint") opens a three-paragraph guide inline.
 
-The page has four views:
+The page has three views:
 
 | View | Shows |
 |---|---|
-| **Progress** (default for a tree) | A progress line. Every task is a stop on one line, in tree order, grouped under its parent. Filled stops are done (crossed: dropped), the track fills behind them, the blue marker sits on the next task ("next", or "on it" once started), and hollow stops are what's left. Below, one short line per parent: its children as stops, closed / total and how many are left. A dashed ring means tira closes it when you move on; a bolt means tira closed it. The header counts tasks closed of all tasks, and how many are left |
-| **Board** | Jira-style status columns of the work (the leaf tasks), with a strip of parents and their "children closed" meters above |
-| **Lanes** (default for the factory) | Each brief's regions side by side, handoff pairs, what's waiting (D2, below) |
-| **Activity** | The whole log, newest first, including rejected commands, anomalies, other entities and the full hash |
+| **Board** (default for a tree) | One view in two styles, switched in its own bar (CSS only; `tira serve` remembers the choice per browser). **Kanban** (the default): Jira-style status columns, every ticket a card naming its parent; ◆ marks the next task. An untouched grouping parent (to do, with subtasks) stays on the Graph; started, blocked or closed, a parent is a card too, with "1/3 subtasks" closed (so a task blocked on a new ticket stays on the board, in Blocked). **Graph**: the whole tree, top-down, a parent centred above its children; each node is coloured by state, a line turns green once its child is closed, a parent says "1/3 closed · 2 left", and a dotted line joins a task to the one it was found while working on. A dashed ring means tira closes it when you move on; a bolt means tira closed it. Big trees stay narrow: in a tree of more than 40 tasks the lowest branches hang as indented columns (212 tasks: about 4,800 px across, not 20,000). Live, the graph is a canvas you move like Figma or Excalidraw (drag or scroll to pan, pinch or ⌘/Ctrl + scroll to zoom, Fit, ◆ Next, full screen) and fold: the button under a parent hides its branch ("+N", red when a blocked task is inside); Collapse done folds every finished branch. Folds and the view survive the reload after every action The header counts tasks closed of all tasks, and how many are left |
+| **Lanes** (default for the factory; shown only when the stream has something for it) | Each brief's regions side by side, sessions, drops and ideas, handoff pairs, what's waiting (D2, below) |
+| **History** | The whole log, newest first, including rejected commands, anomalies, legacy tags, other entities and the full hash: the audit trail |
 
-Words live in the drawers, not on the canvas. The page follows the system's light or dark
+Words live in the task dialogs, not on the canvas: a click on any task (a card, a node, a
+row) opens a dialog over the page, never a side panel or a new page. It closes with ×, a click
+on the dimmed page behind it, or Esc (live). The page follows the system's light or dark
 setting, or the System / Light / Dark switch at the top right (CSS only; `tira serve`
 remembers the choice per browser). The look is Jira's: white or near-black surfaces, Jira
 blue as the one accent and muted status colours (green done, blue in progress, red blocked,
-amber waiting). It is self-contained (no JS, fonts or scripts from the network; tabs and drawers
-are CSS), so the bytes still depend only on the fold. The only motion is the drawer
-sliding in, and it turns off for reduced motion. Print is always light.
+amber waiting). It is self-contained (no JS, fonts or scripts from the network; tabs and dialogs
+are CSS), so the bytes still depend only on the fold. The only motion is the dialog
+fading in, and it turns off for reduced motion. Print is always light.
 
 **Event names (D1, decided):** stored types are lowercase-kebab, derived mechanically
 from the table events: `node.born` (decided 2026-10-17), `node.start`, `node.add-child`,
@@ -470,27 +473,28 @@ have:
 | Piece | What it does |
 |---|---|
 | **Actions on needs-attention rows** | Unblock a blocked task; complete or block the one in progress |
-| **⌘K search** | Find any task in a few letters (name, prefix, initials, a word inside it; a space matches `_`) and open its drawer. Type a verb first to act: `start`, `unblock`, `complete`, `block`; `unblock ` lists every blocked task. After ≤ 3 letters a task is among the visible matches (the first 8): first on the demo, not always first on a 100-task tree of look-alike names |
-| **Confirm page** | Every action goes through it first. **What tira says** (read-only): the move, the rule, every parent tira will close first, the record it will leave, and its check. That check is the write path's own decision (`WritePath.preview`: reserved names, tira's closes, then the rules), so the page can't say "refused" for a move the write accepts. **What you decide**: the evidence or reason, then the button. The form carries the seq it was decided on: if the log moved before you submit, nothing is written and the packet is shown again |
-| **Result** | After an action the page says what happened, a refusal included (and the refusal is in the log). It shows once |
+| **Actions in a task's dialog** | By its state: start, complete, block, unblock, cancel, reopen, and **add subtask** (a new task under it, marked as found while working on it with `kind=discovered`) |
+| **⌘K search** | Find any task in a few letters (name, prefix, initials, a word inside it; a space matches `_`) and open its dialog. Type a verb first to act: `start`, `unblock`, `complete`, `block`; `unblock ` lists every blocked task. After ≤ 3 letters a task is among the visible matches (the first 8): first on the demo, not always first on a 100-task tree of look-alike names |
+| **Decision dialog** | Every human input opens a decision over the page, never a new page, in two views. **tira recommends** (read-only): Decision (the work in a nutshell: the task, why and since when it is blocked, its subtasks, its proof, the move, what tira closes first), Recommendation (from the facts: "api is done now, so the wait looks over", "next in order is fetch_metrics", "Don't run it: tira will refuse"), Tradeoffs, Best practice, Kind and the rule, then tira's check and **what to do** instead of a refusal. **Your action — edit before sending**: the action as a tira command, filled in (`tira send node colors UNBLOCK`; empty quotes where a value is yours: `evidenceRef=""`, `reason=""`), editable, plus an optional `note="…"` the history keeps; the same text runs in a terminal. To block, name what it waits on: the command becomes two lines, a new ticket created under the task (found while working on it) and the block naming it as `blocker=` (or one line for an open task picked as the blocker); the two are linked everywhere ("Blocked by" / "Blocks" in their dialogs, "waiting on" and then "ready to unblock" in needs attention, a red line on the Graph, a "blocks" chip in Kanban). Reasons used before (to re-open) are chips. The command is read strictly: a value left empty, another task or verb than the one opened, a stray key or flag, something tira would refuse, or a moved log comes back into the dialog with your text kept, and nothing is written (`tira-docs/components/confirm-page.md`) |
+| **Result** | After an action the page says what happened (a refusal of a post that skipped the dialog is in the log too). It shows once |
 | **The guide** | Opens by itself on the first visit (once per browser), then only from the link or the chip |
 
 Safety:
 - Any `Host` other than 127.0.0.1 or localhost is refused (DNS rebinding).
 - A write needs this process's random token, and refuses a foreign or `null` `Origin` (cross-site forms).
 - The actor is fixed at start, and `tira` or `dispatcher` (any spelling) is refused at start.
-- Only those four verbs, on tree tasks, are accepted.
-- A strict Content-Security-Policy allows only the server's own two scripts.
+- Only the page's verbs (start, unblock, complete, block, cancel, reopen, add subtask), on tree tasks, are accepted, as fields or as a command in the CLI's syntax with only the keys the verb uses (plus `note`); a subtask name is trimmed, 1–80 characters, no control characters.
+- A strict Content-Security-Policy allows only the server's own scripts (app.mjs and the modules it loads: rank, theme, graph, layout).
 
 The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
 
 Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
-progress line, drawer, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+board, task dialog, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
 name exists in the build.
 
 Calls made here, for the PM:
 
-- **Every action passes the confirm page**, START included. The brief's "permission-only
+- **Every action passes the decision dialog**, START included. The brief's "permission-only
   blocks stay one click" has no case among the task verbs: each can trigger tira's closes or
   needs a field.
 - **"Stale" is left out of needs attention** until the time limit is ruled.

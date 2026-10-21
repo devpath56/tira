@@ -168,9 +168,10 @@ const MUTANTS: Mutant[] = [
   { name: "render: no closed-by-tira mark", file: "src/render/html.ts", find: "r.closedByTira ? `<span class=\"mark tira\">closed by tira</span>` : \"\",", replace: "\"\"," },
   { name: "render: progress counts only done, not cancelled", file: "src/render/html.ts", find: 'const CLOSED = new Set(["done", "cancelled"]);', replace: 'const CLOSED = new Set(["done"]);' },
   { name: "render: drawer ids don't match the links", file: "src/render/html.ts", find: "<section class=\"drawer\" id=\"t${n.i}\"", replace: "<section class=\"drawer\" id=\"d${n.i}\"" },
-  { name: "render: board puts parents in the columns", file: "src/render/html.ts", find: "const leaves = nodes.filter((n) => n.row.children.length === 0);", replace: "const leaves = nodes;" },
+  { name: "render: board puts parents in the columns", file: "src/render/html.ts", find: "const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== \"unstarted\");", replace: "const leaves = nodes;" },
+  { name: "render: a blocked or started parent drops off Kanban", file: "src/render/html.ts", find: "n.row.children.length === 0 || n.row.state !== \"unstarted\");", replace: "n.row.children.length === 0);" },
   { name: "render: --at N shows history from after N", file: "src/render/html.ts", find: "  events = events.filter((e) => e.seq <= r.lastSeq);", replace: "" },
-  { name: "render: no history per task", file: "src/render/html.ts", find: "const lines = trail.get(r.key) ?? [];", replace: "const lines: string[] = [];" },
+  { name: "render: no history per task", file: "src/render/html.ts", find: "byKey, links, (trail.get(n.row.key) ?? []).length);", replace: "byKey, links, 0);" },
   // Track B1: factory tables, handoffs, dispatcher, lanes
   { name: "b1: captures never applied", file: "src/fold/evaluate.ts", find: "const captured = applyCapture(current.context?.[hit.region], res.capture, intent.payload);", replace: "const captured = current.context?.[hit.region];" },
   { name: "b1: guards don't see their region's captured data", file: "src/fold/evaluate.ts", find: "    view,\n    own,\n  });", replace: "    view,\n  });" },
@@ -214,14 +215,28 @@ const MUTANTS: Mutant[] = [
   { name: "review: reserved names miss Cyrillic lookalikes", file: "src/text.ts", find: "\"\u0430\": \"a\", \"\u0441\": \"c\", \"\u0435\": \"e\", \"\u0456\": \"i\", \"\u043e\": \"o\", \"\u0440\": \"p\",", replace: "\"\u0430\": \"a\", \"\u0456\": \"i\"," },
   { name: "review: supersedes typed as text refused", file: "src/fold/evaluate.ts", find: "Number(intent.payload.supersedes) !== v - 1", replace: "intent.payload.supersedes !== v - 1" },
   { name: "review: a race-refused receiver is logged as the dispatcher's", file: "src/write/dispatcher.ts", find: " && evaluate(this.registry, entities, view, intentOf(next, DISPATCHER)).ok;", replace: ";" },
-  // The progress line
-  { name: "render: the next-task marker rides on the active task, not the cursor", file: "src/render/html.ts", find: "${r.cursor ? NEXT_MARK : \"\"}", replace: "${r.active ? NEXT_MARK : \"\"}" },
-  { name: "render: no waiting ring on branch lines", file: "src/render/html.ts", find: "${r.awaitingClose ? `<span class=\"wait-ring\"", replace: "${false ? `<span class=\"wait-ring\"" },
-  { name: "render: no tira mark on branch lines", file: "src/render/html.ts", find: "${r.closedByTira ? `<span class=\"tira-mark\"", replace: "${false ? `<span class=\"tira-mark\"" },
-  { name: "render: the active stop isn't marked", file: "src/render/html.ts", find: "r.active ? \"is-active\" : \"\",\n    ].filter(Boolean)", replace: "\"\",\n    ].filter(Boolean)" },
-  { name: "render: long names not shortened on the progress line", file: "src/render/html.ts", find: "${esc(short(r.id))}${r.discoveredDuring ? \" \u2726\" : \"\"}", replace: "${esc(r.id)}${r.discoveredDuring ? \" \u2726\" : \"\"}" },
-  { name: "render: the track never fills", file: "src/render/html.ts", find: "CLOSED.has(r.state) ? \"closed\" : \"\",", replace: "\"\"," },
-  { name: "render: branch lines count what's left wrong", file: "src/render/html.ts", find: "    const left = kids.length - closed;", replace: "    const left = kids.length;" },
+  // The board: Kanban | Graph
+  { name: "render: the next-task pin rides on the active task, not the cursor", file: "src/render/html.ts", find: "const pin = r.cursor ? `<span class=\"here\">", replace: "const pin = r.active ? `<span class=\"here\">" },
+  { name: "render: no waiting ring on graph nodes", file: "src/render/html.ts", find: "const waitRing = r.awaitingClose ?", replace: "const waitRing = false ?" },
+  { name: "render: no tira mark on graph nodes", file: "src/render/html.ts", find: "const tiraMark = r.closedByTira ?", replace: "const tiraMark = false ?" },
+  { name: "render: the active node isn't marked", file: "src/render/html.ts", find: "r.active ? \"is-active\" : \"\",\n  ].filter(Boolean)", replace: "\"\",\n  ].filter(Boolean)" },
+  { name: "render: long names not shortened on the graph", file: "src/render/html.ts", find: "${esc(short(r.id))}</span></span>`", replace: "${esc(r.id)}</span></span>`" },
+  { name: "render: a closed child's line never turns green", file: "src/render/html.ts", find: "CLOSED.has(n.row.state) ? \"e done\" : \"e\"", replace: "\"e\"" },
+  { name: "render: parent nodes count what's left wrong", file: "src/render/html.ts", find: "  const left = ks.length - closed;", replace: "  const left = ks.length;" },
+  { name: "layout: a parent isn't centred over its children", file: "src/serve/layout.mjs", find: "const centre = (p.offs[0] + p.offs.at(-1)) / 2;", replace: "const centre = p.offs[0];" },
+  { name: "layout: rows aren't spaced by depth", file: "src/serve/layout.mjs", find: "y: up === undefined ? G.top : up.y + G.level }", replace: "y: up === undefined ? G.top : up.y + G.box }" },
+  { name: "layout: siblings packed with no gap", file: "src/serve/layout.mjs", find: "right[d] - s.left[d] + G.gap", replace: "right[d] - s.left[d]" },
+  { name: "layout: siblings packed on the first row only", file: "src/serve/layout.mjs", find: "for (let d = 0; d < Math.min(right.length, s.left.length); d++)", replace: "for (let d = 0; d < 1; d++)" },
+  { name: "layout: a fold hides nothing", file: "src/serve/layout.mjs", find: "(shown.has(n.parent) && !folded.has(n.parent))", replace: "shown.has(n.parent)" },
+  { name: "layout: big trees never compact", file: "src/serve/layout.mjs", find: "const compact = shown.size > STACK.compact;", replace: "const compact = false;" },
+  { name: "layout: a column reserves one row only", file: "src/serve/layout.mjs", find: "const rows = Math.floor((end - STACK.pitch + G.box - 1) / G.level);", replace: "const rows = 1;" },
+  { name: "layout: column tasks not indented", file: "src/serve/layout.mjs", find: "out.push([c, dx + STACK.dx, y]);", replace: "out.push([c, dx, y]);" },
+  { name: "zoom: not around the pointer", file: "src/serve/layout.mjs", find: "return { x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k, s };", replace: "return { x: view.x * k, y: view.y * k, s };" },
+  { name: "zoom: no limits", file: "src/serve/layout.mjs", find: "const clamp = (s) => Math.min(ZOOM.max, Math.max(ZOOM.min, s));", replace: "const clamp = (s) => s;" },
+  { name: "fit: blows a small tree up past life size", file: "src/serve/layout.mjs", find: "clamp(Math.min(1, (vw - 2 * pad) / width", replace: "clamp(Math.min(4, (vw - 2 * pad) / width" },
+  { name: "finished branches: an open task inside counts as finished", file: "src/serve/layout.mjs", find: "subtree(nodes, n.key).every((k) => isClosed(k))", replace: "subtree(nodes, n.key).some((k) => isClosed(k))" },
+  { name: "render: no found-while line", file: "src/render/html.ts", find: "n.row.discoveredDuring !== n.parent?.row.key && byKey.has(n.row.discoveredDuring)", replace: "false" },
+  { name: "render: the board opens on Graph, not Kanban", file: "src/render/html.ts", find: "${s === \"kanban\" ? \" checked\" : \"\"}", replace: "${s === \"graph\" ? \" checked\" : \"\"}" },
   // Dependency graph, frontier, scenario runner
   { name: "dag: cycle check off", file: "src/fold/evaluate.ts", find: "      if (loop) return reject(\"cycle\"", replace: "      if (false) return reject(\"cycle\"" },
   { name: "dag: a new version's own dependencies ignored", file: "src/fold/evaluate.ts", find: "  edges.set(id, Array.isArray(deps) ? deps.filter((x): x is string => typeof x === \"string\") : []);\n", replace: "" },
@@ -334,15 +349,15 @@ const MUTANTS: Mutant[] = [
   { name: "block reason: in-progress tasks block without one", json: "charts/node-lifecycle.json", edit: (t) => { delete (t.pairs.find((p) => p.from === "in_progress" && p.event === "BLOCK") as { guard?: string }).guard; } },
   // The page, live: tira serve, needs attention, the palette (D1 UI brief, 2026-10-20)
   { name: "serve: any Host answers", file: "src/serve/server.ts", find: "    if (!LOCAL_HOST.test(host)) return send(res, 403,", replace: "    if (false) return send(res, 403," },
-  { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) return send(res, 403,", replace: "    if (false) return send(res, 403," },
-  { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) return send(res, 403, text,", replace: "    if (false) return send(res, 403, text," },
+  { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403,", replace: "    if (false) { send(res, 403," },
+  { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) { send(res, 403, text,", replace: "    if (false) { send(res, 403, text," },
   { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !registry.get(type)?.tree || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
-  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "actor: opts.actor, payload: ask.payload };", replace: "actor: form.get(\"actor\") ?? opts.actor, payload: ask.payload };" },
+  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, opts.stream, opts.actor);", replace: "const cmd = commandOf(ask, opts.stream, form.get(\"actor\") ?? opts.actor);" },
   { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
   { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
-  { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "  const placeholder = verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {};", replace: "  const placeholder = {};" },
-  { name: "serve: confirm form without the token", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"token\" value=\"${esc(opts.token)}\">", replace: "" },
-  { name: "serve: the blocked reason not shown", file: "src/serve/server.ts", find: "  const said = opts.blockedWhy === undefined ? p.lines : [...p.lines, `Blocked because: ${opts.blockedWhy}`];", replace: "  const said = p.lines;" },
+  { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "payload: verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {} })", replace: "payload: {} })" },
+  { name: "serve: confirm form without the token", file: "src/serve/server.ts", find: "const hidden = [[\"token\", opts.token], ", replace: "const hidden = [" },
+  { name: "brief: the blocked reason not shown", file: "src/serve/server.ts", find: "since: since ? { seq: since.seq, reason: since.reason } : undefined,", replace: "since: since ? { seq: since.seq } : undefined," },
   { name: "page: live parts in the rendered file", file: "src/render/html.ts", find: "  const live = opts.live !== undefined;", replace: "  const live = true;" },
   { name: "page: attention ignores the reason", file: "src/render/html.ts", find: "    const why = whyLabel(blocked.get(n.row.key)?.reason);", replace: "    const why = \"blocked\";" },
   { name: "page: attention dates a block by its last no-op", file: "src/render/html.ts", find: "  if (ev === \"block\" && !blocked.has(key)) blocked.set(key,", replace: "  if (ev === \"block\") blocked.set(key," },
@@ -358,10 +373,10 @@ const MUTANTS: Mutant[] = [
   { name: "palette: a verb doesn't filter by state", file: "src/serve/rank.mjs", find: "    if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;", replace: "" },
   { name: "palette: ties lose tree order", file: "src/serve/rank.mjs", find: "  scored.sort((a, b) => b.s - a.s || a.order - b.order);", replace: "  scored.sort((a, b) => b.s - a.s || b.order - a.order);" },
   { name: "palette: a verb needs a task word after it", file: "src/serve/rank.mjs", find: "  return verb ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };", replace: "  return verb && s.slice(cut).trim() ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };" },
-  { name: "serve: tira's closes not announced", file: "src/serve/server.ts", find: "  if (closes.length > 0) lines.push(`tira will first close", replace: "  if (false) lines.push(`tira will first close" },
+  { name: "brief: tira's closes not announced", file: "src/serve/brief.ts", find: "  if (pv.ok && pv.closes.length > 0) s += ", replace: "  if (false) s += " },
   { name: "serve: the packet judges without tira's closes", file: "src/write/write-path.ts", find: "    return this.decide(intent, await this.store.readStream(cmd.stream), false, \"preview\").verdict;", replace: "    return this.decide(intent, await this.store.readStream(cmd.stream), true, \"preview\").verdict;" },
-  { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "    if (seen !== String((await now()).r.lastSeq)) {", replace: "    if (false) {" },
-  { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: "<input type=\"hidden\" name=\"seen\" value=\"${p.seen}\">", replace: "" },
+  { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "    if (a.seen !== String((await now()).r.lastSeq)) {", replace: "    if (false) {" },
+  { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: ", [\"seen\", String(p.seen)]]", replace: "]" },
   { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
   { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "    flashes.delete(rk); // a result shows once", replace: "" },
   { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
@@ -377,13 +392,71 @@ const MUTANTS: Mutant[] = [
   { name: "reason check: only spaces counts as a reason", file: "src/tables/table.ts", find: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.trim().length > 0,", replace: "hasReasonText: ({ payload }) => typeof payload.reason === \"string\" && payload.reason.length > 0," },
   { name: "page: a finished active parent needs you", file: "src/render/html.ts", find: "const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);", replace: "const busy = nodes.filter((n) => n.row.active);" },
   { name: "page: legacy events unlabelled", file: "src/render/html.ts", find: "legacy: e.metadata.era === undefined, key: `${type}:${d.entity.id}`", replace: "legacy: false, key: `${type}:${d.entity.id}`" },
-  { name: "serve: the reason field takes only spaces", file: "src/serve/server.ts", find: "required${field.text ? ` pattern=", replace: "required${false ? ` pattern=" },
+  { name: "command: a value of only spaces gets through", file: "src/serve/command.ts", find: "if (typeof v === \"string\" && v.trim() !== \"\") return undefined;", replace: "if (typeof v === \"string\" && v !== \"\") return undefined;" },
   // B3 round 1, published: the scorer and the generator
   { name: "b3 score: any non-OK verdict counts as caught", file: "scripts/b3-score.ts", find: "if (m.verdict !== \"OK\" && got === m.verdict) caught++;", replace: "if (m.verdict !== \"OK\" && got !== \"OK\") caught++;" },
   { name: "b3 score: false positives not counted", file: "scripts/b3-score.ts", find: "    if (m.verdict === \"OK\" && got !== \"OK\") falsePositives++;\n", replace: "" },
   { name: "b3 build: the retried dispatch journaled once", file: "scripts/b3-fixture.ts", find: "return [record, { ...record, ts: ts() }]; // journaled twice", replace: "return [record]; // journaled twice" },
   { name: "cli paths: anything outside the run folder is allowed", file: "scripts/cli-path.ts", find: "if (resolved !== baseDir && !resolved.startsWith(baseDir + sep)) {", replace: "if (false) {" },
   { name: "cli paths: a sibling folder that starts the same passes", file: "scripts/cli-path.ts", find: "!resolved.startsWith(baseDir + sep)", replace: "!resolved.startsWith(baseDir)" },
+  // Task dialogs (Isha, 2026-10-21): a task opens over the page, never a side panel or a new page
+  { name: "dialog: no click-outside to close", file: "src/render/html.ts", find: "aria-label=\"${esc(r.id)}\" role=\"dialog\" aria-modal=\"true\">${SCRIM}<div", replace: "aria-label=\"${esc(r.id)}\" role=\"dialog\" aria-modal=\"true\"><div" },
+  { name: "dialog: not marked as a modal dialog", file: "src/render/html.ts", find: "aria-label=\"${esc(r.id)}\" role=\"dialog\" aria-modal=\"true\">", replace: "aria-label=\"${esc(r.id)}\">" },
+  { name: "dialog: the page behind scrolls", file: "src/render/html.ts", find: "body:has(.drawer:target){overflow:hidden}\n", replace: "" },
+  { name: "dialog: slides in from the side", file: "src/render/html.ts", find: ".drawer{position:fixed;inset:0;z-index:10;display:grid;place-items:center;", replace: ".drawer{position:fixed;top:0;right:0;bottom:0;z-index:10;display:block;" },
+  { name: "live: Esc doesn't close a dialog", file: "src/serve/app.mjs", find: "{ location.hash = \"_\"; e.preventDefault(); }", replace: "{ e.preventDefault(); }" },
+  { name: "live: the palette's Esc also closes the dialog behind it", file: "src/serve/app.mjs", find: "e.key === \"Escape\" && !e.defaultPrevented && root.hidden", replace: "e.key === \"Escape\" && root.hidden" },
+  // The task flow on the page (Isha, 2026-10-21): confirm as a dialog, hints, suggestions, new verbs, subtasks, proof
+  { name: "confirm: the dialog fetches the whole page", file: "src/serve/app.mjs", find: "fetch(`${href}&fragment=1`,", replace: "fetch(href," },
+  { name: "confirm: no fallback when the packet can't load", file: "src/serve/app.mjs", find: "  } catch {\n    location.href = href;\n  }", replace: "  } catch {\n  }" },
+  { name: "confirm: action links leave the page", file: "src/serve/app.mjs", find: "  e.preventDefault();\n  void openConfirm(link.getAttribute(\"href\"));", replace: "  void openConfirm(link.getAttribute(\"href\"));" },
+  { name: "confirm: the palette's verbs leave the page", file: "src/serve/app.mjs", find: "if (verb) void openConfirm(", replace: "if (verb) location.assign(" },
+  { name: "confirm: the fragment comes wrapped in a page", file: "src/serve/server.ts", find: "fragment ? packetBody(p, co, true) : confirmPage(p, co)", replace: "confirmPage(p, co)" },
+  { name: "hints: never shown", file: "src/serve/server.ts", find: "const hint = p.hint ? `<p class=\"hint\"", replace: "const hint = false ? `<p class=\"hint\"" },
+  { name: "hints: one-active names the task itself", file: "src/serve/server.ts", find: "Complete or block ${others.join(\", \")} first", replace: "Complete or block ${id} first" },
+  { name: "suggestions: none offered", file: "src/serve/server.ts", find: "return [...used.slice(0, 8), ...waiting.filter((w) => !used.includes(w)).slice(0, 8)];", replace: "return [];" },
+  { name: "suggestions: a task waits on itself", file: "src/serve/server.ts", find: "x.id !== id && ", replace: "" },
+  { name: "suggestions: done tasks are waited on", file: "src/serve/server.ts", find: "!above.has(x.id) && !CLOSED.has(x.state)", replace: "!above.has(x.id)" },
+  { name: "suggestions: a task waits on its own parent", file: "src/serve/server.ts", find: "x.id !== id && !above.has(x.id) &&", replace: "x.id !== id &&" },
+  { name: "add subtask: a blank name accepted", file: "src/serve/command.ts", find: "return name.length > 0 && name.length <= 80", replace: "return name.length <= 80" },
+  { name: "command: any key accepted", file: "src/serve/command.ts", find: "    if (!allowed.includes(key)) return", replace: "    if (false) return" },
+  { name: "command: a key given twice keeps the last", file: "src/serve/command.ts", find: "    if (key in out) return", replace: "    if (false) return" },
+  { name: "command: an escaped quote is lost", file: "src/serve/command.ts", find: String.raw`dq.replaceAll(/\\(.)/g, "$1")`, replace: "dq" },
+  { name: "command: an unclosed quote is run", file: "src/serve/command.ts", find: "  if (text.replaceAll(WORD, \"\").trim() !== \"\") return { why: \"a quote is never closed\" };\n", replace: "" },
+  { name: "command: found work under another task", file: "src/serve/command.ts", find: "(kv.kind !== \"discovered\" || kv.discovered_during !== parent)", replace: "kv.kind !== \"discovered\"" },
+  { name: "command: a missing proof isn't caught", file: "src/serve/command.ts", find: "  if (!field || PAGE_VERBS[a.event]?.creates) return undefined;", replace: "  return undefined;" },
+  { name: "command: the value to fill isn't offered", file: "src/serve/command.ts", find: "const toFill = verb?.field ? \" \" + pair(verb.field.name, \"\") : \"\";", replace: "const toFill = \"\";" },
+  { name: "act: an edited action runs without its preview", file: "src/serve/server.ts", find: "if (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event) {", replace: "if (false) {" },
+  { name: "act: a typed refusal is written to the log", file: "src/serve/server.ts", find: "      if (!pv.ok) return `tira would still refuse", replace: "      if (false) return `tira would still refuse" },
+  { name: "brief: tira's close promised for a blocked parent", file: "src/serve/brief.ts", find: "  if (p.closable) return", replace: "  if (true) return" },
+  { name: "brief: every start looks like the next task", file: "src/serve/brief.ts", find: "  if (f.next === f.id) return", replace: "  if (true) return" },
+  { name: "brief: the wait looks over whatever it waited on", file: "src/serve/brief.ts", find: "  if (w && CLOSED.has(w.state)) return", replace: "  if (w) return" },
+  { name: "brief: open subtasks not mentioned on unblock", file: "src/serve/brief.ts", find: "  const then = open.length > 0 ?", replace: "  const then = false ?" },
+  { name: "command: a ticket and a block that don't belong together run", file: "src/serve/command.ts", find: " || blockerOf(b) !== t.child) return no(pairNote);", replace: ") return no(pairNote);" },
+  { name: "command: a task blocked by itself", file: "src/serve/command.ts", find: "  if (blocker?.trim() === id.trim()) return no(", replace: "  if (false) return no(" },
+  { name: "command: a block on a ticket still asks for a reason", file: "src/serve/command.ts", find: "  if (a.event === \"BLOCK\" && blockerOf(a) !== undefined) return undefined;\n", replace: "" },
+  { name: "command: no reason defaults from the ticket", file: "src/serve/command.ts", find: "reason: `waiting on ${blocker}` } };", replace: "reason: \"\" } };" },
+  { name: "command: a block opens without a ticket", file: "src/serve/command.ts", find: "  if (event === \"BLOCK\") return commandFor(type, id, \"ADD_SUBTASK\", true)", replace: "  if (false) return commandFor(type, id, \"ADD_SUBTASK\", true)" },
+  { name: "act: a block waits on a task that isn't there", file: "src/serve/server.ts", find: "  if (!target) return `there is no task", replace: "  if (false) return `there is no task" },
+  { name: "act: a block waits on a closed task", file: "src/serve/server.ts", find: "  if (CLOSED.has(target.state)) return `${blocker} is already", replace: "  if (false) return `${blocker} is already" },
+  { name: "act: a block waits on a task it sits under", file: "src/serve/server.ts", find: "    if (up?.key === target.key) return", replace: "    if (false) return" },
+  { name: "act: a new ticket isn't checked before it's written", file: "src/serve/server.ts", find: "for (const c of first === undefined ? [cmd] : [first, cmd]) {", replace: "for (const c of [cmd]) {" },
+  { name: "act: the block is written without its ticket", file: "src/serve/server.ts", find: "    if (!done.ok) return { ok: false, text: said.join(\" \") };\n", replace: "" },
+  { name: "links: a block forgets its ticket", file: "src/render/html.ts", find: "...(typeof reason === \"string\" ? { reason } : {}), ...blocker });", replace: "...(typeof reason === \"string\" ? { reason } : {}) });" },
+  { name: "links: blocked-by not shown", file: "src/render/html.ts", find: "    blockedBy.set(key, since.blocker);\n", replace: "" },
+  { name: "links: what a ticket blocks not shown", file: "src/render/html.ts", find: "    blocks.set(since.blocker, [...(blocks.get(since.blocker) ?? []), key]);\n", replace: "" },
+  { name: "links: never ready to unblock", file: "src/render/html.ts", find: "const ready = blocker !== undefined && CLOSED.has(blocker.state) ?", replace: "const ready = false ?" },
+  { name: "links: the blocks line looks like any line", file: "src/render/html.ts", find: "    const blocking = links.blockedBy.get(p.row.key) === n.row.key;", replace: "    const blocking = false;" },
+  { name: "links: no arc to a blocker elsewhere", file: "src/render/html.ts", find: "${found.join(\"\")}${blockArcs.join(\"\")}</svg>", replace: "${found.join(\"\")}</svg>" },
+  { name: "brief: the blocker ticket's state ignored", file: "src/serve/server.ts", find: "  const ticket = state === \"blocked\" ? since?.blocker : undefined;", replace: "  const ticket = undefined;" },
+  { name: "brief: a refusal recommended anyway", file: "src/serve/brief.ts", find: "  if (!pv.ok) return `Don't run it:", replace: "  if (false) return `Don't run it:" },
+  { name: "add subtask: the discovered box ignored", file: "src/serve/server.ts", find: "form.get(\"discovered\") === \"1\" ? { kind: \"discovered\", discovered_during: id } : {}", replace: "{}" },
+  { name: "dialog: no subtasks list", file: "src/render/html.ts", find: "<ul class=\"kids-list\" aria-label=\"Subtasks\">${kidsList}</ul>", replace: "" },
+  { name: "dialog: a re-open keeps the old proof", file: "src/render/html.ts", find: "    if (ev === \"reopen\") proofs.delete(key);\n", replace: "" },
+  { name: "dialog: actions in the rendered file", file: "src/render/html.ts", find: "const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];", replace: "const verbs = DIALOG_ACTIONS[r.state] ?? [];" },
+  { name: "dialog: a done task can't be reopened from it", file: "src/render/html.ts", find: "  done: [[\"REOPEN\", \"Reopen\"]],", replace: "  done: []," },
+  { name: "lanes: an empty Lanes tab shows", file: "src/render/html.ts", find: "const views = VIEWS.filter(([t]) => t !== \"lanes\" || lanes !== \"\");", replace: "const views = VIEWS;" },
+  { name: "history: still called Activity", file: "src/render/html.ts", find: "[\"log\", \"History\"]", replace: "[\"log\", \"Activity\"]" },
   // KAN-8 label channel (2026-10-21): the enforcement the labels suite exists to hold —
   // planted when the coverage hole was found (the suite did not run here, and nothing
   // targeted the label source, so each of these survived by construction).
@@ -401,6 +474,9 @@ const MUTANTS: Mutant[] = [
 // only saves memory; the 413 is the same either way.
 // Known gap, deliberately not listed: BEGIN IMMEDIATE -> BEGIN in sqlite-store.ts
 // cannot be observed from a single in-process connection.
+// Equivalent, so not listed: dropping the "done" check on a task dialog's proof of work
+// (html.ts drawerHtml). A task leaves done only by a re-open, and a re-open already clears
+// its proof (proofsOf), so only done tasks ever have one.
 // Equivalent since 2026-10-18, so not listed: the cursor skipping closed branches
 // (tree.ts `isTerminal` in cursor's walk). The closing gate, the re-open order and
 // ADD_CHILD being denied on done/cancelled mean no open task can sit under a closed
@@ -414,7 +490,7 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "labels"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));
