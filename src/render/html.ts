@@ -13,6 +13,7 @@ import type { FoldResult, Rejection } from "../fold/fold.ts";
 import { MACHINE_ACTOR, type EntityState } from "../fold/types.ts";
 import { REJECTED, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
+import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
 
@@ -105,6 +106,18 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .attention.calm .att-head h2{color:var(--done)}
 .attention.calm p{margin:0;padding:0 16px 12px;color:var(--mut);font-size:13px}.attention.calm p a{color:var(--accent);font-weight:600}
 #v-lanes:checked~main .attention,#v-log:checked~main .attention{display:none}
+.divergence{margin:0 0 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
+.divergence .att-head h2 b{background:var(--warn)}
+.divergence.clean .att-head h2{color:var(--done)}.divergence.unevaluable .att-head h2{color:var(--block)}
+.dv-counts{list-style:none;margin:0;padding:0 16px 10px;display:flex;flex-wrap:wrap;gap:6px}
+.dv-counts li{font-size:12px;color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:1px 9px}
+.dv-counts li b{color:var(--fg);font-variant-numeric:tabular-nums;margin-left:4px}.dv-counts li.hit{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+.dv-rows{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.dv-row{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;padding:8px 16px;border-top:1px solid var(--line)}.dv-row:first-child{border-top:0}
+.dv-row .v{font-size:11px;font-weight:650;letter-spacing:.04em;color:var(--warn)}.dv-row .id{font-family:var(--mono);font-size:11.5px;color:var(--mut);overflow-wrap:anywhere}
+.dv-row .detail{grid-column:1/-1;font-size:13px;overflow-wrap:anywhere}
+.dv-meta{margin:0;padding:8px 16px 12px;color:var(--dim);font-size:12px;overflow-wrap:anywhere;border-top:1px solid var(--line)}.dv-meta code{font-family:var(--mono);font-size:11.5px}
+.divergence.unevaluable p.why{margin:0;padding:0 16px 12px;font-size:13px;overflow-wrap:anywhere}
 .act{display:inline-block;font:550 12.5px/1.4 var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:4px 11px;cursor:pointer;box-shadow:var(--shadow)}
 .act:hover{background:var(--hover)}
 .journey{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 16px 14px;overflow-x:auto;scrollbar-width:thin;box-shadow:var(--shadow)}
@@ -649,6 +662,54 @@ export const THEME_RADIOS = THEMES.map(([t, label]) => `<input class="view-radio
 export const THEME_SWITCH = `<span class="theme" data-theme-switch>${THEMES.map(([t, label, icon]) => `<label for="th-${t}" title="${label}">${icon}</label>`).join("")}</span>`;
 
 // The top bar: views, the search button (live only), the guide link and the hash chip.
+// ---------- divergence (B3 watchdog, D3's panel) ----------
+// A view of the report `tira divergence --json` emits: the caller runs the one differ
+// (src/divergence/divergence.ts) at read time and hands the report here; this section never
+// diffs, stores or caches. Three explicit states: divergences (counts + the non-OK rows),
+// clean (an explicit "0 divergences"), and UNEVALUABLE when the inputs could not be read or
+// the report lacks its coordinates or population — never a blank and never a bare 0, since
+// a 0 nobody computed is the stale-0 this panel exists to kill. Warn-only (severity policy
+// v1): the panel stops nothing.
+export type DivergencePanel = { report: DivergenceReport } | { unevaluable: string };
+
+const isCount = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0;
+
+// Why a report cannot be shown as one, or undefined when it can.
+export function reportDefect(r: DivergenceReport): string | undefined {
+  const f = r?.coordinates?.factory;
+  const t = r?.coordinates?.tira;
+  if (typeof f?.snapshot !== "string" || f.snapshot === "" || typeof t?.stream !== "string" || t.stream === "" || !isCount(t.atSeq)) return "the report has no coordinates (factory snapshot, tira stream and atSeq)";
+  const p = r.population;
+  if (!isCount(p?.factoryRecords) || !isCount(p?.tiraFxEvents) || !isCount(p?.ids)) return "the report has no population (factory records, tira fx: events, ids in the union)";
+  if (!VERDICTS.every((v) => isCount(r.counts?.[v])) || !Array.isArray(r.findings)) return "the report has no per-verdict counts or findings";
+  const total = VERDICTS.reduce((a, v) => a + r.counts[v], 0);
+  if (total !== p.ids || total - r.counts.OK !== r.findings.length) return `the report does not add up: ${total} verdict(s), ${p.ids} id(s), ${r.findings.length} finding(s)`;
+  return undefined;
+}
+
+const unevaluableHtml = (why: string) =>
+  `<section class="divergence unevaluable" data-divergence-state="unevaluable" aria-label="Divergence"><div class="att-head"><h2>Divergence UNEVALUABLE</h2>`
+  + `<span class="sum">factory vs tira could not be compared, so no count is shown</span></div><p class="why" data-unevaluable-reason>${esc(why)}</p></section>`;
+
+export function divergenceHtml(panel: DivergencePanel): string {
+  if ("unevaluable" in panel) return unevaluableHtml(panel.unevaluable);
+  const r = panel.report;
+  const defect = reportDefect(r);
+  if (defect !== undefined) return unevaluableHtml(defect);
+  const n = r.findings.length;
+  const f = r.coordinates.factory;
+  const counts = VERDICTS.map((v) => `<li class="${v !== "OK" && r.counts[v] > 0 ? "hit" : ""}" data-verdict="${v}" data-count="${r.counts[v]}">${v}<b>${r.counts[v]}</b></li>`).join("");
+  const head = n === 0 ? `<h2>0 divergences</h2>` : `<h2><b>${n}</b>${n === 1 ? "divergence" : "divergences"}</h2>`;
+  const rows = n === 0 ? "" : `<ol class="dv-rows">${r.findings.map((x) =>
+    `<li class="dv-row" data-event-id="${esc(x.event_id)}" data-verdict="${esc(x.verdict)}"><span class="v">${esc(x.verdict)}</span><span class="id">${esc(x.event_id)}</span><span class="detail">${esc(x.detail)}</span></li>`).join("")}</ol>`;
+  const meta = `<p class="dv-meta" data-factory-snapshot="${esc(f.snapshot)}" data-stream="${esc(r.coordinates.tira.stream)}" data-at-seq="${r.coordinates.tira.atSeq}"`
+    + ` data-factory-records="${r.population.factoryRecords}" data-tira-fx-events="${r.population.tiraFxEvents}" data-ids="${r.population.ids}">`
+    + `factory ${f.file !== undefined ? `${esc(f.file)} ` : ""}(${esc(f.pin)} <code>${esc(f.snapshot)}</code>) · tira stream ${esc(r.coordinates.tira.stream)} at seq ${r.coordinates.tira.atSeq}<br>`
+    + `read ${r.population.factoryRecords} factory record(s) · ${r.population.tiraFxEvents} tira fx: event(s) · ${r.population.ids} event id(s) in the union · severity policy ${esc(r.severityPolicy)}: warn-only, stops nothing</p>`;
+  return `<section class="divergence ${n === 0 ? "clean" : "divergent"}" data-divergence-state="${n === 0 ? "clean" : "divergent"}" data-divergence-count="${n}" aria-label="Divergence">`
+    + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
+}
+
 function navHtml(dumpHash: string, lastSeq: number, live: boolean): string {
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
   const tabs = VIEWS.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
@@ -667,6 +728,8 @@ export interface RenderOptions {
   // `tira serve`: rows get actions (each through a confirm page), the ⌘K palette loads,
   // and the last action's result shows. A rendered file never carries any of it.
   live?: { flash?: { ok: boolean; text: string } };
+  // The divergence report the caller just computed (or why it could not), shown as a section.
+  divergence?: DivergencePanel;
 }
 
 export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = [], opts: RenderOptions = {}): string {
@@ -713,6 +776,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 ${navHtml(dumpHash, v.lastSeq, live)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
+${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, new Set(anomalies.map((a) => a.seq))) : ""}
 <section class="view view-train" aria-label="Progress">${trainView}</section>
 <section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardHtml(nodes, trail) : `<p class="empty">No tree yet.</p>`}</section>

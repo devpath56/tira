@@ -4,11 +4,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { run } from "../src/cli/cli.ts";
+import { VERDICTS, type DivergenceReport } from "../src/divergence/divergence.ts";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { canonicalJson, fold } from "../src/fold/fold.ts";
-import { CSS, renderHtml } from "../src/render/html.ts";
+import { CSS, divergenceHtml, renderHtml } from "../src/render/html.ts";
 import { streamView, textTree } from "../src/render/tree-view.ts";
 
 const S = "tasktree-dash";
@@ -375,4 +381,158 @@ test("a quote in a task id can't break out of an attribute: every \" is escaped 
   assert.ok(!html.includes('" onmouseover="'), "a raw quote reached the page");
   assert.match(html, /data-key="node:x&#34; onmouseover=&#34;alert\(1\)"/);
   assert.match(html, /aria-label="x&#34; onmouseover=&#34;alert\(1\)"/);
+});
+
+// --- the divergence panel (B3 watchdog PR-B) -------------------------------------------------
+// The panel is a view of the report `tira divergence --json` emits: these tests take that
+// report from the CLI itself, so the panel and the command can never be judged on different
+// inputs. The fixture's answer key (manifest.json) pins the counts: 39 OK, 8 planted.
+
+const B3 = fileURLToPath(new URL("../fixtures/b3/", import.meta.url));
+const B3_FACTORY = join(B3, "factory-state.jsonl");
+const B3_TIRA = join(B3, "tira-log.jsonl");
+const lines = (f: string) => readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>);
+
+async function cliReport(factory: string, tiraLog: string): Promise<{ code: number; report: DivergenceReport | undefined; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const dir = mkdtempSync(join(tmpdir(), "tira-panel-"));
+  const code = await run(["--db", join(dir, "t.db"), "divergence", "--factory", factory, "--tira-log", tiraLog, "--json"], { out: (l) => out.push(l), err: (l) => err.push(l), env: { TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") } });
+  return { code, report: code === 0 ? (JSON.parse(out.join("\n")) as DivergenceReport) : undefined, err: err.join("\n") };
+}
+
+// What the rendered section says, read back off its data-* attributes.
+function panelOf(html: string) {
+  const sec = html.match(/<section class="divergence[^"]*"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(sec !== undefined, "no divergence section rendered");
+  return {
+    sec,
+    state: sec.match(/data-divergence-state="([^"]+)"/)?.[1],
+    count: sec.match(/data-divergence-count="([^"]+)"/)?.[1],
+    counts: Object.fromEntries([...sec.matchAll(/data-verdict="([A-Z-]+)" data-count="(\d+)"/g)].map(([, v, c]) => [v, Number(c)])),
+    rows: [...sec.matchAll(/data-event-id="([^"]+)" data-verdict="([^"]+)"><span class="v">[^<]*<\/span><span class="id">[^<]*<\/span><span class="detail">([^<]*)<\/span>/g)].map(([, event_id, verdict, detail]) => ({ event_id, verdict, detail: detail ?? "" })),
+  };
+}
+const unesc = (s: string) => s.replace(/&#(\d+);/g, (_, c) => String.fromCodePoint(Number(c)));
+const page = (panel: Parameters<typeof divergenceHtml>[0]) => renderHtml(fold([], defaultRegistry()), "empty", "h", [], { divergence: panel });
+
+test("divergence panel: on the fixture pair its counts and rows are the CLI's --json report, 39 OK / 8 by kind", async () => {
+  const { code, report } = await cliReport(B3_FACTORY, B3_TIRA);
+  assert.equal(code, 0);
+  assert.ok(report);
+  const p = panelOf(page({ report }));
+  assert.equal(p.state, "divergent");
+  assert.deepEqual(p.counts, report.counts);
+  assert.deepEqual(p.rows.map((r) => ({ ...r, detail: unesc(r.detail) })), report.findings);
+  assert.equal(p.count, String(report.findings.length));
+  // the answer key: the scorer-verified verdict map
+  const key = JSON.parse(readFileSync(join(B3, "manifest.json"), "utf8")) as { verdicts: { event_id: string; verdict: string }[] };
+  const byKind = Object.fromEntries(VERDICTS.map((v) => [v, key.verdicts.filter((m) => m.verdict === v).length]));
+  assert.deepEqual(p.counts, byKind);
+  assert.equal(p.counts.OK, 39);
+  assert.equal(p.rows.length, 8);
+  assert.deepEqual(Object.fromEntries(p.rows.map((r) => [r.event_id, r.verdict])), Object.fromEntries(key.verdicts.filter((m) => m.verdict !== "OK").map((m) => [m.event_id, m.verdict])));
+  // coordinates and population ride with the counts
+  assert.match(p.sec, new RegExp(`data-factory-snapshot="${report.coordinates.factory.snapshot}" data-stream="factory-b3" data-at-seq="65"`));
+  assert.match(p.sec, /data-factory-records="46" data-tira-fx-events="45" data-ids="47"/);
+});
+
+test("divergence panel: a clean pair renders an explicit '0 divergences', with its counts, coordinates and population", async () => {
+  const { report: full } = await cliReport(B3_FACTORY, B3_TIRA);
+  assert.ok(full);
+  const ok = new Set(Object.entries(full.verdicts).filter(([, v]) => v === "OK").map(([id]) => id));
+  const dir = mkdtempSync(join(tmpdir(), "tira-panel-clean-"));
+  const fac = join(dir, "factory.jsonl");
+  const tl = join(dir, "tira.jsonl");
+  writeFileSync(fac, lines(B3_FACTORY).filter((r) => ok.has(r.event_id)).map((r) => JSON.stringify(r)).join("\n") + "\n");
+  writeFileSync(tl, lines(B3_TIRA).filter((e) => !String(e.eventId).startsWith("fx:") || ok.has(e.eventId)).map((e) => JSON.stringify(e)).join("\n") + "\n");
+  const { code, report } = await cliReport(fac, tl);
+  assert.equal(code, 0);
+  assert.ok(report);
+  assert.equal(report.findings.length, 0, "the filtered pair is clean by the CLI's own verdict");
+  const p = panelOf(page({ report }));
+  assert.equal(p.state, "clean");
+  assert.equal(p.count, "0");
+  assert.match(p.sec, /<h2>0 divergences<\/h2>/);
+  assert.deepEqual(p.counts, report.counts);
+  assert.equal(p.counts.OK, 39);
+  assert.equal(p.rows.length, 0);
+  assert.match(p.sec, /data-ids="39"/);
+});
+
+test("divergence panel: unreadable input renders UNEVALUABLE, never a blank and never a 0", async () => {
+  const { code, err } = await cliReport(join(tmpdir(), "no-such-factory-file.jsonl"), B3_TIRA);
+  assert.equal(code, 1);
+  const p = panelOf(page({ unevaluable: err }));
+  assert.equal(p.state, "unevaluable");
+  assert.match(p.sec, /Divergence UNEVALUABLE/);
+  assert.match(p.sec, /cannot read factory file/);
+  assert.equal(p.count, undefined);
+  assert.deepEqual(p.counts, {});
+  assert.doesNotMatch(p.sec, /0 divergences|data-count=/);
+  // a report without its coordinates or population is not a report
+  const { report } = await cliReport(B3_FACTORY, B3_TIRA);
+  assert.ok(report);
+  const noCoords = { ...report, coordinates: { ...report.coordinates, factory: { ...report.coordinates.factory, snapshot: "" } } };
+  const noPop = { ...report, population: undefined } as unknown as DivergenceReport;
+  const offBy = { ...report, counts: { ...report.counts, OK: 38 } };
+  for (const [bad, why] of [[noCoords, /no coordinates/], [noPop, /no population/], [offBy, /does not add up/]] as const) {
+    const q = panelOf(page({ report: bad }));
+    assert.equal(q.state, "unevaluable");
+    assert.match(q.sec, why);
+    assert.doesNotMatch(q.sec, /data-count=/);
+  }
+});
+
+test("divergence panel: the renderer never diffs — html.ts takes the report and imports no differ", () => {
+  const src = readFileSync(fileURLToPath(new URL("../src/render/html.ts", import.meta.url)), "utf8");
+  const imports = src.match(/^import [^;]*divergence\.ts";$/gm) ?? [];
+  assert.deepEqual(imports, [`import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";`]);
+  assert.doesNotMatch(src, /\bdivergence\(/);
+  // no input, no section: a page that was handed no pair claims nothing about one
+  assert.doesNotMatch(renderHtml(fold([], defaultRegistry()), "empty", "h", []), /class="divergence/);
+  // continuous-at-read: a different report renders differently — nothing remembered between renders
+  const r1 = divergenceHtml({ unevaluable: "a" });
+  assert.notEqual(r1, divergenceHtml({ unevaluable: "b" }));
+});
+
+// Spec assumption 3, the 1 s/read falsifier: one read (CLI parse + diff) plus one render at
+// MVP scale. The fixture is replicated with every id suffixed, so verdicts do not collapse and
+// the counts must scale exactly.
+test("divergence panel: one read + render at ~2,800 tira events costs under 1 s", async () => {
+  const K = 43;
+  const fac = lines(B3_FACTORY);
+  const tl = lines(B3_TIRA);
+  const tag = (id: string, k: number) => {
+    const at = id.indexOf("@");
+    return at < 0 ? `${id}-r${k}` : `${id.slice(0, at)}-r${k}${id.slice(at)}`;
+  };
+  const facOut: string[] = [];
+  const tlOut: string[] = [];
+  let seq = 0;
+  for (let k = 0; k < K; k++) {
+    for (const r of fac) facOut.push(JSON.stringify({ ...r, event_id: `${r.event_id}-r${k}`, entity_id: tag(r.entity_id, k) }));
+    for (const e of tl) {
+      const d = structuredClone(e.data);
+      if (d.entity && typeof d.entity.id === "string") d.entity.id = `${d.entity.id}-r${k}`;
+      if (d.intent?.entity && typeof d.intent.entity.id === "string") d.intent.entity.id = `${d.intent.entity.id}-r${k}`;
+      seq++;
+      tlOut.push(JSON.stringify({ ...e, eventId: `${e.eventId}-r${k}`, seq, streamRevision: seq - 1, data: d }));
+    }
+  }
+  const dir = mkdtempSync(join(tmpdir(), "tira-panel-scale-"));
+  writeFileSync(join(dir, "factory.jsonl"), facOut.join("\n") + "\n");
+  writeFileSync(join(dir, "tira.jsonl"), tlOut.join("\n") + "\n");
+  const { report: one } = await cliReport(B3_FACTORY, B3_TIRA);
+  assert.ok(one);
+  const t0 = performance.now();
+  const { code, report } = await cliReport(join(dir, "factory.jsonl"), join(dir, "tira.jsonl"));
+  assert.ok(report);
+  const html = page({ report });
+  const ms = performance.now() - t0;
+  assert.equal(code, 0);
+  assert.equal(tlOut.length, 2795);
+  assert.deepEqual(panelOf(html).counts, Object.fromEntries(VERDICTS.map((v) => [v, one.counts[v] * K])));
+  console.log(`divergence read+render: ${tlOut.length} tira events, ${facOut.length} factory records, ${report.population.ids} ids: ${ms.toFixed(1)} ms`);
+  assert.ok(ms < 1000, `read+render took ${ms.toFixed(1)} ms at ${tlOut.length} events: continuous-at-read is falsified`);
 });
