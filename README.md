@@ -12,7 +12,7 @@
 > **Exec Note**
 > - **Phase 1 is a vertical slice, not a foundation layer.** It ships a generic core for work management: the event store, the storage interface, the fold, and the write gates — events in, derived state out, guards enforced on every write. It is *not* a product, *not* storage without logic, and *not* a second source of truth.
 > - **The factory is customer #1.** The substrate thesis gets tested against the hardest real user immediately — real event types, real edge cases — instead of against demo scenarios.
-> - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it today, KurrentDB can replace it tomorrow — the fold, guards, and UI never touch storage directly.
+> - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it on one machine, Postgres for a shared tira — the fold, guards, and UI never touch storage directly.
 > - **Phase 1's falsifier is armed: we will learn exactly where the simple model breaks — and that lesson is the deliverable.** Factory work orders track three things independently (authorized, picked up with proof, finished); the machine models a task on one dial. Where the three won't fit the one, the pinch points show precisely how the core must generalize — discovered now, not after four more phases are built on the wrong shape.
 
 # tira — deterministic task-tree tracking
@@ -27,7 +27,7 @@ Nothing is stored as "current" — the fold is authoritative.
    Keyboard: `n` next, `b` back.
 2. **The plan** — `build-plan.md`: phases, in/out scope, JTBDs, test plan, acceptance criteria.
 3. **The packing** — `packing.md`: build/buy/clone per layer, the storage interface
-   (SQLite now, KurrentDB as the named upgrade), UI scope, decision log.
+   (SQLite on one machine, Postgres for a shared tira), UI scope, decision log.
 4. **The spec** — `charts/`: the transition tables in executable form. These are not diagrams;
    they are the transition functions the implementation must honor.
 
@@ -69,19 +69,19 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 ## Code — Phase 1: Track A (generic core) + Track C1 (tree)
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
-built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 433 known bugs and fails unless the suite catches every one;
+built-in `node:sqlite`; Postgres via `pg`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
+`npm run mutants` plants 443 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
-CI runs the match check first, then both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
+CI runs the match check first, then both (with a throwaway Postgres service, so the Postgres store's tests and planted bugs run too), re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
-regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
+regions proposal's graduation rule). One runtime dependency, `pg` (the Postgres driver); `xstate` is a dev
 dependency, used only by the chart verifiers.
 
 | Path | What it is |
 |---|---|
-| `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite implementation: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision` |
+| `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite and Postgres implementations, held to the same contract tests: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision`; `open.ts` picks one from `--db` |
 | `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (regions, coupled only by handoff events — no cross-region invariant), versioned identity, per-type birth name (`node.born`), and a same-lifecycle `tree` config |
 | `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates (incl. `drained`), per-stream tree summary (roots, cursor, active), rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path; `tree.ts` holds the tree rules |
 | `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
@@ -137,6 +137,27 @@ are strings; use `--payload '{"k":1}'` for other types. `--event-id` makes a re-
 `duplicate`. Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or
 `add-child`). `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 3 the health
 sweep found something broken · 1 usage/error.
+
+### Running on Postgres (a shared tira)
+
+`--db` / `$TIRA_DB` takes a `postgres://` URL as well as a SQLite file: every command, `tira
+serve` included, then reads and writes the shared Postgres store (`src/store/postgres-store.ts`;
+`packing.md` §3 and D11). Put a URL with a password in `$TIRA_DB`, not on the command line;
+tira never prints the password.
+
+```
+docker run -d --name tira-pg -e POSTGRES_USER=tira -e POSTGRES_PASSWORD=<pick one> -e POSTGRES_DB=tira -p 127.0.0.1:5433:5432 postgres:17
+export TIRA_DB=postgres://tira:<that password>@127.0.0.1:5433/tira
+node scripts/tira.ts create node dashboard --actor isha   # first use makes the tables and triggers, in schema "tira"
+TIRA_PG_URL=$TIRA_DB npm test                               # the store's contract tests and every scenario, on Postgres too
+```
+
+Without `TIRA_PG_URL` the Postgres tests are skipped, and `npm run mutants` lists the Postgres
+store's planted bugs as not run; CI runs both against a throwaway Postgres service. The tests
+work in their own schemas and drop them after. In production the schema is made once by its
+owner; tira then connects as a login that owns nothing and may only insert into and read the
+events table (and update its counter): the triggers refuse edits, deletes and truncates, and
+not owning the table refuses a drop.
 
 ### Demo D0 script (manual test M0)
 
@@ -667,7 +688,7 @@ Internal knowledge (runbooks, decision logs) lives in BookStack, not here.
 
 **Resolved** (see `packing.md` §5 for rationale):
 - Claim-pipeline approvals happen in chat (Muse/Claude).
-- Event store: SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade path.
+- Event store: SQLite behind the storage interface (`packing.md` §3) on one machine; Postgres for a shared tira (decided 2026-10-21, `packing.md` D11; it replaces KurrentDB as the upgrade).
 - Claim pipeline lives in our store (single source of truth).
 - Transition tables are the spec; JSON + tiny runner preferred over a framework vehicle.
 - Lean UI is in MVP scope, for manual edge testing.

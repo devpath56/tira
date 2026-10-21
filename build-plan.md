@@ -37,7 +37,7 @@ invariant sweeps (on-demand)
 - **Language:** Node.js.
 - **Storage:** SQLite, append-only events table, behind the narrow storage interface
   specified in `packing.md` §3 (`append` / `readStream` / `readAll` / `subscribe`).
-  KurrentDB is the named upgrade path — the interface makes the swap one module.
+  The upgrade path is Postgres (decided 2026-10-21, `packing.md` D11; it replaced KurrentDB) — the interface made the swap one module.
   No second source of truth in MVP.
 - **Interface:** lean UI in MVP, for manual edge testing (log viewer, replay-to-N
   stepper, derived-state inspector, event injection, denial surfacing). The UI reads
@@ -291,7 +291,7 @@ QE notes: (q04) a PASS on M1 licenses D2's lanes — so M1 checks completeness n
 - 2026-10-19 (blind round 1): differ catches all planted divergences, 0 false positives on 30+ clean transitions. Outcome recorded 2026-10-19: 5/10 killed (faults 1, 4, 5, 8, 10), 5 survived (2, 3, 6, 7, 9), each fault run twice — below target. Updated 2026-10-20: manifest revealed and confirmed against his run; survivor fixes are in PR #10 (one catching test each, replant scores 5/5 — a discrimination check, not sign-off). Track-A sign-off moved under the hardened representation-gaps gate (fresh blind round); see the 2026-10-20 block below.
 
 **Resolved since the proposal** (see `packing.md` §5):
-- Log location → SQLite behind the storage interface (`packing.md` §3); KurrentDB is the named upgrade.
+- Log location → SQLite behind the storage interface (`packing.md` §3); Postgres for a shared tira (2026-10-21, `packing.md` D11; it replaced KurrentDB as the upgrade).
 - Approval UX → chat (Muse/Claude); idea pipeline stays in our store (single source of truth).
 - Transition tables are the spec; JSON + tiny runner preferred over the XState vehicle.
 - Lean UI is in MVP scope, for manual edge testing.

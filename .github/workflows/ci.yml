@@ -10,6 +10,24 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A throwaway Postgres for this job: the Postgres store's contract tests, the scenario suite
+    # on Postgres, and its planted bugs run against it (they are skipped without TIRA_PG_URL).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: tira
+          POSTGRES_PASSWORD: tira-ci
+          POSTGRES_DB: tira
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tira"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TIRA_PG_URL: postgres://tira:tira-ci@localhost:5432/tira
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

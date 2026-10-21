@@ -21,8 +21,10 @@ import { catcherFirst, failedTest, namePattern, suiteOrder } from "./mutant-orde
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
+// `needs: "postgres"`: a bug in the Postgres store, which only its Postgres contract tests can
+// catch: run when TIRA_PG_URL names a database (CI sets it), listed as not run otherwise.
 type Mutant =
-  | { name: string; file: string; find: string; replace: string; reextract?: boolean }
+  | { name: string; file: string; find: string; replace: string; reextract?: boolean; needs?: "postgres" }
   | { name: string; json: string; edit: (t: { pairs: { from: string; event: string; outcome: string }[] }) => void };
 
 const flip = (from: string, event: string, outcome: string) => (t: { pairs: { from: string; event: string; outcome: string }[] }) => {
@@ -41,9 +43,9 @@ const MUTANTS: Mutant[] = [
   { name: "store: no-delete trigger dropped", file: "src/store/sqlite-store.ts", find: "CREATE TRIGGER IF NOT EXISTS no_delete_events BEFORE DELETE ON events\n  BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;", replace: "" },
   { name: "store: no-update trigger dropped", file: "src/store/sqlite-store.ts", find: "CREATE TRIGGER IF NOT EXISTS no_update_events BEFORE UPDATE ON events\n  BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;", replace: "" },
   { name: "store: duplicate eventId not deduped", file: "src/store/sqlite-store.ts", find: "e.eventId !== undefined ? (findById.get(eventId)", replace: "false ? (findById.get(eventId)" },
-  { name: "store: subscribe ignores fromSeq", file: "src/store/sqlite-store.ts", find: "let next = opts.fromSeq ?? 1;", replace: "let next = 1;" },
-  { name: "store: subscribe advances before handler", file: "src/store/sqlite-store.ts", find: "if (source === ALL || e.stream === source) await handler(e);\n          next = e.seq + 1;", replace: "next = e.seq + 1;\n          if (source === ALL || e.stream === source) await handler(e);" },
-  { name: "store: async handler not awaited", file: "src/store/sqlite-store.ts", find: "if (source === ALL || e.stream === source) await handler(e);", replace: "if (source === ALL || e.stream === source) void handler(e);" },
+  { name: "store: subscribe ignores fromSeq", file: "src/store/poll.ts", find: "let next = opts.fromSeq ?? 1;", replace: "let next = 1;" },
+  { name: "store: subscribe advances before handler", file: "src/store/poll.ts", find: "if (source === ALL || e.stream === source) await handler(e);\n        next = e.seq + 1;", replace: "next = e.seq + 1;\n        if (source === ALL || e.stream === source) await handler(e);" },
+  { name: "store: async handler not awaited", file: "src/store/poll.ts", find: "if (source === ALL || e.stream === source) await handler(e);", replace: "if (source === ALL || e.stream === source) void handler(e);" },
   // Runner
   { name: "runner ignores guards", file: "src/tables/table.ts", find: "if (!impl(ctx)) return", replace: "if (false && !impl(ctx)) return" },
   { name: "guard accepts non-strings", file: "src/tables/table.ts", find: 'const nonEmptyString = (v: unknown) => typeof v === "string" && v.length > 0;', replace: "const nonEmptyString = (v: unknown) => !!v;" },
@@ -174,7 +176,7 @@ const MUTANTS: Mutant[] = [
   { name: "cli: live runs not logged", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (false) {\n    const row = {" },
   { name: "cli: fixture runs logged too", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (true) {\n    const row = {" },
   { name: "cli: an empty input reads as a zero report", file: "src/cli/cli.ts", find: "  if (rows.length === 0) throw new UsageError(`${what} ${file} has no records`);\n", replace: "" },
-  { name: "cli: an empty stream reads as a zero report", file: "src/cli/cli.ts", find: "    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${db}`);\n", replace: "" },
+  { name: "cli: an empty stream reads as a zero report", file: "src/cli/cli.ts", find: "    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${dbLabel(db)}`);\n", replace: "" },
   { name: "render: no closed-by-tira mark", file: "src/render/html.ts", find: "r.closedByTira ? `<span class=\"mark tira\">closed by tira</span>` : \"\",", replace: "\"\"," },
   { name: "render: progress counts only done, not cancelled", file: "src/render/html.ts", find: 'const CLOSED = new Set(["done", "cancelled"]);', replace: 'const CLOSED = new Set(["done"]);' },
   { name: "render: drawer ids don't match the links", file: "src/render/html.ts", find: "<section class=\"drawer\" id=\"t${n.i}\"", replace: "<section class=\"drawer\" id=\"d${n.i}\"" },
@@ -303,7 +305,7 @@ const MUTANTS: Mutant[] = [
   { name: "b2: the fx: key ignores the actor", file: "src/write/fxkey.ts", find: "actor: t.actor ?? null,", replace: "actor: null," },
   { name: "b2: tira key skips the version rule", file: "src/cli/cli.ts", find: "  if (!def.versioned && cmd.entity.version !== undefined) throw new UsageError(", replace: "  if (false) throw new UsageError(" },
   { name: "b2: tira key skips the shape check", file: "src/cli/cli.ts", find: "  checkCommand(cmd, registry);\n", replace: "" },
-  { name: "b2: tira key opens the store", file: "src/cli/cli.ts", find: "    if (cmd === \"key\") return key(args, values, registry, stream, io);\n", replace: "    if (cmd === \"key\") { new SqliteEventStore({ path: db }).close(); return key(args, values, registry, stream, io); }\n" },
+  { name: "b2: tira key opens the store", file: "src/cli/cli.ts", find: "    if (cmd === \"key\") return key(args, values, registry, stream, io);\n", replace: "    if (cmd === \"key\") { void openStore(db).close(); return key(args, values, registry, stream, io); }\n" },
   { name: "b2: --now takes any time", file: "src/cli/cli.ts", find: "    if (values.now !== undefined && !isIsoTime(values.now)) throw", replace: "    if (false) throw" },
   { name: "b2: the page doesn't mark automatic rows", file: "src/render/html.ts", find: "${x.auto ? `<span class=\"auto\"", replace: "${false ? `<span class=\"auto\"" },
   { name: "scenarios: a step's event id ignored", file: "src/scenario/run.ts", find: "      const cmd = { ...plain, ...(eventId ? { eventId } : {}) } as Command;", replace: "      const cmd = plain;" },
@@ -501,6 +503,17 @@ const MUTANTS: Mutant[] = [
   { name: "labels: an oracle may write non-label events at the write path", file: "src/write/write-path.ts", find: "if (!internal && isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (!internal && isOracle(intent.actor) && isLabelBirth(intent)) {" },
   { name: "labels: an oracle may write non-label events in the fold", file: "src/fold/fold.ts", find: "if (isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (isOracle(intent.actor) && isLabelBirth(intent)) {" },
   { name: "labels: a refused self-label still appends a rejection", file: "src/write/write-path.ts", find: "batch: [] as NewEvent[],", replace: "batch: [toRejectedEvent(intent, \"bad-label\", problem.detail, moveId)]," },
+  // The Postgres store (2026-10-21): the same rules as SQLite's, judged by the same contract tests
+  { name: "postgres: the counter row isn't locked (two writers take the same seq)", file: "src/store/postgres-store.ts", find: "SELECT last FROM ${s}.event_seq WHERE one FOR UPDATE", replace: "SELECT last FROM ${s}.event_seq WHERE one", needs: "postgres" },
+  { name: "postgres: the counter isn't advanced", file: "src/store/postgres-store.ts", find: "      await c.query(`UPDATE ${s}.event_seq SET last = $1 WHERE one`, [last]);\n", replace: "", needs: "postgres" },
+  { name: "postgres: no-update trigger dropped", file: "src/store/postgres-store.ts", find: "CREATE OR REPLACE TRIGGER no_update_events BEFORE UPDATE ON ${s}.events\n  FOR EACH ROW EXECUTE FUNCTION ${s}.events_append_only();\n", replace: "", needs: "postgres" },
+  { name: "postgres: no-delete trigger dropped", file: "src/store/postgres-store.ts", find: "CREATE OR REPLACE TRIGGER no_delete_events BEFORE DELETE ON ${s}.events\n  FOR EACH ROW EXECUTE FUNCTION ${s}.events_append_only();\n", replace: "", needs: "postgres" },
+  { name: "postgres: TRUNCATE allowed", file: "src/store/postgres-store.ts", find: "CREATE OR REPLACE TRIGGER no_truncate_events BEFORE TRUNCATE ON ${s}.events\n  FOR EACH STATEMENT EXECUTE FUNCTION ${s}.events_append_only();\n", replace: "", needs: "postgres" },
+  { name: "postgres: duplicate eventId not deduped", file: "src/store/postgres-store.ts", find: "e.eventId !== undefined ? byId.get(eventId) : undefined", replace: "e.eventId !== undefined ? undefined : undefined", needs: "postgres" },
+  { name: "postgres: expectedRevision ignored", file: "src/store/postgres-store.ts", find: "if (fresh.length > 0 && opts.expectedRevision !== undefined && opts.expectedRevision !== rev) {", replace: "if (false) {", needs: "postgres" },
+  { name: "postgres: a duplicate in another stream accepted", file: "src/store/postgres-store.ts", find: "if (existing && existing.stream !== stream) throw new DuplicateEventIdError", replace: "if (false) throw new DuplicateEventIdError", needs: "postgres" },
+  { name: "open: a postgres URL opens a SQLite file", file: "src/store/open.ts", find: "return isPostgresUrl(db) ? new PostgresEventStore", replace: "return false ? new PostgresEventStore" },
+  { name: "open: a URL's password is printed", file: "src/store/open.ts", find: ".replace(/^(\\w+:\\/\\/[^:/@]+):[^@/]*@/, \"$1:***@\")", replace: "" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -604,6 +617,12 @@ if (args.includes("--check")) {
   process.exit(0);
 }
 
+// Bugs whose catchers need a database this run doesn't have: named, never counted as caught.
+const needsPg = (m: Mutant) => "needs" in m && m.needs === "postgres";
+const unrunnable = process.env.TIRA_PG_URL ? [] : selected.filter(needsPg);
+for (const m of unrunnable) console.log(`NOT RUN  ${m.name} (needs Postgres: set TIRA_PG_URL)`);
+const runnable = selected.filter((m) => !unrunnable.includes(m));
+
 const jobs = Math.max(1, Number(process.env.MUTANT_JOBS) || availableParallelism());
 const t0 = performance.now();
 
@@ -685,7 +704,7 @@ async function hunt(dir: string, m: Mutant, target: readonly string[]): Promise<
   return firstFailing(dir, catcherFirst(suiteOrder(target, SUITES, cost, readCached, memo), known?.suite));
 }
 
-await pool(selected, jobs, async (m) => {
+await pool(runnable, jobs, async (m) => {
   const dir = scratchCopy();
   try {
     const target = plant(dir, m);
@@ -710,6 +729,6 @@ await pool(selected, jobs, async (m) => {
 const names = new Set(MUTANTS.map((m) => m.name));
 writeFileSync(CATCHERS, JSON.stringify(Object.fromEntries(Object.entries(catchers).filter(([k]) => names.has(k)).sort(([a], [b]) => a.localeCompare(b))), null, 1) + "\n");
 const seconds = Math.round((performance.now() - t0) / 1000);
-console.log(`\n${selected.length - survived - broken}/${selected.length} killed, ${survived} survived, ${broken} broken`);
+console.log(`\n${runnable.length - survived - broken}/${runnable.length} killed, ${survived} survived, ${broken} broken${unrunnable.length > 0 ? `; ${unrunnable.length} not run (no Postgres)` : ""}`);
 console.log(`${jobs} at a time, ${seconds}s; caught by last time's test: ${how.test}, by the first file tried: ${how.file}, later: ${how.later}`);
 process.exit(survived || broken ? 1 : 0);

@@ -1,5 +1,7 @@
 export * from "./store/types.ts";
 export { SqliteEventStore, type SqliteStoreOptions } from "./store/sqlite-store.ts";
+export { PostgresEventStore, type PostgresStoreOptions } from "./store/postgres-store.ts";
+export { openStore, type ClosableStore } from "./store/open.ts";
 export * from "./tables/table.ts";
 export * from "./tables/registry.ts";
 export * from "./fold/types.ts";

@@ -9,7 +9,7 @@ import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderHtml, type DivergencePanel } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
-import { SqliteEventStore } from "../store/sqlite-store.ts";
+import { dbLabel, openStore, type ClosableStore } from "../store/open.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { checkCommand, type Command, type WriteResult } from "../write/write-path.ts";
 import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
@@ -68,7 +68,8 @@ Usage:
                                                   --json prints the per-id verdict map with the report
 
 Options:
-  --db PATH        store file (default: $TIRA_DB, else ./tira.db)
+  --db PATH|URL    the store: a SQLite file, or a postgres:// URL for the shared Postgres store
+                   (default: $TIRA_DB, else ./tira.db). Put a URL with a password in $TIRA_DB, not on the command line
   --stream NAME    stream / tree (default: $TIRA_STREAM, else tasktree-main)
   --actor NAME     who is acting, for create/send (default: $TIRA_ACTOR)
   --version N      entity version (versioned entity types only)
@@ -186,7 +187,7 @@ function commandFrom(kind: "create" | "send", args: string[], values: Values, st
   return kind === "create" ? { ...base, kind: "create" } : { ...base, kind: "event", event };
 }
 
-async function write(kind: "create" | "send", args: string[], values: Values, store: SqliteEventStore, registry: Registry, stream: string, io: Io): Promise<number> {
+async function write(kind: "create" | "send", args: string[], values: Values, store: ClosableStore, registry: Registry, stream: string, io: Io): Promise<number> {
   if (args.length < (kind === "create" ? 2 : 3)) {
     throw new UsageError(kind === "create" ? "usage: tira create <type> <id> [key=value ...]" : "usage: tira send <type> <id> <EVENT> [key=value ...]");
   }
@@ -234,7 +235,7 @@ function eventDetail(e: StoredEvent): string {
   return p && Object.keys(p).length > 0 ? JSON.stringify(p) : "";
 }
 
-async function log(store: SqliteEventStore, stream: string, values: Values, io: Io): Promise<number> {
+async function log(store: ClosableStore, stream: string, values: Values, io: Io): Promise<number> {
   const events = await store.readStream(stream);
   if (values.json) {
     io.out(JSON.stringify(events));
@@ -326,7 +327,7 @@ const foldOptions = (upTo: number | undefined, values: Values): FoldOptions => (
   ...(values.vantage !== undefined ? { vantage: values.vantage } : {}),
 });
 
-async function state(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+async function state(store: ClosableStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   if (values.json) io.out(canonicalJson(r));
   else printState(r, stream, upTo, io);
@@ -336,7 +337,7 @@ async function state(store: SqliteEventStore, registry: Registry, stream: string
 // The replay oracle for demo D0 / manual tests M0–M1: every dump is a full replay of
 // the raw log in this process (nothing derived is stored), so equal hashes across
 // runs, copies of the store file, or machines mean the replay is deterministic.
-async function dump(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+async function dump(store: ClosableStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   if (values.hash) {
     const sha = fingerprint(r);
@@ -352,7 +353,7 @@ const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex
 
 // Health sweeps (src/sweep/sweep.ts). Exit 0 when nothing is broken (things to look at
 // are fine), 3 when something is.
-async function sweepCmd(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+async function sweepCmd(store: ClosableStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = sweep(await store.readStream(stream), registry, stream, upTo === undefined ? {} : { upToSeq: upTo });
   if (values.json) {
     io.out(canonicalJson(r));
@@ -373,7 +374,7 @@ async function sweepCmd(store: SqliteEventStore, registry: Registry, stream: str
   return r.broken > 0 ? 3 : 0;
 }
 
-async function tree(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+async function tree(store: ClosableStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const r = fold(await store.readStream(stream), registry, foldOptions(upTo, values));
   const v = streamView(r, stream);
   if (values.json) io.out(JSON.stringify(v.roots));
@@ -382,7 +383,7 @@ async function tree(store: SqliteEventStore, registry: Registry, stream: string,
 }
 
 // D1: a static page from the same fold `dump` hashes, stamped with that hash (M1 oracle).
-async function render(store: SqliteEventStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
+async function render(store: ClosableStore, registry: Registry, stream: string, upTo: number | undefined, values: Values, io: Io): Promise<number> {
   const events = await store.readStream(stream);
   const r = fold(events, registry, foldOptions(upTo, values));
   const hash = fingerprint(r);
@@ -544,13 +545,13 @@ async function divergenceCmd(values: Values, db: string, io: Io): Promise<number
     const named = values.stream ?? io.env.TIRA_STREAM;
     if (named === undefined) throw new UsageError("tira divergence reads the store by stream: pass --stream (or --tira-log FILE)");
     stream = named;
-    const store = new SqliteEventStore({ path: db });
+    const store = openStore(db);
     try {
       events = await store.readStream(stream);
     } finally {
-      store.close();
+      await store.close();
     }
-    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${db}`);
+    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${dbLabel(db)}`);
   } else {
     events = readTiraLog(values["tira-log"] as string);
     const streams = [...new Set(events.map((e) => e.stream))];
@@ -602,7 +603,7 @@ async function serve(db: string, registry: Registry, stream: string, values: Val
   if (actor === undefined) throw new UsageError("tira serve needs --actor NAME: who the page's actions are written as");
   const port = values.port === undefined ? 4747 : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
-  const store = new SqliteEventStore({ path: db });
+  const store = openStore(db);
   const file = factoryFile(values, io);
   const server = tiraServer({ store, registry, stream, actor, divergence: (events) => divergencePanel(file, events, stream) });
   try {
@@ -613,7 +614,7 @@ async function serve(db: string, registry: Registry, stream: string, values: Val
     await new Promise<void>((resolve) => server.close(() => resolve()));
     return 0;
   } finally {
-    store.close();
+    await store.close();
   }
 }
 
@@ -648,13 +649,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
 
   const db = values.db ?? io.env.TIRA_DB ?? "tira.db";
   const stream = values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main";
-  let store: SqliteEventStore | undefined;
+  let store: ClosableStore | undefined;
   try {
     if (cmd === "key") return key(args, values, registry, stream, io);
     if (cmd === "divergence") return await divergenceCmd(values, db, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     if (cmd === "serve") return await serve(db, registry, stream, values, io);
-    store = new SqliteEventStore({ path: db });
+    store = openStore(db);
     switch (cmd) {
       case "create":
       case "send":
@@ -681,6 +682,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
     io.err(`tira: ${(err as Error).message}`);
     return 1;
   } finally {
-    store?.close();
+    await store?.close();
   }
 }

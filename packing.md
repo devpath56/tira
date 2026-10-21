@@ -23,7 +23,7 @@ decided against the JTBDs with no incumbency bias (assumes nothing already spec'
 
 | Layer | Best served by OSS | Why / Why not |
 |---|---|---|
-| Event log | **SQLite** (interface below; KurrentDB is the named upgrade) | Append-only table, single file, zero ops, queryable. KurrentDB is the right *category* (event-native) but serves storage, not logic — all 11 JTBDs' logic stays custom either way, and single-writer MVP scale doesn't justify the server. |
+| Event log | **SQLite** on one machine; **Postgres** for a shared tira (interface below; decided 2026-10-21, D11) | SQLite: append-only table, single file, zero ops, queryable. Postgres: the same rules for many people and workspaces, plus people, permissions and the Jira/git sync outbox in one database. KurrentDB was the named upgrade until D11: the right *category* (event-native), but it serves storage, not logic, and would need a second database for everything else. |
 | Fold engine | — (build) | Pure function over the transition tables; no OSS knows our domain. |
 | Transition tables | — (build); JSON Schema validates shape | The 35-pair node table and 36-pair idea table are the spec. Executable form is an implementation choice (JSON + tiny runner preferred over a framework). |
 | Write-time guards | — (build) | Plain conditionals (`COMPLETE` without `evidenceRef` → reject). OPA is factory-consistent but overkill inside the MVP. |
@@ -36,8 +36,8 @@ decided against the JTBDs with no incumbency bias (assumes nothing already spec'
 ## 3. Storage interface
 
 The event store is the one swappable layer. Everything above speaks this interface;
-SQLite implements it for the MVP, KurrentDB can replace the implementation later
-without touching the fold, guards, or UI.
+SQLite implements it for one machine and Postgres for a shared tira (D11). Both pass
+the same contract tests (`test/store.test.ts`), and neither touches the fold, guards, or UI.
 
 ```typescript
 interface EventStore {
@@ -87,7 +87,7 @@ reconstruction. The `$all` source exists for future multi-tree operation.
 
 1. **Append-only is structural, not conventional.** No update/delete operations exist
    on the interface. The SQLite implementation adds `BEFORE UPDATE` / `BEFORE DELETE`
-   triggers that abort; KurrentDB is immutable by construction.
+   triggers that abort; Postgres adds the same, plus `BEFORE TRUNCATE`.
 2. **The store never validates domain rules.** Guards (evidence on COMPLETE, reason on
    REOPEN, transition legality) run in the write path *before* `append` is called.
    The store guarantees ordering, durability, and idempotency — nothing more.
@@ -119,7 +119,25 @@ CREATE TRIGGER no_delete_events BEFORE DELETE ON events
 `expectedRevision` is checked in a transaction (`MAX(stream_revision)` per stream).
 `subscribe` is a poll loop over `seq` (MVP scale: fine).
 
-### KurrentDB mapping (upgrade path)
+### Postgres implementation (shared tira, D11)
+
+`src/store/postgres-store.ts`, selected by a `postgres://` URL in `--db` / `$TIRA_DB`. One
+schema (default `tira`) holds the same `events` table (`seq` BIGINT primary key,
+`UNIQUE(stream, stream_revision)`, `event_id` UNIQUE, data and metadata as text, exactly as
+written) and a one-row counter `event_seq`. Triggers abort UPDATE, DELETE and TRUNCATE.
+
+`seq` stays global, gapless and in commit order. Postgres's own numbering (a sequence or
+identity) leaves gaps on rollback, and two writers can commit their numbers out of order, so
+a reader could pass seq 11 before seq 10 lands. Instead every append locks the counter row
+(`SELECT … FOR UPDATE`) for its transaction: appends run one at a time, each takes the next
+numbers, and commits in that order. Ample for a team. If writes ever queue, the choice is one
+order per workspace (an open call for Devansh).
+
+In production tira connects as a login that owns nothing and may only `INSERT` and `SELECT`
+on the events table (and update the counter); the triggers stop edits, and ownership stops a
+`DROP`. `subscribe` is the same poll loop as SQLite's (`src/store/poll.ts`).
+
+### KurrentDB mapping (the named upgrade until D11)
 
 | Interface | KurrentDB |
 |---|---|
@@ -161,3 +179,4 @@ never state directly.
 | D8 | Docs/showcase → Mintlify Starter (free) | Free-tier gates (no AI assistant, no preview deploys, no analytics, 5 seats) don't constrain a two-person public showcase; MDX-in-git keeps Docusaurus as a clean exit. Scalar renders the API reference from the OpenAPI spec; BookStack holds internal knowledge (runbooks, decision logs) outside the repo. |
 | D9 | Phase 1 = vertical slice, factory stream first | The first build is end-to-end (store + fold + gates + factory stream vocabulary), not layered. The factory is customer #1: the substrate thesis meets the hardest real user on day one, and the cutover decision gets measured evidence (dual-run divergence) instead of argument. The dashboard scenarios become the executable test suite. Falsifier: if the brief's 3-dimension state doesn't fit the node lifecycle, Phase 1 discovers the needed generalization. |
 | D10 | Cross-region rules live in the declared handoff policy (H1–H6) | Tables stay small and guard-free; composition declared in config per the regions proposal, mechanically enforced by region-scan. Keeps each region's table independently auditable; joint meaning is computed in exactly one place. Counter-pressure: the policy must stay declarative — a procedural policy becomes a second codebase, and the sign-off checks that. |
+| D11 | Postgres, not KurrentDB, for a shared tira (decided by Isha, 2026-10-21) | tira goes multi-user across 15+ workspaces, synced with Jira and git. Postgres meets every log rule above and also holds people, workspaces, permissions (row-level security) and the sync outbox in one database; KurrentDB would need a second database for those. Revises D5's upgrade path; SQLite stays for one machine. Open for Devansh: one order across all workspaces or one per workspace; who wins when tira and Jira disagree; when to switch. Brief: the "tira storage and workspaces" doc. |
