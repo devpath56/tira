@@ -11,6 +11,8 @@ import { Dispatcher } from "../src/write/dispatcher.ts";
 import { compareCodeUnits, fold } from "../src/fold/fold.ts";
 import type { Command, WriteResult } from "../src/write/write-path.ts";
 import type { EntityRef } from "../src/fold/types.ts";
+import { PASS, verifies } from "../src/tables/factory.ts";
+import { filesMatching, srcCode } from "./src-text.ts";
 
 const S = "factory";
 type DistCmd = Command extends infer C ? (C extends unknown ? Omit<C, "stream"> : never) : never; // keep the create/event union
@@ -875,5 +877,51 @@ test("only the exact word PASS verifies a drop: pass, Pass and padded PASS are r
   for (const verdict of ["pass", "Pass", " PASS", "PASS ", "PASSED", true]) {
     assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: verdict })), "rejected:guard-failed", JSON.stringify(verdict));
   }
+  assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: "PASS" })), "appended");
+});
+
+// ---------- the five representation classes, made structural (2026-10-21) ----------
+// One test per class, named by its convention id (conventions/conventions.jsonl): the class is
+// defined in one place (structure), and every surface the convention binds is checked.
+
+test("claimable-birth-order: every work queue is in birth order, never name order: claimable now, tree roots, children and the cursor, all through one byBirth", async () => {
+  // structure: one birth comparator, and the queues sort by it
+  const src = srcCode();
+  assert.deepEqual(filesMatching(src, /createdSeq\s*-/), ["src/fold/view.ts"]);
+  assert.match(src.get("src/tables/factory.ts") ?? "", /export const frontier[^;]*\.sort\(byBirth\);/);
+  assert.match(src.get("src/fold/tree.ts") ?? "", /export function roots[^;]*\.sort\(byBirth\);/);
+  // zeta is born first everywhere: a brief, a root, and a child
+  const t = setup();
+  for (const id of ["zeta", "alpha", "mid"]) {
+    await t.make(brief(id), "orchestrator");
+    await t.ev(brief(id), "DISPATCHED", "orchestrator");
+  }
+  for (const id of ["zeta", "alpha"]) await t.make({ type: "node", id }, "isha");
+  for (const id of ["zeta_kid", "alpha_kid"]) await t.make({ type: "node", id }, "isha", { parent_id: "zeta" });
+  const r = await t.now();
+  assert.deepEqual(r.frontier[S], ["brief:zeta@1", "brief:alpha@1", "brief:mid@1"]);
+  assert.deepEqual(r.trees[S]?.node?.roots, ["node:zeta", "node:alpha"]);
+  assert.deepEqual(r.entities.find((e) => e.key === "node:zeta")?.tree?.children, ["node:zeta_kid", "node:alpha_kid"]);
+  assert.equal(r.trees[S]?.node?.cursor, "node:zeta_kid");
+});
+
+test("verify-vocabulary-pass: exactly the word PASS verifies a drop, read in one place: every near-miss is refused, whatever its casing, padding, lookalike or type", async () => {
+  // structure: the word is written once in src, and a verdict is read only through verifies
+  const src = srcCode();
+  assert.deepEqual(filesMatching(src, /["'`]PASS["'`]/), ["src/tables/factory.ts"]);
+  assert.equal(src.get("src/tables/factory.ts")?.match(/["'`]PASS["'`]/g)?.length, 1);
+  assert.deepEqual(filesMatching(src, /done_test_result\s*[!=]==?|done_test_result\)?\.(?:trim|to\w*Case|normalize)/), []);
+  const nearMisses: unknown[] = [
+    "pass", "Pass", "pASS", " PASS", "PASS ", "PASS\n", "\tPASS", "​PASS", "PASS​",
+    "ＰＡＳＳ", "PАSS", "PASSED", "PAS", "P A S S", "", null, true, 1, ["PASS"], { result: "PASS" },
+  ];
+  for (const v of nearMisses) assert.equal(verifies(v), false, JSON.stringify(v));
+  assert.equal(verifies(PASS), true);
+  // the write path: each near-miss is refused, and so is no verdict at all; then PASS verifies
+  const t = setup();
+  await t.claimed("b", "s1");
+  await t.make(dropRef("b"), "s1");
+  for (const v of nearMisses) assert.match(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: v })), /^rejected:/, JSON.stringify(v));
+  assert.match(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator")), /^rejected:/, "no verdict");
   assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: "PASS" })), "appended");
 });

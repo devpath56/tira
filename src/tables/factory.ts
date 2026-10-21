@@ -8,6 +8,7 @@ import type { EntityTypeDef } from "./registry.ts";
 import type { EntityState, StateView } from "../fold/types.ts";
 import { isIsoTime, isoMs } from "../time.ts";
 import { isOracle, VERDICTS } from "../fold/labels.ts";
+import { byBirth } from "../fold/view.ts";
 
 // Role names are literal actor ids (A15). The dispatcher is the single append process
 // for handoff receivers (N2, A9); the write path reserves its name like tira's.
@@ -44,7 +45,12 @@ export const unverifiedDeps = (view: StateView, b: EntityState) => depsOf(b).fil
 export const frontier = (view: StateView): EntityState[] =>
   view.all("brief")
     .filter((b) => !isSuperseded(view, b) && b.regions.gate === "gated" && b.regions.claim === "unclaimed" && b.regions.outcome === "open" && unverifiedDeps(view, b).length === 0)
-    .sort((a, b) => a.createdSeq - b.createdSeq);
+    .sort(byBirth);
+
+// The verify vocabulary is exactly {"PASS"} (incident 2; convention verify-vocabulary-pass):
+// no other casing, no padding, no lookalike, no non-string. The one place a verdict is read.
+export const PASS = "PASS";
+export const verifies = (result: unknown): boolean => result === PASS;
 
 export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,
@@ -65,7 +71,7 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
   renamedByAllowed: ({ actor, entity }) => s(actor) && (actor === entity.id || actor === ORCHESTRATOR || actor === MAC),
   // Incident 2: the filer never verifies its own drop, and nothing verifies without a PASS.
   orchestratorVerifiesPass: ({ actor, payload, entity }) =>
-    actor === ORCHESTRATOR && actor !== entity.createdBy && payload.done_test_result === "PASS",
+    actor === ORCHESTRATOR && actor !== entity.createdBy && verifies(payload.done_test_result),
 
   // Births (core change C2).
   // A3/A4: the orchestrator creates a brief version; blocked_by is fixed per version.

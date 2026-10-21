@@ -11,6 +11,8 @@ import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
 import { CSP, hintFor, inOrder, taskIndex, tiraServer } from "../src/serve/server.ts";
+import { esc } from "../src/render/escape.ts";
+import { filesMatching, srcCode } from "./src-text.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
 import { rank, score } from "../src/serve/rank.mjs";
 
@@ -72,8 +74,8 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.equal(page.headers["referrer-policy"], "same-origin");
     assert.match(page.body, /<script type="module" src="\/app\.mjs"><\/script>/);
     assert.match(page.body, /data-open-palette/);
-    assert.match(page.body, /<a class="act" href="\/confirm\?type=node&amp;id=colors&amp;event=UNBLOCK" data-act="UNBLOCK">Unblock<\/a>/);
-    assert.match(page.body, /<a class="act" href="\/confirm\?type=node&amp;id=loading_state&amp;event=COMPLETE" data-act="COMPLETE">Complete<\/a>/);
+    assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=colors&#38;event=UNBLOCK" data-act="UNBLOCK">Unblock<\/a>/);
+    assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=loading_state&#38;event=COMPLETE" data-act="COMPLETE">Complete<\/a>/);
     assert.match(page.body, /<section class="drawer guide" id="guide"[^>]*data-guide>/);
     assert.ok(!/<script(?![^>]*src="\/app\.mjs")/.test(page.body), "no inline script");
     // the same log rendered to a file: no script, no actions, no search button
@@ -575,6 +577,53 @@ test("Cancel, Reopen and Add subtask go through the page like the other verbs", 
     await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
     const underDone = (await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=ADD_SUBTASK")).body;
     assert.match(underDone, /What to do:<\/b> Re-open fetch_metrics first, with a reason\./);
+  } finally {
+    await s.done();
+  }
+});
+
+// ---------- the five representation classes, made structural (2026-10-21) ----------
+
+test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one escape, total over the class, on the rendered page and every served page", async () => {
+  // structure: one escape in src, used by both HTML surfaces; no hand-written entities; the
+  // browser scripts never build markup from data
+  const src = srcCode();
+  assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/server.ts"]);
+  assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
+  assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
+  // total over the class, and nothing else changes
+  assert.equal(esc(`&<>"'`), "&#38;&#60;&#62;&#34;&#39;");
+  for (let c = 0x20; c < 0x7f; c++) if (!`&<>"'`.includes(String.fromCharCode(c))) assert.equal(esc(String.fromCharCode(c)), String.fromCharCode(c));
+  // taint: the whole class inside everything a person types (task ids, a block reason, proof of
+  // work, a subtask name), then every page: each copy of the marker reaches it with all five escaped
+  const M = `QX&<>"'XQ`;
+  const s = await serving();
+  try {
+    const wp = new WritePath(s.store, s.registry);
+    const make = (id: string, parent_id: string) => wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha", payload: { parent_id } });
+    await make(`t${M}`, "table");
+    await make(`b${M}`, "table");
+    await s.send(`b${M}`, "BLOCK", { reason: `r${M}` });
+    await s.send("loading_state", "COMPLETE", { evidenceRef: `e${M}` });
+    const log = await s.store.readStream(S);
+    const confirm = async (id: string, event: string) => (await s.http("GET", `/confirm?type=node&id=${encodeURIComponent(id)}&event=${encodeURIComponent(event)}`)).body;
+    const pages: Record<string, string> = {
+      "the rendered page": renderHtml(fold(log, s.registry), S, "h", log),
+      "the served page": (await s.http("GET", "/")).body,
+      "start's confirm page": await confirm(`t${M}`, "START"),
+      "block's confirm page (reasons used before, open tasks)": await confirm(`t${M}`, "BLOCK"),
+      "unblock's confirm page": await confirm(`b${M}`, "UNBLOCK"),
+      "a task that doesn't exist": await confirm(`g${M}`, "START"),
+      "a verb the page doesn't take": await confirm(`t${M}`, `X${M}`),
+      "a post on a log that moved, shown again": (await s.form({ token: "t0k3n", type: "node", id: `t${M}`, event: "BLOCK", seen: "1", command: `tira send node t${M} BLOCK reason=r${M}` })).body,
+      "a post missing its reason, shown again": (await s.form({ token: "t0k3n", type: "node", id: `t${M}`, event: "BLOCK", command: `tira send node t${M} BLOCK note=n${M}` })).body,
+    };
+    for (const [name, body] of Object.entries(pages)) {
+      const copies = body.match(/QX.{0,60}?XQ/g) ?? [];
+      assert.ok(copies.length > 0, `${name}: the marker never reached it`);
+      for (const c of copies) assert.doesNotMatch(c.replace(/&#\d+;/g, ""), /[&<>"']/, `${name}: raw ${c}`);
+    }
   } finally {
     await s.done();
   }

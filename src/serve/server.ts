@@ -13,14 +13,15 @@
 // (cross-site forms); the actor is fixed when the server starts; only the tree verbs
 // below are accepted; a strict Content-Security-Policy allows only this server's scripts.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
-import { canonicalJson, fold, type FoldResult } from "../fold/fold.ts";
+import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
 import { attentionSince, BRAND, CSS, proofsOf, renderHtml, THEME_RADIOS, THEME_SWITCH, type DivergencePanel } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
+import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
 import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, withDefaults, type PageAction } from "./command.ts";
@@ -36,7 +37,6 @@ const HEADERS = { "Content-Security-Policy": CSP, "X-Content-Type-Options": "nos
 const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
 const MAX_BODY = 16 * 1024;
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.codePointAt(0)};`);
 const ASSETS: Record<string, string> = {
   "/app.mjs": readFileSync(new URL("./app.mjs", import.meta.url), "utf8"),
   "/rank.mjs": readFileSync(new URL("./rank.mjs", import.meta.url), "utf8"),
@@ -383,7 +383,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const now = async () => {
     const events = await opts.store.readStream(opts.stream);
     const r = fold(events, opts.registry);
-    return { events, r, hash: createHash("sha256").update(canonicalJson(r)).digest("hex") };
+    return { events, r, hash: fingerprint(r) };
   };
   const send = (res: ServerResponse, status: number, type: string, body: string, extra: Record<string, string> = {}) => {
     res.writeHead(status, { ...HEADERS, "Content-Type": type, ...extra });

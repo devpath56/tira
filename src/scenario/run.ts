@@ -211,7 +211,7 @@ export async function runScenario(s: Scenario, all: Map<string, Scenario>, regis
   // determinism (T2 for every script): twice, from a shuffled copy, and at every prefix
   const once = canonicalJson(r);
   if (canonicalJson(fold(log, registry)) !== once) failures.push("determinism: two folds of the same log differ");
-  const shuffled = [...log].sort((a, b) => (a.eventId < b.eventId ? -1 : 1));
+  const shuffled = [...log].sort((a, b) => compareCodeUnits(a.eventId, b.eventId));
   if (canonicalJson(fold(shuffled, registry)) !== once) failures.push("determinism: a shuffled copy of the log folds differently");
   for (const e of log) {
     const at = fold(log, registry, { upToSeq: e.seq });
