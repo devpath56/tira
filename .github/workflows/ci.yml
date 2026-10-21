@@ -34,5 +34,19 @@ jobs:
       - name: region-scan factory (warn mode)
         continue-on-error: true
         run: python3 docs/tools/region-scan.py --all charts/brief-gate.json charts/brief-claim.json charts/brief-outcome.json charts/session.json charts/drop.json charts/refusal.json charts/override.json
+      # What caught each planted bug last time, so it's tried first (speed only; a PR
+      # starts from main's latest). Missing or stale just means a slower run.
+      - name: restore mutant catchers
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutant-catchers.json
+          key: mutant-catchers-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutant-catchers-
       # Every planted bug must be caught by the suite (scripts/mutants.ts).
       - run: npm run mutants
+      - name: save mutant catchers
+        if: always() && hashFiles('.mutant-catchers.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutant-catchers.json
+          key: mutant-catchers-${{ github.run_id }}-${{ github.run_attempt }}
