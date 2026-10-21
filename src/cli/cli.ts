@@ -55,8 +55,9 @@ Usage:
                                                   fx: event id (B3): OK, MISSING, PHANTOM, WRONG-ENTITY,
                                                   DUPLICATE, ORPHAN. tira's side is the store's --stream;
                                                   --tira-log reads a log file instead (fixtures, tests). A live
-                                                  run needs FILE.sha256 beside the factory file, refuses without
-                                                  it, and appends one row to docs/divergence-run-log.jsonl;
+                                                  run hashes the bytes it read and records that sha256; a
+                                                  FILE.sha256 beside it is optional, but one that disagrees
+                                                  refuses the run; appends one row to docs/divergence-run-log.jsonl;
                                                   --json prints the per-id verdict map with the report
 
 Options:
@@ -443,20 +444,26 @@ function fixturePin(file: string, bytes: Buffer): Coordinates["factory"] {
   return { snapshot: sha256(bytes), pin: "unpinned", file };
 }
 
-// A live run reads a factory snapshot the factory hashed: FILE.sha256 beside it ("<hex>" or
-// sha256sum's "<hex>  name"). No sidecar is a refusal, not a warning; neither is a mismatch.
+// A live run is pinned by the bytes it read: the command hashes them itself and records that
+// sha256 as the snapshot (spec Q3 / D-Po2; operator ruling 2026-10-20 — repeatability is a
+// property of the run, not of a publisher). A FILE.sha256 sidecar is optional: absent, the run
+// proceeds; present and equal, it proceeds; present and different (or present but unreadable,
+// so its value cannot be shown equal), the run is refused as an integrity mismatch.
 function livePin(file: string, bytes: Buffer): Coordinates["factory"] {
+  const snapshot = sha256(bytes);
   const side = `${file}.sha256`;
-  let declared: string;
+  let text: string | undefined;
   try {
-    declared = (readFileSync(side, "utf8").trim().split(/\s+/)[0] ?? "").toLowerCase();
-  } catch {
-    throw new UsageError(`refusing an unhashed factory input: ${file} has no ${basename(side)} beside it (live runs read only a hashed snapshot; --tira-log runs are exempt)`);
+    text = readFileSync(side, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw new UsageError(`integrity mismatch: ${side} is present but unreadable (${code ?? (err as Error).message}); bytes ${snapshot}`);
   }
-  if (!/^[0-9a-f]{64}$/.test(declared)) throw new UsageError(`refusing an unhashed factory input: ${side} does not hold a sha256`);
-  const actual = sha256(bytes);
-  if (actual !== declared) throw new UsageError(`factory snapshot ${file} does not match ${basename(side)}: declared ${declared}, bytes ${actual}`);
-  return { snapshot: actual, pin: "sha256", file };
+  if (text !== undefined) {
+    const declared = (text.trim().split(/\s+/)[0] ?? "").toLowerCase();
+    if (declared !== snapshot) throw new UsageError(`integrity mismatch: factory snapshot ${file} does not match ${basename(side)}: declared ${declared || "(empty)"}, bytes ${snapshot}`);
+  }
+  return { snapshot, pin: "sha256", file };
 }
 
 function printDivergence(r: DivergenceReport, io: Io): void {
@@ -478,7 +485,7 @@ async function divergenceCmd(values: Values, db: string, io: Io): Promise<number
   try {
     bytes = readFileSync(file);
   } catch (err) {
-    throw new UsageError(`cannot read factory file ${file}: ${(err as Error).message}`);
+    throw new UsageError(`cannot read factory file ${file}, so it cannot be hashed: ${(err as Error).message}`);
   }
   const live = values["tira-log"] === undefined;
   const pin = live ? livePin(file, bytes) : fixturePin(file, bytes);

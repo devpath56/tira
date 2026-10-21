@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -283,32 +283,72 @@ test("tira divergence: a copy git does not hold is reported unpinned, with its b
   }
 });
 
-test("live run: an unhashed factory input is REFUSED (exit 1), and nothing is logged", async () => {
+test("live run: no sidecar PROCEEDS and records the sha256 of the bytes it read (Q3 / D-Po2)", async () => {
   const s = sandbox();
   try {
     await seedStore(s.dir, "live");
     const copy = join(s.dir, "factory.jsonl");
     copyFileSync(FACTORY, copy);
-    const r = await s.tira("divergence", "--factory", copy, "--stream", "live");
-    assert.equal(r.code, 1);
-    assert.match(r.err, /refusing an unhashed factory input: .*factory\.jsonl has no factory\.jsonl\.sha256/);
-    assert.equal(r.out, "", "a refusal prints no report");
-    assert.ok(!existsSync(s.runLog));
-    s.write("factory.jsonl.sha256", "not a hash\n");
-    const junk = await s.tira("divergence", "--factory", copy, "--stream", "live");
-    assert.equal(junk.code, 1);
-    assert.match(junk.err, /does not hold a sha256/);
-    s.write("factory.jsonl.sha256", `${"0".repeat(64)}\n`);
-    const wrong = await s.tira("divergence", "--factory", copy, "--stream", "live");
-    assert.equal(wrong.code, 1);
-    assert.match(wrong.err, /does not match factory\.jsonl\.sha256/);
+    const r = await s.tira("divergence", "--factory", copy, "--stream", "live", "--json");
+    assert.equal(r.code, 0, r.err);
+    // independent of the CLI's own helper: hash the file's bytes here, by hand
+    const independent = createHash("sha256").update(readFileSync(copy)).digest("hex");
+    assert.match(independent, /^[0-9a-f]{64}$/);
+    const report = JSON.parse(r.out) as DivergenceReport;
+    assert.deepEqual(report.coordinates.factory, { snapshot: independent, pin: "sha256", file: copy });
+    const rows = jsonl<Record<string, unknown>>(s.runLog);
+    assert.equal(rows.length, 1);
+    assert.equal((rows[0] as Record<string, unknown>).factorySnapshot, independent, "run-log hash == sha256 of the input file");
+    // different bytes, different recorded hash: the value follows what was read
+    writeFileSync(copy, `${readFileSync(copy, "utf8")}\n`);
+    assert.equal((await s.tira("divergence", "--factory", copy, "--stream", "live")).code, 0);
+    const second = jsonl<Record<string, unknown>>(s.runLog)[1] as Record<string, unknown>;
+    assert.equal(second.factorySnapshot, createHash("sha256").update(readFileSync(copy)).digest("hex"));
+    assert.notEqual(second.factorySnapshot, independent);
+  } finally {
+    s.done();
+  }
+});
+
+test("live run: a sidecar that disagrees is REFUSED (exit 1) as an integrity mismatch, and nothing is logged", async () => {
+  const s = sandbox();
+  try {
+    await seedStore(s.dir, "live");
+    const copy = join(s.dir, "factory.jsonl");
+    copyFileSync(FACTORY, copy);
+    for (const text of [`${"0".repeat(64)}\n`, "not a hash\n", ""]) {
+      s.write("factory.jsonl.sha256", text);
+      const r = await s.tira("divergence", "--factory", copy, "--stream", "live");
+      assert.equal(r.code, 1, JSON.stringify(text));
+      assert.match(r.err, /integrity mismatch: factory snapshot .*factory\.jsonl does not match factory\.jsonl\.sha256/);
+      assert.ok(r.err.includes(sha(copy)), "the refusal names the computed hash");
+      assert.equal(r.out, "", "a refusal prints no report");
+    }
+    rmSync(join(s.dir, "factory.jsonl.sha256"));
+    mkdirSync(join(s.dir, "factory.jsonl.sha256"));
+    const unreadable = await s.tira("divergence", "--factory", copy, "--stream", "live");
+    assert.equal(unreadable.code, 1);
+    assert.match(unreadable.err, /integrity mismatch: .*factory\.jsonl\.sha256 is present but unreadable/);
     assert.ok(!existsSync(s.runLog));
   } finally {
     s.done();
   }
 });
 
-test("live run: a hashed snapshot against the store's stream, exit 0, one run-log row per run", async () => {
+test("live run: an unreadable input cannot be hashed and is REFUSED (exit 1)", async () => {
+  const s = sandbox();
+  try {
+    await seedStore(s.dir, "live");
+    const r = await s.tira("divergence", "--factory", join(s.dir, "absent.jsonl"), "--stream", "live");
+    assert.equal(r.code, 1);
+    assert.match(r.err, /cannot read factory file .*absent\.jsonl, so it cannot be hashed/);
+    assert.ok(!existsSync(s.runLog));
+  } finally {
+    s.done();
+  }
+});
+
+test("live run: a matching sidecar proceeds silently, exit 0, one run-log row per run", async () => {
   const s = sandbox();
   try {
     await seedStore(s.dir, "live");
@@ -330,6 +370,13 @@ test("live run: a hashed snapshot against the store's stream, exit 0, one run-lo
     assert.deepEqual(row.population, report.population);
     assert.equal((await s.tira("divergence", "--factory", copy, "--stream", "live")).code, 0);
     assert.equal(jsonl(s.runLog).length, 2);
+    // a matching sidecar written in upper case is accepted, and the recorded value is still the
+    // run's own hash of the bytes, never the sidecar's text
+    s.write("factory.jsonl.sha256", `${sha(copy).toUpperCase()}\n`);
+    const upper = await s.tira("divergence", "--factory", copy, "--stream", "live", "--json");
+    assert.equal(upper.code, 0, upper.err);
+    assert.equal((JSON.parse(upper.out) as DivergenceReport).coordinates.factory.snapshot, sha(copy));
+    assert.equal((jsonl<Record<string, unknown>>(s.runLog)[2] as Record<string, unknown>).factorySnapshot, sha(copy));
   } finally {
     s.done();
   }

@@ -152,8 +152,15 @@ const MUTANTS: Mutant[] = [
   { name: "divergence: last record per id wins (order read)", file: "src/divergence/divergence.ts", find: "fac.set(r.event_id, [...(fac.get(r.event_id) ?? []), seen]);", replace: "fac.set(r.event_id, [seen]);" },
   { name: "divergence: atSeq is the last event read, not the highest", file: "src/divergence/divergence.ts", find: "if (e.seq > atSeq) atSeq = e.seq;", replace: "atSeq = e.seq;" },
   { name: "cli: divergences exit 1", file: "src/cli/cli.ts", find: "  else printDivergence(r, io);\n  return 0;", replace: "  else printDivergence(r, io);\n  return r.findings.length > 0 ? 1 : 0;" },
-  { name: "cli: live run accepts an unhashed factory input", file: "src/cli/cli.ts", find: "const pin = live ? livePin(file, bytes) : fixturePin(file, bytes);", replace: "const pin = fixturePin(file, bytes);" },
-  { name: "cli: live run ignores a sidecar mismatch", file: "src/cli/cli.ts", find: "if (actual !== declared) throw", replace: "if (false) throw" },
+  // "accepts an unhashed input", redefined by the 2026-10-20 ruling: a live run that records a
+  // hash it did not compute from the bytes it read, or records none.
+  { name: "cli: live run accepts an unhashed factory input (records no hash)", file: "src/cli/cli.ts", find: "  const snapshot = sha256(bytes);\n  const side", replace: "  const snapshot = \"\";\n  const side" },
+  { name: "cli: live run accepts an unhashed factory input (hash not of the bytes read)", file: "src/cli/cli.ts", find: "  const snapshot = sha256(bytes);\n  const side", replace: "  const snapshot = sha256(file);\n  const side" },
+  { name: "cli: live run accepts an unhashed factory input (sidecar's value recorded, not the bytes')", file: "src/cli/cli.ts", find: "  return { snapshot, pin: \"sha256\", file };", replace: "  return { snapshot: text === undefined ? snapshot : (text.trim().split(/\\s+/)[0] ?? \"\"), pin: \"sha256\", file };" },
+  { name: "cli: live run ignores a sidecar mismatch", file: "src/cli/cli.ts", find: "if (declared !== snapshot) throw", replace: "if (false) throw" },
+  { name: "cli: live run refuses when no sidecar is present", file: "src/cli/cli.ts", find: "if (code !== \"ENOENT\") throw", replace: "if (true) throw" },
+  { name: "cli: live run accepts an unreadable sidecar", file: "src/cli/cli.ts", find: "if (code !== \"ENOENT\") throw", replace: "if (false) throw" },
+  { name: "cli: live run refuses a matching sidecar", file: "src/cli/cli.ts", find: "if (declared !== snapshot) throw", replace: "if (declared === snapshot) throw" },
   { name: "cli: live runs not logged", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (false) {\n    const row = {" },
   { name: "cli: fixture runs logged too", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (true) {\n    const row = {" },
   { name: "cli: an empty input reads as a zero report", file: "src/cli/cli.ts", find: "  if (rows.length === 0) throw new UsageError(`${what} ${file} has no records`);\n", replace: "" },
