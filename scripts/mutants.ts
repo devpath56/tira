@@ -138,6 +138,26 @@ const MUTANTS: Mutant[] = [
   { name: "replay: a cut mid-append counts as an anomaly", file: "src/fold/fold.ts", find: "    if (cut) continue;\n", replace: "" },
   { name: "tira: everyone's closes count as tira's", file: "src/fold/fold.ts", find: "values.closedByTira = isTerminal(def.tree, ent) && movedBy.get(", replace: "values.closedByTira = isTerminal(def.tree, ent) || movedBy.get(" },
   { name: "tira: waiting-for-tira flag never set", file: "src/fold/fold.ts", find: "values.awaitingClose = awaitingClose(def.tree, ent, view);", replace: "values.awaitingClose = false;" },
+  // B3 divergence watchdog
+  { name: "divergence: tira-side duplicates ignored", file: "src/divergence/divergence.ts", find: "if (f.length >= 2 || t.length >= 2) {", replace: "if (f.length >= 2) {" },
+  { name: "divergence: DUPLICATE judged after WRONG-ENTITY", file: "src/divergence/divergence.ts", find: "  if (f.length >= 2 || t.length >= 2) {\n    return { verdict: \"DUPLICATE\"", replace: "  if (f.length >= 2 && f[0]?.entity === t[0]?.entity || t.length >= 2) {\n    return { verdict: \"DUPLICATE\"" },
+  { name: "divergence: a kind mismatch is not WRONG-ENTITY", file: "src/divergence/divergence.ts", find: "const kindDiffers = ts.kind !== undefined && ts.kind !== fs.kind;", replace: "const kindDiffers = false;" },
+  { name: "divergence: entity never compared", file: "src/divergence/divergence.ts", find: "if (ts.entity !== fs.entity || kindDiffers) {", replace: "if (kindDiffers) {" },
+  { name: "divergence: ORPHAN never judged", file: "src/divergence/divergence.ts", find: "if (!born.has(subject.entity)) {", replace: "if (false) {" },
+  { name: "divergence: a rejected command gives birth", file: "src/divergence/divergence.ts", find: "if (seen.applied && seen.kind !== undefined && BIRTHS.includes(seen.kind))", replace: "if (seen.kind !== undefined && BIRTHS.includes(seen.kind))" },
+  { name: "divergence: a rejected command counts as applied", file: "src/divergence/divergence.ts", find: "if (fs !== undefined && (ts === undefined || !ts.applied)) {", replace: "if (fs !== undefined && ts === undefined) {" },
+  { name: "divergence: REVISED is not a birth", file: "src/divergence/divergence.ts", find: "export const BIRTHS: readonly string[] = [\"NAMED\", \"CREATED\", \"REVISED\", \"FILED\"];", replace: "export const BIRTHS: readonly string[] = [\"NAMED\", \"CREATED\", \"FILED\"];" },
+  { name: "divergence: non-fx tira events judged", file: "src/divergence/divergence.ts", find: "    if (!e.eventId.startsWith(FX)) continue;\n", replace: "" },
+  { name: "divergence: ids sorted by locale", file: "src/divergence/divergence.ts", find: "].sort(compareCodeUnits);", replace: "].sort((a, b) => a.localeCompare(b));" },
+  { name: "divergence: last record per id wins (order read)", file: "src/divergence/divergence.ts", find: "fac.set(r.event_id, [...(fac.get(r.event_id) ?? []), seen]);", replace: "fac.set(r.event_id, [seen]);" },
+  { name: "divergence: atSeq is the last event read, not the highest", file: "src/divergence/divergence.ts", find: "if (e.seq > atSeq) atSeq = e.seq;", replace: "atSeq = e.seq;" },
+  { name: "cli: divergences exit 1", file: "src/cli/cli.ts", find: "  else printDivergence(r, io);\n  return 0;", replace: "  else printDivergence(r, io);\n  return r.findings.length > 0 ? 1 : 0;" },
+  { name: "cli: live run accepts an unhashed factory input", file: "src/cli/cli.ts", find: "const pin = live ? livePin(file, bytes) : fixturePin(file, bytes);", replace: "const pin = fixturePin(file, bytes);" },
+  { name: "cli: live run ignores a sidecar mismatch", file: "src/cli/cli.ts", find: "if (actual !== declared) throw", replace: "if (false) throw" },
+  { name: "cli: live runs not logged", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (false) {\n    const row = {" },
+  { name: "cli: fixture runs logged too", file: "src/cli/cli.ts", find: "  if (live) {\n    const row = {", replace: "  if (true) {\n    const row = {" },
+  { name: "cli: an empty input reads as a zero report", file: "src/cli/cli.ts", find: "  if (rows.length === 0) throw new UsageError(`${what} ${file} has no records`);\n", replace: "" },
+  { name: "cli: an empty stream reads as a zero report", file: "src/cli/cli.ts", find: "    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${db}`);\n", replace: "" },
   { name: "render: no closed-by-tira mark", file: "src/render/html.ts", find: "r.closedByTira ? `<span class=\"mark tira\">closed by tira</span>` : \"\",", replace: "\"\"," },
   { name: "render: progress counts only done, not cancelled", file: "src/render/html.ts", find: 'const CLOSED = new Set(["done", "cancelled"]);', replace: 'const CLOSED = new Set(["done"]);' },
   { name: "render: drawer ids don't match the links", file: "src/render/html.ts", find: "<section class=\"drawer\" id=\"t${n.i}\"", replace: "<section class=\"drawer\" id=\"d${n.i}\"" },
@@ -375,7 +395,7 @@ function scratchCopy(): string {
 }
 
 function runTests(dir: string, report = false): number {
-  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3"].map((n) => `test/${n}.test.ts`);
+  const tests = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence"].map((n) => `test/${n}.test.ts`);
   // a planted bug can make a test loop forever: a suite that doesn't finish in 5 minutes failed
   const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--test", ...tests], { cwd: dir, encoding: "utf8", timeout: 300_000 });
   if (report && r.status !== 0) console.error((r.stdout ?? "").split("\n").filter((l) => l.startsWith("not ok")).join("\n"));

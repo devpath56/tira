@@ -3,7 +3,10 @@
 // never touches state directly, so what you see here is what the core decides.
 import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderHtml } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
@@ -14,6 +17,7 @@ import { fxKey, transitionOf } from "../write/fxkey.ts";
 import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
+import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
@@ -46,6 +50,14 @@ Usage:
   tira serve --actor NAME [--port N]              the page, live, on 127.0.0.1 only (default port 4747): needs
                                                   attention, ⌘K search, and start / unblock / complete / block,
                                                   each through a confirm page, written as NAME. Ctrl-C stops it
+  tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]
+                                                  the factory's file state against tira's log, one verdict per
+                                                  fx: event id (B3): OK, MISSING, PHANTOM, WRONG-ENTITY,
+                                                  DUPLICATE, ORPHAN. tira's side is the store's --stream;
+                                                  --tira-log reads a log file instead (fixtures, tests). A live
+                                                  run needs FILE.sha256 beside the factory file, refuses without
+                                                  it, and appends one row to docs/divergence-run-log.jsonl;
+                                                  --json prints the per-id verdict map with the report
 
 Options:
   --db PATH        store file (default: $TIRA_DB, else ./tira.db)
@@ -58,6 +70,8 @@ Options:
   --hash           (dump) print sha256 of the canonical JSON
   --parent ID      (create) the parent node; discovered work: kind=discovered discovered_during=ID
   --out FILE       (render) output path (default: tira.html)
+  --factory FILE   (divergence) the factory's file state, JSONL
+  --tira-log FILE  (divergence) tira's log as JSONL, instead of the store
   -h, --help       this help
 
 Event names: use the table's name (COMPLETE, ADD_CHILD) or the stored form (complete, add-child).
@@ -66,7 +80,8 @@ Writes go through the dispatcher: after your command lands it writes any handoff
 made due (factory briefs, drops and sessions; idea -> node births) as "dispatcher",
 and prints them as "+ dispatcher ..." lines. tira state lists handoffs still waiting.
 
-Exit codes: 0 ok · 2 rejected by the rules · 3 the sweep found something broken · 1 usage or other error`;
+Exit codes: 0 ok · 2 rejected by the rules · 3 the sweep found something broken · 1 usage or other error
+(including malformed or empty divergence input). Divergences are warn-only (severity policy v1): they exit 0.`;
 
 class UsageError extends Error {}
 
@@ -85,6 +100,8 @@ const OPTIONS = {
   parent: { type: "string" },
   out: { type: "string" },
   port: { type: "string" },
+  factory: { type: "string" },
+  "tira-log": { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -313,7 +330,7 @@ async function dump(store: SqliteEventStore, registry: Registry, stream: string,
   return 0;
 }
 
-const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 
 // Health sweeps (src/sweep/sweep.ts). Exit 0 when nothing is broken (things to look at
 // are fine), 3 when something is.
@@ -354,6 +371,153 @@ async function render(store: SqliteEventStore, registry: Registry, stream: strin
   writeFileSync(out, renderHtml(r, stream, hash, await store.readStream(stream)));
   const nodes = streamView(r, stream).nodeCount;
   io.out(values.json ? JSON.stringify({ out, nodes, sha256: hash, lastSeq: r.lastSeq }) : `wrote ${out}  ${nodes} node(s) · seq ${r.lastSeq} · sha256:${hash}`);
+  return 0;
+}
+
+// B3 divergence watchdog. The differ (src/divergence/divergence.ts) is pure; these are its
+// thin input adapters and the report's printer. Nothing is stored or cached: the report is
+// computed at read time. Divergences are attention findings under severity policy v1, so
+// they never change the exit code; an unreadable, malformed or empty input is a command
+// error (exit 1) naming the offending line, never a blank or zero report.
+const FACTORY_FIELDS = ["transition_kind", "entity_type", "entity_id", "ts", "outcome", "actor", "event_id"] as const;
+const RUN_LOG = fileURLToPath(new URL("../../docs/divergence-run-log.jsonl", import.meta.url));
+
+function jsonLines(file: string, what: string): { line: number; value: Record<string, unknown> }[] {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    throw new UsageError(`cannot read ${what} ${file}: ${(err as Error).message}`);
+  }
+  const rows: { line: number; value: Record<string, unknown> }[] = [];
+  text.split("\n").forEach((raw, i) => {
+    if (raw.trim() === "") return;
+    let v: unknown;
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      throw new UsageError(`${what} ${file} line ${i + 1}: not valid JSON`);
+    }
+    if (v === null || typeof v !== "object" || Array.isArray(v)) throw new UsageError(`${what} ${file} line ${i + 1}: not a JSON object`);
+    rows.push({ line: i + 1, value: v as Record<string, unknown> });
+  });
+  if (rows.length === 0) throw new UsageError(`${what} ${file} has no records`);
+  return rows;
+}
+
+function readFactory(file: string): FactoryRecord[] {
+  return jsonLines(file, "factory file").map(({ line, value }) => {
+    for (const f of FACTORY_FIELDS) {
+      if (typeof value[f] !== "string" || value[f] === "") throw new UsageError(`factory file ${file} line ${line}: ${f} must be a non-empty string`);
+    }
+    if (!(value.event_id as string).startsWith(FX)) throw new UsageError(`factory file ${file} line ${line}: event_id must be an fx: key, got "${String(value.event_id)}"`);
+    return value as unknown as FactoryRecord;
+  });
+}
+
+function readTiraLog(file: string): StoredEvent[] {
+  return jsonLines(file, "tira log").map(({ line, value }) => {
+    const bad = (why: string) => new UsageError(`tira log ${file} line ${line}: ${why}`);
+    if (typeof value.eventId !== "string" || value.eventId === "") throw bad("eventId must be a non-empty string");
+    if (typeof value.stream !== "string" || value.stream === "") throw bad("stream must be a non-empty string");
+    if (!Number.isInteger(value.seq) || (value.seq as number) < 1) throw bad("seq must be a positive integer");
+    if (typeof value.type !== "string" || value.type === "") throw bad("type must be a non-empty string");
+    if (value.data === null || typeof value.data !== "object" || Array.isArray(value.data)) throw bad("data must be a JSON object");
+    return value as unknown as StoredEvent;
+  });
+}
+
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+
+// A fixture run is pinned by git: the commit whose tree holds these exact bytes. A copy git
+// does not hold (or holds with edits) is reported unpinned, with the bytes' sha256.
+function fixturePin(file: string, bytes: Buffer): Coordinates["factory"] {
+  const cwd = dirname(file);
+  try {
+    git(cwd, "ls-files", "--error-unmatch", "--", basename(file));
+    const blob = git(cwd, "rev-parse", `HEAD:./${basename(file)}`);
+    if (git(cwd, "hash-object", "--", basename(file)) === blob) return { snapshot: git(cwd, "rev-parse", "HEAD"), pin: "git", file };
+  } catch {
+    // not in a git work tree, or not tracked: fall through
+  }
+  return { snapshot: sha256(bytes), pin: "unpinned", file };
+}
+
+// A live run reads a factory snapshot the factory hashed: FILE.sha256 beside it ("<hex>" or
+// sha256sum's "<hex>  name"). No sidecar is a refusal, not a warning; neither is a mismatch.
+function livePin(file: string, bytes: Buffer): Coordinates["factory"] {
+  const side = `${file}.sha256`;
+  let declared: string;
+  try {
+    declared = (readFileSync(side, "utf8").trim().split(/\s+/)[0] ?? "").toLowerCase();
+  } catch {
+    throw new UsageError(`refusing an unhashed factory input: ${file} has no ${basename(side)} beside it (live runs read only a hashed snapshot; --tira-log runs are exempt)`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(declared)) throw new UsageError(`refusing an unhashed factory input: ${side} does not hold a sha256`);
+  const actual = sha256(bytes);
+  if (actual !== declared) throw new UsageError(`factory snapshot ${file} does not match ${basename(side)}: declared ${declared}, bytes ${actual}`);
+  return { snapshot: actual, pin: "sha256", file };
+}
+
+function printDivergence(r: DivergenceReport, io: Io): void {
+  const f = r.coordinates.factory;
+  io.out(`divergence · factory ${f.file ?? "?"} (${f.pin} ${f.snapshot}) · tira stream ${r.coordinates.tira.stream} at seq ${r.coordinates.tira.atSeq}`);
+  io.out(`read ${r.population.factoryRecords} factory record(s) · ${r.population.tiraFxEvents} tira fx: event(s) · ${r.population.ids} event id(s) in the union`);
+  io.out(VERDICTS.map((v) => `${v} ${r.counts[v]}`).join(" · "));
+  io.out("");
+  io.out(`findings (${r.findings.length})`);
+  for (const l of table(r.findings.map((x) => ({ verdict: x.verdict, "event id": x.event_id, detail: x.detail })), ["verdict", "event id", "detail"])) io.out(l);
+  io.out("");
+  io.out(`severity policy ${r.severityPolicy}: divergences are attention findings; the exit code stays 0`);
+}
+
+async function divergenceCmd(values: Values, db: string, io: Io): Promise<number> {
+  const file = values.factory;
+  if (file === undefined) throw new UsageError("usage: tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]");
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(file);
+  } catch (err) {
+    throw new UsageError(`cannot read factory file ${file}: ${(err as Error).message}`);
+  }
+  const live = values["tira-log"] === undefined;
+  const pin = live ? livePin(file, bytes) : fixturePin(file, bytes);
+  const factory = readFactory(file);
+  let events: StoredEvent[];
+  let stream: string;
+  if (live) {
+    const named = values.stream ?? io.env.TIRA_STREAM;
+    if (named === undefined) throw new UsageError("tira divergence reads the store by stream: pass --stream (or --tira-log FILE)");
+    stream = named;
+    const store = new SqliteEventStore({ path: db });
+    try {
+      events = await store.readStream(stream);
+    } finally {
+      store.close();
+    }
+    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${db}`);
+  } else {
+    events = readTiraLog(values["tira-log"] as string);
+    const streams = [...new Set(events.map((e) => e.stream))];
+    if (values.stream !== undefined && streams.some((s) => s !== values.stream)) throw new UsageError(`tira log holds stream(s) ${streams.join(", ")}, not ${values.stream}`);
+    if (streams.length !== 1) throw new UsageError(`tira log holds ${streams.length} streams (${streams.join(", ")}): pass one stream's log`);
+    stream = streams[0] as string;
+  }
+  const r = divergence({ factory, tira: events, factorySnapshot: pin, stream });
+  if (live) {
+    const row = {
+      ts: new Date().toISOString(),
+      factorySnapshot: r.coordinates.factory.snapshot,
+      stream: r.coordinates.tira.stream,
+      atSeq: r.coordinates.tira.atSeq,
+      population: r.population,
+      counts: r.counts,
+      severityPolicy: r.severityPolicy,
+    };
+    appendFileSync(io.env.TIRA_DIVERGENCE_LOG ?? RUN_LOG, `${JSON.stringify(row)}\n`);
+  }
+  if (values.json) io.out(JSON.stringify(r));
+  else printDivergence(r, io);
   return 0;
 }
 
@@ -419,7 +583,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve"].includes(cmd)) {
+  if (!["create", "send", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -431,6 +595,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   let store: SqliteEventStore | undefined;
   try {
     if (cmd === "key") return key(args, values, registry, stream, io);
+    if (cmd === "divergence") return await divergenceCmd(values, db, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     if (cmd === "serve") return await serve(db, registry, stream, values, io);
     store = new SqliteEventStore({ path: db });
