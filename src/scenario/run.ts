@@ -71,7 +71,7 @@ export const SCENARIO_DIR = new URL("../../scenarios/", import.meta.url);
 
 export function loadScenarios(dir: URL = SCENARIO_DIR): Map<string, Scenario> {
   const out = new Map<string, Scenario>();
-  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort((a, b) => a.localeCompare(b))) {
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort(compareCodeUnits)) {
     const s = JSON.parse(readFileSync(join(dir.pathname, f), "utf8")) as Scenario;
     if (`${s.id}.json` !== f) throw new Error(`${f}: id ${s.id} must match the file name`);
     out.set(s.id, s);
