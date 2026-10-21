@@ -33,6 +33,12 @@ async function pages(): Promise<string> {
   await send("t1", "CANCEL"); // its ticket closed: "ready to unblock"
   // found while working on a, its sibling: the graph's found-while line
   await d.submit({ stream: "t", kind: "create", entity: { type: "node", id: "c" }, actor: "isha", payload: { parent_id: "app", kind: "discovered", discovered_during: "a" } });
+  // ideas: one placed under app (its file approved), one waiting for its file, one whose parent a person must pick
+  const idea = (id: string, summary: string, under?: string) => d.submit({ stream: "t", kind: "create", entity: { type: "idea", id }, actor: "claude", payload: { summary, why: "w", ...(under ? { under } : {}) } });
+  await idea("paging", "paging for the app");
+  await idea("csv", "export to csv");
+  await idea("both", "a link from the app", "d"); // declared under d, its text names app
+  for (const id of ["paging", "both"]) await d.submit({ stream: "t", kind: "event", entity: { type: "idea", id }, event: "APPROVE_FILE", actor: "isha", payload: {} });
   const te = await store.readStream("t");
   const staticPage = renderHtml(fold(te, registry), "t", "h", te);
   // a log from before the rules version marker, for the legacy tag
@@ -65,13 +71,15 @@ async function pages(): Promise<string> {
     const fragment = (await get("GET", "/confirm?type=node&id=a&event=START&fragment=1")).body;
     // a block decision (reasons used before, as chips) and a command left without its proof
     const blockLive = (await get("GET", "/confirm?type=node&id=b&event=BLOCK&fragment=1")).body;
+    // an idea's placement where a person picks the parent (its candidates as buttons)
+    const pick = (await get("GET", "/confirm?type=idea&id=both&event=APPROVE_NODE&fragment=1")).body;
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const seen = String((await store.readStream("t")).at(-1)?.seq);
     const acted = await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&evidenceRef=e&seen=${seen}`);
     const flash = (await get("GET", acted.location ?? "/")).body;
     const script = ["app.mjs", "graph.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
-    return [staticPage, legacyPage, lanes, live, confirm, fragment, blockLive, stopped, flash, script].join("\n");
+    return [staticPage, legacyPage, lanes, live, confirm, fragment, blockLive, pick, stopped, flash, script].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
@@ -91,7 +99,7 @@ const present = (hook: string, text: string): boolean => {
 
 test("every component doc says its job and names hooks; every hook exists in the build", async () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
-  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "theme-switch.md"]);
+  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "theme-switch.md"]);
   const built = await pages();
   for (const f of files) {
     const doc = readFileSync(new URL(f, DIR), "utf8");

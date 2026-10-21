@@ -11,7 +11,13 @@
 // Safety: bound to 127.0.0.1; any other Host is refused (DNS rebinding); a write needs
 // this process's random token and, when the browser sends one, a same-origin Origin
 // (cross-site forms); the actor is fixed when the server starts; only the tree verbs
-// below are accepted; a strict Content-Security-Policy allows only this server's scripts.
+// below, and an idea's approvals, are accepted; a strict Content-Security-Policy allows only
+// this server's scripts.
+//
+// Ideas (D5, the vapor catch): an idea's two approvals, the file then the placement, go through
+// the same decision. A stage skip (approving the placement while the file is still pending) is
+// refused in the dialog with a plain reason, and the placement's parent is checked before the
+// approval is written: the task the idea becomes must fit there.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -24,8 +30,10 @@ import { flatten, streamView } from "../render/tree-view.ts";
 import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
-import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, withDefaults, type PageAction } from "./command.ts";
-import { briefFor, type Brief, type BriefFacts } from "./brief.ts";
+import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, verbFits, withDefaults, type PageAction } from "./command.ts";
+import { briefFor, ideaBriefFor, ideaRefusal, type Brief, type BriefFacts } from "./brief.ts";
+import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
+import { makeView } from "../fold/view.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 
@@ -73,8 +81,9 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
   });
 }
 
-// waitables: to block, the open tasks it could wait on instead of a new ticket
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[] }
+// waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
+// idea, the tasks tira found for it
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -154,7 +163,9 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   const verb = PAGE_VERBS[event];
   const title = `${verb?.label ?? event} ${id}?`;
   const seen = r.lastSeq;
+  if (type === IDEA) return ideaPacketFor(ask);
   if (!verb) return { ok: false, title, verdict: `tira doesn't take ${event} from the page.`, seen, suggestions: [] };
+  if (verb.on !== undefined) return { ok: false, title, verdict: `${verb.label} is for ${verb.on}s, not tasks.`, seen, suggestions: [] };
   const current = r.entities.find((e) => e.stream === stream && e.key === entityKey({ type, id }));
   const cfg = registry.get(type)?.tree;
   if (!current || !cfg) return { ok: false, title, verdict: `There is no task ${id}.`, seen, suggestions: [] };
@@ -172,6 +183,44 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
+  };
+}
+
+// The stream as one view, for the checks that read the tree (an idea's parent).
+const viewOf = (r: FoldResult, stream: string) => makeView(new Map(r.entities.filter((e) => e.stream === stream).map((e) => [e.key, e])));
+
+// An idea's approval, in the same two views. The verdict is the write path's, said in plain words
+// when it is a stage skip; approving the placement is also judged on the task it becomes (the
+// birth tira writes next): the parent must take it.
+async function ideaPacketFor(ask: PacketAsk): Promise<Packet> {
+  const { r, events, registry, stream, id, event } = ask;
+  const verb = PAGE_VERBS[event];
+  const title = `${verb?.label ?? event} ${id}?`;
+  const seen = r.lastSeq;
+  const own = Object.keys(PAGE_VERBS).filter((k) => PAGE_VERBS[k]?.on === IDEA).map((k) => PAGE_VERBS[k]?.label.toLowerCase()).join(", ");
+  if (verb?.on !== IDEA) return { ok: false, title, verdict: `tira doesn't take ${event} on an idea from the page: an idea takes ${own}.`, seen, suggestions: [] };
+  const idea = ideaRows(r, events, stream).find((i) => i.id === id);
+  if (!idea) return { ok: false, title, verdict: `There is no idea ${id}.`, seen, suggestions: [] };
+  const parent = event === "APPROVE_NODE" ? idea.proposal?.parent : undefined;
+  const filled = verb.field ? { [verb.field.name]: parent ?? "(you fill this in)" } : {};
+  const pv = await ask.wp.preview({ stream, kind: "event", entity: { type: IDEA, id }, event, actor: ask.actor, payload: filled });
+  const refusal = pv.ok ? undefined : ideaRefusal(idea.stage, event, id, idea.summary !== undefined);
+  const misplaced = pv.ok && parent !== undefined ? placeProblem(viewOf(r, stream), registry, id, parent) : undefined;
+  const hit = registry.resolve(IDEA, event);
+  const guard = hit?.table.pairs.find((x) => x.from === idea.stage && x.event === event)?.guard;
+  let verdict = verdictOf(pv);
+  if (refusal) verdict = `tira would refuse this: ${refusal.why} (${pv.ok ? "" : `${pv.code}: ${pv.detail}`}).`;
+  else if (misplaced) verdict = `tira would refuse this: ${misplaced}.`;
+  const hint = refusal?.todo ?? (misplaced ? "Put it under another task: change parent_id." : undefined);
+  return {
+    ok: pv.ok && misplaced === undefined, title, verdict, ...(hint ? { hint } : {}), seen, suggestions: [],
+    // the tasks tira found, as buttons, unless the one it found is already filled in
+    ...(event === "APPROVE_NODE" ? { parents: (idea.proposal?.candidates ?? []).filter((c) => c !== parent) } : {}),
+    brief: ideaBriefFor({
+      id, event, stage: idea.stage, summary: idea.summary, why: idea.why, declaredBy: idea.declaredBy, declaredSeq: idea.declaredSeq,
+      proposal: idea.proposal, refusal, noop: pv.ok && pv.outcome === "noop", rule: guard === undefined ? undefined : hit?.table.guards[guard] ?? guard, actor: ask.actor,
+    }),
+    command: commandFor(IDEA, id, event, false, parent),
   };
 }
 
@@ -231,6 +280,7 @@ function helpText(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "tira would refuse this as it stands: edit it (another task or verb) and check again, or close.";
   if (opts.event === "BLOCK" && fragment) return `Name what it waits on: a new ticket is created under ${opts.id} and linked as blocking it, or pick an open task. The command updates as you type and runs exactly as written.`;
   if (opts.event === "BLOCK") return `Name the new ticket on line 1 and as blocker= on line 2 (the reason defaults to "waiting on" it). To wait on an open task instead, delete line 1 and set blocker= to it.`;
+  if (opts.event === "APPROVE_NODE") return (p.command?.includes('parent_id=""') ? "Fill in parent_id: the task it goes under. " : "parent_id is tira's proposal: change it to put the task elsewhere. ") + NOTE_HELP;
   return (PAGE_VERBS[opts.event]?.field ? "Fill in the empty quotes. " : "Ready to run as it is. ") + NOTE_HELP;
 }
 
@@ -253,7 +303,8 @@ function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string 
 
 function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "";
-  const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`);
+  const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`)
+    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`);
   const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
     ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
     : "";
@@ -360,7 +411,7 @@ function actionFrom(form: URLSearchParams, registry: Registry): PageAction | und
   const id = form.get("id") ?? "";
   const event = form.get("event") ?? "";
   const verb = PAGE_VERBS[event];
-  if (!verb || !registry.get(type)?.tree || id === "") return undefined;
+  if (!verb || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined) || id === "") return undefined;
   if (verb.creates) {
     const child = subtaskName(form.get("name"));
     if (child === undefined) return undefined;
@@ -453,7 +504,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const typed = form.get("command");
     if (typed === null) {
       const ask = actionFrom(form, opts.registry);
-      if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, or add a subtask with a name\n"); return undefined; }
+      if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
       return { fragment, typed, seen, ask, ticket: undefined, target: targetOf(ask) };
     }
     const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
@@ -477,6 +528,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (lacking !== undefined) return back({ error: lacking }, 422);
     const problem = await waitProblem(a);
     if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
+    const misplaced = await placeCheck(a);
+    if (misplaced && a.typed === null) { send(res, 409, text, `tira can't run that: ${misplaced}\n`); return true; }
+    if (misplaced) return back({ error: `tira can't run that: ${misplaced}.` }, 422);
     // decided on one log, written on another? show the decision again instead
     // (a post without `seen` didn't come from a decision: it gets one first)
     if (a.seen !== String((await now()).r.lastSeq)) {
@@ -498,21 +552,53 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return blockerProblem((await now()).r, opts.stream, a.ask, blocker);
   };
 
+  // approving an idea's placement: the task it becomes must fit under the parent named (the idea's
+  // own stage is the rules' to judge)
+  const placeCheck = async (a: Asked): Promise<string | undefined> => {
+    const parent = a.ask.payload.parent_id;
+    if (a.ask.type !== IDEA || a.ask.event !== "APPROVE_NODE" || typeof parent !== "string" || parent.trim() === "") return undefined;
+    return placeProblem(viewOf((await now()).r, opts.stream), opts.registry, a.ask.id, parent.trim());
+  };
+
   // a typed command tira would refuse goes back into the dialog, not into the log; a new
-  // ticket and its block are both checked before either is written
+  // ticket and its block are both checked before either is written. An idea's stage skip says
+  // so in plain words.
   const refusal = async (a: Asked, cmd: Command, first: Command | undefined): Promise<string | undefined> => {
     for (const c of first === undefined ? [cmd] : [first, cmd]) {
       const pv = await previews.preview(c);
       const what = c === first ? "the new ticket " + (a.ticket?.child ?? "") : "this";
-      if (!pv.ok) return `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.`;
+      if (pv.ok) continue;
+      const idea = a.ask.type === IDEA ? await ideaNow(a.ask.id) : undefined;
+      if (idea) return `tira would still refuse ${what}: ${ideaRefusal(idea.stage, a.ask.event, idea.id, idea.summary !== undefined).why} (${pv.code}: ${pv.detail}).`;
+      return `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.`;
     }
     return undefined;
+  };
+  const ideaNow = async (id: string): Promise<IdeaRow | undefined> => {
+    const { events, r } = await now();
+    return ideaRows(r, events, opts.stream).find((i) => i.id === id);
+  };
+
+  // after an idea's approval: what tira did next, in a sentence
+  const ideaAfter = async (id: string): Promise<string> => {
+    const i = await ideaNow(id);
+    const p = i?.proposal;
+    if (i?.stage === "node_pending" && p?.parent !== undefined) return `tira proposes it under ${p.parent} (${p.basis}): approve the placement next.`;
+    if (i?.stage === "node_pending") return `tira couldn't settle where it goes (${p?.basis.replace(/^needs you: /, "") ?? "no proposal"}): pick its parent when you approve the placement.`;
+    if (i?.stage === "materialized") {
+      const { r } = await now();
+      const born = viewOf(r, opts.stream).get({ type: "node", id });
+      return born ? `It's a task now: ${id}, under ${i.placedUnder ?? "its parent"}.` : "The task isn't born yet: see the handoffs waiting in Lanes.";
+    }
+    if (i?.stage === "dropped") return "It's dropped; your reason stays in its history.";
+    return "";
   };
 
   const label = (a: PageAction) => (a.child === undefined ? a.id : a.child + " under " + a.id);
   const write = async (a: PageAction, c: Command) => {
     try {
-      return flashFor(a.event, label(a), (await dispatcher.submit(c)).result);
+      const flash = flashFor(a.event, label(a), (await dispatcher.submit(c)).result);
+      return a.type === IDEA && flash.ok ? { ok: true, text: `${flash.text} ${await ideaAfter(a.id)}`.trim() } : flash;
     } catch (err) {
       return { ok: false, text: `${PAGE_VERBS[a.event]?.label ?? a.event} ${label(a)}: not sent (${(err as Error).message}).` };
     }
