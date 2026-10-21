@@ -56,6 +56,9 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
   isOrchestrator: ({ actor }) => actor === ORCHESTRATOR,
   orchestratorWithReason: ({ actor, payload }) => actor === ORCHESTRATOR && s(payload.reason),
   fromDispatcher: ({ actor }) => actor === DISPATCHER,
+  // Rules era 3 (ruling 2026-10-21): a brief is done-verified only on a PASS, read through the
+  // same verifies as the drop's. Eras 1 and 2 took the dispatcher's word (fromDispatcher).
+  dispatcherWithPass: ({ actor, payload }) => actor === DISPATCHER && verifies(payload.done_test_result),
   dispatcherWithReason: ({ actor, payload }) => actor === DISPATCHER && s(payload.reason),
   sessionClaimsForItself: ({ actor, payload }) => s(payload.session) && actor === payload.session,
   fromClaimantOrDispatcher: ({ actor, own }) => actor === DISPATCHER || (s(actor) && actor === own?.claimant),
@@ -116,6 +119,8 @@ export const FACTORY_GUARDS: Record<string, GuardFn> = {
 };
 
 export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][string]): EntityTypeDef[] {
+  // The outcome table as first built, frozen (versioned rules): eras 1 and 2 replay under it.
+  const outcomeEra1 = chart("eras/brief-outcome.era1.json");
   return [
     {
       type: "brief",
@@ -130,6 +135,7 @@ export function factoryTypes(chart: (name: string) => EntityTypeDef["regions"][s
         waitingOn: (b, { view }) => unverifiedDeps(view, b),
       },
       regions: { gate: chart("brief-gate.json"), claim: chart("brief-claim.json"), outcome: chart("brief-outcome.json") },
+      eras: { 1: { outcome: outcomeEra1 }, 2: { outcome: outcomeEra1 } },
     },
     { type: "session", createdAs: "NAMED", createGuard: "sessionNamesItself", regions: { lifecycle: chart("session.json") } },
     // A12: one drop per brief version, enforced by identity (drop:<brief>@<version>).
