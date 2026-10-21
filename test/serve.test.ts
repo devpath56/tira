@@ -357,7 +357,7 @@ test("a confirm opens as a dialog over the page: ?fragment=1 is just the packet,
     const app = (await s.http("GET", "/app.mjs")).body;
     assert.match(app, /closest\('a\.act\[href\^="\/confirm"\]'\)/); // every action link, in rows and task dialogs
     assert.match(app, /e\.preventDefault\(\);\n  void openConfirm\(link\.getAttribute\("href"\)\);/); // stays on the page
-    assert.match(app, /if \(verb\) openConfirm\(/); // and the palette's verbs
+    assert.match(app, /if \(verb\) void openConfirm\(/); // and the palette's verbs
     assert.match(app, /fetch\(`\$\{href\}&fragment=1`/);
     assert.match(app, /confirmBox\.showModal\(\)/);
     assert.match(app, /catch \{\n    location\.href = href;/); // no packet: the confirm page instead

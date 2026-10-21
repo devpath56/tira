@@ -98,7 +98,8 @@ function startAdvice(f: BriefFacts): string {
 function unblockAdvice(f: BriefFacts): string {
   const w = f.waitingOn;
   const open = openKids(f);
-  const then = open.length > 0 ? ` Then ${list(open)} still ${open.length === 1 ? "needs" : "need"} doing before it can be completed.` : "";
+  const need = open.length === 1 ? "needs" : "need";
+  const then = open.length > 0 ? ` Then ${list(open)} still ${need} doing before it can be completed.` : "";
   if (w && CLOSED.has(w.state)) return `Unblock it: ${w.id} is ${word(w.state)} now, so the wait looks over.${then}`;
   if (w) return `Wait, unless you no longer need ${w.id}: it is still ${word(w.state)}.`;
   const why = f.since?.reason?.trim();

@@ -160,12 +160,21 @@ function canvas(wrap) {
     world.style.width = `${last.width}px`;
     world.style.height = `${last.height}px`;
     svg.setAttribute("viewBox", `0 0 ${last.width.toFixed(1)} ${last.height}`);
+    drawNodes();
+    drawLines();
+    wrap.classList.toggle("hide-found", !showFound);
+    foundBtn.setAttribute("aria-pressed", String(showFound));
+    for (const [key, b] of folds) drawFold(key, b);
+  }
+  function drawNodes() {
     for (const n of nodes) {
       const p = last.at.get(n.key);
       n.el.hidden = p === undefined;
       n.el.classList.toggle("folded", folded.has(n.key));
       if (p) { n.el.style.left = `${p.x.toFixed(1)}px`; n.el.style.top = `${p.y}px`; }
     }
+  }
+  function drawLines() {
     for (const line of lines) {
       // arcs: found-while (can be hidden) and a blocker elsewhere in the tree (always shown)
       const found = line.dataset.found !== undefined;
@@ -176,25 +185,26 @@ function canvas(wrap) {
       line.style.display = shown ? "" : "none";
       if (shown) line.setAttribute("d", arc ? foundPath(a, b) : treePath(a, b));
     }
-    wrap.classList.toggle("hide-found", !showFound);
-    foundBtn.setAttribute("aria-pressed", String(showFound));
-    for (const [key, b] of folds) {
-      const p = last.at.get(key);
-      b.hidden = p === undefined;
-      if (!p) continue;
-      b.style.left = `${p.x.toFixed(1)}px`;
-      b.style.top = `${p.y + G.box}px`;
-      const isFolded = folded.has(key);
-      const kids = inside.get(key) ?? [];
-      const has = (test) => isFolded && kids.some((k) => test(byKey.get(k)?.el));
-      b.textContent = isFolded ? `+${kids.length}` : "−";
-      b.setAttribute("aria-expanded", String(!isFolded));
-      b.setAttribute("aria-label", `${isFolded ? "Expand" : "Collapse"} ${nameOf(key)}: ${kids.length} ${kids.length === 1 ? "task" : "tasks"} inside`);
-      b.title = b.getAttribute("aria-label");
-      b.classList.toggle("is-folded", isFolded);
-      b.classList.toggle("has-blocked", has((el) => el?.dataset.state === "blocked"));
-      b.classList.toggle("has-next", has((el) => el?.classList.contains("is-next")));
-    }
+  }
+  // the fold button under a parent: "−" open, "+N" folded (red when a blocked task is inside)
+  function drawFold(key, b) {
+    const p = last.at.get(key);
+    b.hidden = p === undefined;
+    if (!p) return;
+    b.style.left = `${p.x.toFixed(1)}px`;
+    b.style.top = `${p.y + G.box}px`;
+    const isFolded = folded.has(key);
+    const kids = inside.get(key) ?? [];
+    const has = (test) => isFolded && kids.some((k) => test(byKey.get(k)?.el));
+    const tasks = kids.length === 1 ? "task" : "tasks";
+    const label = `${isFolded ? "Expand" : "Collapse"} ${nameOf(key)}: ${kids.length} ${tasks} inside`;
+    b.textContent = isFolded ? `+${kids.length}` : "−";
+    b.setAttribute("aria-expanded", String(!isFolded));
+    b.setAttribute("aria-label", label);
+    b.title = label;
+    b.classList.toggle("is-folded", isFolded);
+    b.classList.toggle("has-blocked", has((el) => el?.dataset.state === "blocked"));
+    b.classList.toggle("has-next", has((el) => el?.classList.contains("is-next")));
   }
 
   // ---------- the view ----------

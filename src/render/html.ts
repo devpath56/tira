@@ -359,7 +359,10 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     // the child blocks its parent: the line itself is the blocks link (red); found while
     // working on its own parent: the line itself is dotted
     const blocking = links.blockedBy.get(p.row.key) === n.row.key;
-    const cls = [CLOSED.has(n.row.state) ? "e done" : "e", blocking ? "blocks" : n.row.discoveredDuring === p.row.key ? "found" : ""].filter(Boolean).join(" ");
+    let style = "";
+    if (blocking) style = "blocks";
+    else if (n.row.discoveredDuring === p.row.key) style = "found";
+    const cls = [CLOSED.has(n.row.state) ? "e done" : "e", style].filter(Boolean).join(" ");
     return `<path class="${cls}" data-from="${esc(p.row.key)}" data-to="${esc(n.row.key)}" d="${treePath(at(p), at(n))}"/>`;
   });
   const found = nodes.filter((n) => n.row.discoveredDuring !== undefined && n.row.discoveredDuring !== n.parent?.row.key && byKey.has(n.row.discoveredDuring)).map((n) => {
@@ -371,41 +374,49 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     const [b, k] = [byKey.get(by) as Placed, byKey.get(key) as Placed];
     return `<path class="e blocks${CLOSED.has(b.row.state) ? " done" : ""}" data-from="${esc(by)}" data-blocks="${esc(key)}" d="${foundPath(at(b), at(k))}"/>`;
   });
-  const node = (n: Placed) => {
-    const r = n.row;
-    const ks = kids.get(n) ?? [];
-    const closed = ks.filter((c) => CLOSED.has(c.row.state)).length;
-    const left = ks.length - closed;
-    const cls = [
-      "gn", `st-${r.state}`, ks.length > 0 ? "parent" : "",
-      r.cursor ? "is-next" : "", r.active ? "is-active" : "",
-    ].filter(Boolean).join(" ");
-    const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
-    const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
-    const marks = tiraMark + waitRing;
-    const leftText = left === 0 ? "" : " · " + left + " left";
-    const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
-    const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
-    const blocks = (links.blocks.get(r.key) ?? []).map((k) => byKey.get(k)?.row.id ?? k);
-    const by = links.blockedBy.get(r.key);
-    const said = [r.id, word(r.state)];
-    if (ks.length > 0) said.push(`${closed} of ${ks.length} subtasks closed`);
-    if (by !== undefined) said.push("blocked by " + (byKey.get(by)?.row.id ?? by));
-    if (blocks.length > 0) said.push("blocks " + blocks.join(", "));
-    if (r.cursor) said.push("next");
-    if (r.active) said.push("active");
-    const p = at(n);
-    const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
-    const pin = r.cursor ? `<span class="here">◆ ${r.active ? "now" : "next"}</span>` : "";
-    return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(said.join(", "))}"${parentAttr} ${nodeAttrs(r, (trail.get(r.key) ?? []).length)}>`
-      + pin
-      + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
-      + `<span class="gm">${marks}${meta}</span></a>`;
-  };
+  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length);
   // Live, graph.mjs turns the box into a canvas (pan, zoom, folds); a rendered file scrolls.
   return `<div class="graph-wrap" data-graph><div class="graph" role="group" aria-label="Tasks as a tree" style="width:${fx(L.width)}px;height:${L.height}px">`
     + `<svg class="edges" viewBox="0 0 ${fx(L.width)} ${L.height}" aria-hidden="true">${tree.join("")}${found.join("")}${blockArcs.join("")}</svg>`
     + `${nodes.map(node).join("")}</div></div>`;
+}
+
+// What a graph node says to a screen reader: the task, its state, and its links.
+function nodeLabel(n: Placed, ks: Placed[], closed: number, byKey: ReadonlyMap<string, Placed>, links: Links): string {
+  const r = n.row;
+  const blocks = (links.blocks.get(r.key) ?? []).map((k) => byKey.get(k)?.row.id ?? k);
+  const by = links.blockedBy.get(r.key);
+  const said = [r.id, word(r.state)];
+  if (ks.length > 0) said.push(`${closed} of ${ks.length} subtasks closed`);
+  if (by !== undefined) said.push("blocked by " + (byKey.get(by)?.row.id ?? by));
+  if (blocks.length > 0) said.push("blocks " + blocks.join(", "));
+  if (r.cursor) said.push("next");
+  if (r.active) said.push("active");
+  return said.join(", ");
+}
+
+// One task on the graph: a link to its dialog, carrying the fold's flags (M1).
+function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number): string {
+  const r = n.row;
+  const closed = ks.filter((c) => CLOSED.has(c.row.state)).length;
+  const left = ks.length - closed;
+  const cls = [
+    "gn", `st-${r.state}`, ks.length > 0 ? "parent" : "",
+    r.cursor ? "is-next" : "", r.active ? "is-active" : "",
+  ].filter(Boolean).join(" ");
+  const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
+  const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
+  const marks = tiraMark + waitRing;
+  const leftText = left === 0 ? "" : " · " + left + " left";
+  const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
+  const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
+  const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
+  const pinWord = r.active ? "now" : "next";
+  const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
+  return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
+    + pin
+    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
+    + `<span class="gm">${marks}${meta}</span></a>`;
 }
 
 // What the graph's colours and marks mean, beside the switch while the graph shows.
@@ -417,8 +428,10 @@ const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done">
 // every action.
 function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
   const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
-  return styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("")
-    + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("")}</span>${LEGEND}</div>`
+  const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
+  const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
+  return radios
+    + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
     + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links)}</div>`;
 }
 

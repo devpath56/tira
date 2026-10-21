@@ -461,7 +461,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const target = targetOf(parsed.action);
     // edited into another action (another task or verb): what tira says about that one first
     if (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event) {
-      { await decide(res, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment); return undefined; }
+      await decide(res, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment);
+      return undefined;
     }
     return { fragment, typed, seen, ask: withDefaults(parsed.action), ticket: parsed.ticket, target };
   };
@@ -473,8 +474,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const lacking = missing(a.ask);
     if (lacking !== undefined && a.typed === null) { send(res, 400, text, `${lacking}\n`); return true; }
     if (lacking !== undefined) return back({ error: lacking }, 422);
-    const blocker = blockerOf(a.ask);
-    const problem = a.typed === null || blocker === undefined || a.ticket !== undefined ? undefined : blockerProblem((await now()).r, opts.stream, a.ask, blocker);
+    const problem = await waitProblem(a);
     if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
     // decided on one log, written on another? show the decision again instead
     // (a post without `seen` didn't come from a decision: it gets one first)
@@ -485,14 +485,27 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       return true;
     }
     if (a.typed === null) return false;
-    // a typed command tira would refuse goes back into the dialog, not into the log; a new
-    // ticket and its block are both checked before either is written
+    const refused = await refusal(a, cmd, first);
+    if (refused) return back({ error: refused }, 409);
+    return false;
+  };
+
+  // a typed block on an open task: why it can't wait on that task, if it can't
+  const waitProblem = async (a: Asked): Promise<string | undefined> => {
+    const blocker = blockerOf(a.ask);
+    if (a.typed === null || blocker === undefined || a.ticket !== undefined) return undefined;
+    return blockerProblem((await now()).r, opts.stream, a.ask, blocker);
+  };
+
+  // a typed command tira would refuse goes back into the dialog, not into the log; a new
+  // ticket and its block are both checked before either is written
+  const refusal = async (a: Asked, cmd: Command, first: Command | undefined): Promise<string | undefined> => {
     for (const c of first === undefined ? [cmd] : [first, cmd]) {
       const pv = await previews.preview(c);
       const what = c === first ? "the new ticket " + (a.ticket?.child ?? "") : "this";
-      if (!pv.ok) return back({ error: `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.` }, 409);
+      if (!pv.ok) return `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.`;
     }
-    return false;
+    return undefined;
   };
 
   const label = (a: PageAction) => (a.child === undefined ? a.id : a.child + " under " + a.id);

@@ -55,7 +55,7 @@ function go() {
   const task = shown[sel];
   if (!task) return;
   close();
-  if (verb) openConfirm(`/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`);
+  if (verb) void openConfirm(`/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`);
   else location.hash = `#${task.drawer}`;
 }
 
@@ -154,7 +154,9 @@ function composeBlock(name) {
   const open = [...confirmBox.querySelectorAll("[data-fill-blocker]")].map((b) => b.dataset.fillBlocker);
   const note = /(?:^|\s)note=("(?:[^"\\]|\\.)*"|\S*)/.exec(box.value)?.[1];
   const n = name.trim();
-  const block = `tira send ${type} ${id} BLOCK blocker=${quoted(n)} reason=${quoted(n ? `waiting on ${n}` : "")}${note ? ` note=${note}` : ""}`;
+  const reason = n ? "waiting on " + n : "";
+  const noted = note ? " note=" + note : "";
+  const block = `tira send ${type} ${id} BLOCK blocker=${quoted(n)} reason=${quoted(reason)}` + noted;
   const ticket = `tira create ${type} ${n ? bare(n) : '""'} --parent ${id} kind=discovered discovered_during=${id}`;
   box.value = n !== "" && open.includes(n) ? block : `${ticket}\n${block}`;
 }
@@ -190,7 +192,7 @@ confirmBox.addEventListener("submit", async (e) => {
   body.set("fragment", "1");
   try {
     const doc = new DOMParser().parseFromString(await (await fetch("/act", { method: "POST", body })).text(), "text/html");
-    const go = doc.querySelector("[data-go]")?.getAttribute("data-go");
+    const go = doc.querySelector("[data-go]")?.dataset.go;
     const packet = doc.querySelector("[data-packet]");
     if (go) location.href = go;
     else if (packet) show(packet);
