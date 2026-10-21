@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
 built-in `node:sqlite`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 309 known bugs and fails unless the suite catches every one.
+`npm run mutants` plants 333 known bugs and fails unless the suite catches every one.
 CI runs both, re-extracts `charts/*.json` and fails on any difference (no hand edits), and
 runs `docs/tools/region-scan.py --all` in **warn mode** (reported, not blocking — the
 regions proposal's graduation rule). No runtime dependencies: `xstate` is a dev
@@ -83,6 +83,7 @@ dependency, used only by the chart verifiers.
 | `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates (incl. `drained`), per-stream tree summary (roots, cursor, active), rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path; `tree.ts` holds the tree rules |
 | `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
 | `src/render/` | D1: the thin read-only HTML page and the text tree, both drawn from one view of the fold |
+| `src/divergence/` | B3: the divergence watchdog's differ, pure (records in, report out); `tira divergence` reads its inputs (below, "Divergence watchdog") |
 | `src/cli/`, `scripts/tira.ts` | `tira` CLI for manual testing (below) |
 
 **Track C1 — the tree (rulings 2026-10-16/17/18).** Same-lifecycle rules only. The node
@@ -503,6 +504,47 @@ Calls made here, for the PM:
 - **Referrer-Policy is `same-origin`**, not `no-referrer`: under `no-referrer` browsers send
   `Origin: null` on form posts, and the page's own writes were refused (found by submitting
   a real form).
+
+## Divergence watchdog (B3, PR-A): the factory's file state against tira's log
+
+`tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]` gives one verdict
+per fx: event id in either side: `OK`, `MISSING` (the factory committed it, tira has no
+event), `PHANTOM` (tira has an fx: event the factory has no record of), `WRONG-ENTITY` (same
+id, another entity or another kind), `DUPLICATE` (an id twice on one side) or `ORPHAN` (its
+entity is born in neither file). Precedence: DUPLICATE > WRONG-ENTITY > ORPHAN >
+MISSING / PHANTOM > OK. The differ (`src/divergence/divergence.ts`) is pure and its header
+holds the per-id state table that defines it; `test/divergence.test.ts` walks every cell.
+
+- **A set join on event ids.** Input order is never read and timestamps are never compared.
+  tira's own dispatcher events (non-fx ids) are not divergences and are ignored. The
+  watchdog never mints, repairs or re-keys an id: it only reports.
+- **A rejected command is not an applied event.** `command.rejected` never gives birth: on
+  an entity born in neither file it is ORPHAN, otherwise the factory's transition is MISSING.
+- **Inputs.** tira's side is the store's `--stream`; `--tira-log` reads a log file instead
+  (one stored event per line, as in `fixtures/b3/tira-log.jsonl`) and makes it a fixture run.
+- **Coordinates and population.** Every report carries the factory snapshot (a fixture
+  run: the git commit holding those exact bytes, or `unpinned` + their sha256 for a copy git
+  doesn't hold; a live run: the sha256 the command computed over the bytes it read), the tira stream and `atSeq`, and how many
+  factory records, tira fx: events and ids it read. Nothing is stored or cached.
+- **Live runs are hashed by the run.** The command computes sha256 over the exact factory
+  bytes it read and records it as the snapshot, in the report and the run-log row, so every
+  live 0 can be re-run against the same bytes. It refuses (exit 1) in exactly two cases: the
+  input cannot be read, so cannot be hashed; or a `FILE.sha256` sidecar sits beside it
+  (`<hex>` or `sha256sum`'s `<hex>  name`) and disagrees with the computed hash (an
+  integrity mismatch; a sidecar present but unreadable counts as one). No sidecar is not a
+  refusal, and a matching one is accepted silently.
+  Every live run appends one row to `docs/divergence-run-log.jsonl` (`$TIRA_DIVERGENCE_LOG`
+  overrides the path): `{ts, factorySnapshot, stream, atSeq, population, counts,
+  severityPolicy}`. Fixture runs log nothing.
+- **Severity policy v1: warn-only.** Divergences exit 0. Exit 1 is a usage or input error
+  only: an unreadable, empty or malformed input names the offending line and never prints a
+  blank or zero report.
+- `--json` prints the whole report; its `verdicts` map is the scorer's input:
+
+```sh
+npm run -s tira -- divergence --factory fixtures/b3/factory-state.jsonl --tira-log fixtures/b3/tira-log.jsonl --json > b3-run.json
+node scripts/b3-score.ts fixtures/b3/manifest.json b3-run.json   # 47/47, bar met
+```
 
 ## Scenario suite (build order C2): the plan's tests as event scripts
 
