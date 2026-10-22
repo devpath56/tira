@@ -291,3 +291,9 @@ export function placesBetween(nodes, from, to, t) {
   }
   return { at, fade };
 }
+
+// ---------- a project's colour ----------
+
+// One of 8 colours for a project's mark, from its name, so a project looks the same on the
+// page, in the sidebar and in its list (the server renders some, the browser the rest).
+export const tint = (name) => [...name].reduce((h, c) => (h * 31 + (c.codePointAt(0) ?? 0)) % 9973, 7) % 8;

@@ -24,8 +24,8 @@ to the one it was found while working on. A bolt means tira closed it; a dashed 
 tira closes it when you move on. A block on a ticket links the two: a red dashed line from the
 blocked task to its ticket (its own subtask; a blocker elsewhere is a red arc), green dashed
 once the ticket is done, and a "blocks colors" chip on the ticket's Kanban card. Click any card
-or node for its dialog. An idea not yet a task is dashed and tagged "idea": the Ideas column
-comes first in Kanban, and on the Graph it is a ghost card under the task tira proposed for it
+or node for its dialog. An idea not yet a task is tagged IDEA: the Ideas column
+comes first in Kanban, and on the Graph it is a ghost box under the task tira proposed for it
 (`ideas.md`).
 
 **Big trees (100+ tasks).** The layout packs a short branch beside a deep one's lower rows.

@@ -498,7 +498,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const flash = flashes.get(rk);
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }) };
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), actor: opts.actor };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 

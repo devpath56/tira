@@ -5,12 +5,12 @@
 **What / why.** An idea an agent pushed (`tira idea`) is on the board before it is a task, so
 it can't be lost and can't be mistaken for work. tira drafts its file and proposes where it
 goes; a person only approves, twice: the file, then the placement. It is never drawn as a
-task: dashed, tagged "idea", outside the counts.
+task: a plain card or box with an IDEA tag (the tag is the whole difference), outside the counts.
 
 **How to read it.** Kanban: the **Ideas** column comes first while any idea is open, one
-dashed card per idea with its summary, its stage ("file to approve", "placement to
+card per idea, tagged IDEA, with its summary, its stage ("file to approve", "placement to
 approve", or "needs a parent" in amber when tira couldn't settle one) and, once proposed,
-"under table". Graph: a dashed **ghost** card, tagged "idea", joined by a dashed line under
+"under table". Graph: a **ghost** box, tagged IDEA, joined by a dashed grey line under
 the task tira proposed; until tira proposes (the file isn't approved yet), or while a person
 must pick the parent, it sits on the top row. A dropped idea, or one that became a task,
 leaves the board; its history stays in History. Click a card or a ghost for the idea's

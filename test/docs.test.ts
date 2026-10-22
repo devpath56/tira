@@ -108,7 +108,7 @@ const present = (hook: string, text: string): boolean => {
 
 test("every component doc says its job and names hooks; every hook exists in the build", async () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
-  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "theme-switch.md", "workspace-switch.md"]);
+  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "project-switch.md", "theme-switch.md"]);
   const built = await pages();
   for (const f of files) {
     const doc = readFileSync(new URL(f, DIR), "utf8");

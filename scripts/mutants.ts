@@ -393,7 +393,7 @@ const MUTANTS: Mutant[] = [
   { name: "page: a picked Dark prints dark", file: "src/render/html.ts", find: "@media screen{:root:has(#th-dark:checked)", replace: "@media all{:root:has(#th-dark:checked)" },
   { name: "serve: the confirm page forgets the theme", file: "src/serve/server.ts", find: "packetBody(p, opts, false) + `</main><script type=\"module\" src=\"/theme.mjs\"></script></body>", replace: "packetBody(p, opts, false) + `</main></body>" },
   { name: "serve: the page forgets the theme", file: "src/serve/app.mjs", find: "import \"./theme.mjs\";\n", replace: "" },
-  { name: "page: the guide gets a fourth paragraph", file: "src/render/html.ts", find: "<p><b>The hash.</b>", replace: "<p>More.</p><p><b>The hash.</b>" },
+  { name: "page: the guide gets a fourth paragraph", file: "src/render/html.ts", find: "<p><b>The fingerprint.</b>", replace: "<p>More.</p><p><b>The fingerprint.</b>" },
   { name: "palette: initials don't match", file: "src/serve/rank.mjs", find: "  if (ws.map((w) => w[0]).join(\"\").startsWith(q)) return 800 - ws.length;", replace: "" },
   { name: "palette: a verb doesn't filter by state", file: "src/serve/rank.mjs", find: "    if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;", replace: "" },
   { name: "palette: ties lose tree order", file: "src/serve/rank.mjs", find: "  scored.sort((a, b) => b.s - a.s || a.order - b.order);", replace: "  scored.sort((a, b) => b.s - a.s || b.order - a.order);" },
@@ -541,11 +541,11 @@ const MUTANTS: Mutant[] = [
   // The page at 100+ tasks (Isha's picks, 2026-10-21): Kanban in one row with Done and Dropped capped,
   // needs attention folded, the decision's nutshell first, the graph readable zoomed out (tiles, labels,
   // minimap), found from the palette and dialogs, glides that respect reduced motion, the changed task's
-  // glow, plain words, and the Living theme
+  // glow, plain words
   { name: "ui: Done isn't newest first", file: "src/render/html.ts", find: "if (CLOSED.has(s)) here.sort((a, b) => movedAt(b) - movedAt(a) || a.i - b.i);", replace: "if (false) here.sort((a, b) => movedAt(b) - movedAt(a) || a.i - b.i);" },
   { name: "ui: Done and Dropped never capped", file: "src/render/html.ts", find: "if (!CLOSED.has(state) || cards.length <= SHOWN) return cards.join(\"\");", replace: "if (true) return cards.join(\"\");" },
   { name: "ui: To do capped like Done", file: "src/render/html.ts", find: "if (!CLOSED.has(state) || cards.length <= SHOWN) return cards.join(\"\");", replace: "if (cards.length <= SHOWN) return cards.join(\"\");" },
-  { name: "ui: Kanban columns wrap under each other again", file: "src/render/html.ts", find: ".cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(184px,1fr);", replace: ".cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));" },
+  { name: "ui: Kanban columns wrap under each other again", file: "src/render/html.ts", find: ".cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(172px,1fr);", replace: ".cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));" },
   { name: "ui: card titles break inside words", file: "src/render/html.ts", find: "const wraps = (id: string) => esc(id).replaceAll(\"_\", \"_<wbr>\");", replace: "const wraps = (id: string) => esc(id);" },
   { name: "ui: needs attention never folds", file: "src/render/html.ts", find: "const folds = count > FOLD_AT;", replace: "const folds = false;" },
   { name: "ui: needs attention folds even when 3 or fewer need you", file: "src/render/html.ts", find: "const folds = count > FOLD_AT;", replace: "const folds = count > 0;" },
@@ -573,8 +573,7 @@ const MUTANTS: Mutant[] = [
   { name: "ui: a zoom glide swings sideways", file: "src/serve/layout.mjs", find: "const cx = lerp((vw / 2 - a.x) / a.s, (vw / 2 - b.x) / b.s, k);", replace: "const cx = lerp((vw / 2 - a.x) / a.s, (vw / 2 - b.x) / a.s, k);" },
   { name: "ui: a fold's new boxes appear in place, not from the parent", file: "src/serve/layout.mjs", find: "const a = was ?? anchor(n.key, from);", replace: "const a = was ?? will;" },
   { name: "ui: a folded box lingers after the fold", file: "src/serve/layout.mjs", find: "    if (!will && k >= 1) continue;\n", replace: "" },
-  { name: "ui: living theme gone from the switch", file: "src/render/html.ts", find: ", [\"living\", \"Living\", ICON.leaf]];", replace: "];" },
-  { name: "ui: living blooms on every theme", file: "src/render/html.ts", find: "const LIVING = `#th-living:checked~main`;", replace: "const LIVING = `main`;" },
+  { name: "ui: a fourth theme comes back", file: "src/render/html.ts", find: "[\"dark\", \"Dark\", ICON.moon]];", replace: "[\"dark\", \"Dark\", ICON.moon], [\"living\", \"Living\", ICON.moon]];" },
   { name: "ui: reduced motion still animates", file: "src/render/html.ts", find: "{transition:none!important;animation:none!important}", replace: "{transition:none!important}" },
   { name: "ui: the palette goes to the dialog on the Graph too", file: "src/serve/app.mjs", find: "else if (!(graphShown() && graph.reveal(task.key))) location.hash", replace: "else if (true) location.hash" },
   { name: "ui: the palette's highlighted match is silent", file: "src/serve/app.mjs", find: "if (shown[sel]) input.setAttribute(\"aria-activedescendant\", `pal-${sel}`);", replace: "if (false) input.setAttribute(\"aria-activedescendant\", `pal-${sel}`);" },
@@ -583,7 +582,7 @@ const MUTANTS: Mutant[] = [
   // workspace in the store at ?w=, and its links, decisions and writes stay in it
   { name: "ui: the mark isn't a link home", file: "src/render/html.ts", find: "export const brand = (href: string) => `<a class=\"brand\" href=\"${esc(href)}\" title=\"Home: the board\" data-home>${ICON.brand}tira</a>`;", replace: "export const brand = (href: string) => `<span class=\"brand\">${ICON.brand}tira</span>`;" },
   { name: "ui: the mark goes to the first workspace", file: "src/render/html.ts", find: "const home = live ? `/${q ? `?${q}` : \"\"}` : \"#\";", replace: "const home = live ? \"/\" : \"#\";" },
-  { name: "ui: the switcher on the rendered file", file: "src/render/html.ts", find: "${live ? workspaceSwitch(stream) : \"\"}", replace: "${workspaceSwitch(stream)}" },
+  { name: "ui: projects on the rendered file", file: "src/render/html.ts", find: "${live ? projectsHtml(stream, home) : \"\"}", replace: "${projectsHtml(stream, home)}" },
   { name: "ui: action links drop the workspace", file: "src/render/html.ts", find: "&event=${event}${q ? `&${q}` : \"\"}`);", replace: "&event=${event}`);" },
   { name: "ui: the workspace in the URL is ignored", file: "src/serve/server.ts", find: "if (w === null || w === \"\" || w === home) return { stream: home, q: \"\" };", replace: "if (true) return { stream: home, q: \"\" };" },
   { name: "ui: a workspace name with control characters accepted", file: "src/serve/server.ts", find: "|| [...w].some((c) => (c.codePointAt(0) ?? 0) < 32 || c === \"\\u007f\")", replace: "" },
@@ -595,6 +594,14 @@ const MUTANTS: Mutant[] = [
   { name: "ui: the switcher counts only blocked tasks as needing you", file: "src/serve/server.ts", find: "rows.filter((x) => x.state === \"blocked\" || (x.active && !x.awaitingClose)).length;", replace: "rows.filter((x) => x.state === \"blocked\").length;" },
   { name: "ui: the palette reads the first workspace", file: "src/serve/app.mjs", find: "const load = () => fetch(withW(\"/api/tasks\"))", replace: "const load = () => fetch(\"/api/tasks\")" },
   { name: "ui: the dialog posts to /act alone", file: "src/serve/app.mjs", find: "await fetch(form.action, { method: \"POST\", body })", replace: "await fetch(\"/act\", { method: \"POST\", body })" },
+  // After Linear (Isha, 2026-10-21): a sidebar, projects and you in it, the audit parts in History,
+  // no 'stream' and no blue ideas
+  { name: "ui: the sidebar is gone on a wide screen", file: "src/render/html.ts", find: "main[data-stream]>.top{position:fixed;z-index:6;", replace: "main[data-stream]>.top{position:static;z-index:6;" },
+  { name: "ui: the fingerprint back on the board's bar", file: "src/render/html.ts", find: "${brand(home)}${search}<div class=\"tabs\">", replace: "${brand(home)}${search}${fingerprintHtml(\"\", 0)}<div class=\"tabs\">" },
+  { name: "ui: the divergence panel back on the board", file: "src/render/html.ts", find: "<section class=\"view view-log\" aria-label=\"History\">${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : \"\"}", replace: "${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : \"\"}<section class=\"view view-log\" aria-label=\"History\">" },
+  { name: "ui: the header says stream again", file: "src/render/html.ts", find: ".hero h1{display:flex;align-items:center;gap:12px}", replace: ".hero h1{display:flex;align-items:center;gap:12px}.hero h1::before{content:\"stream\"}" },
+  { name: "ui: the profile on the rendered file", file: "src/render/html.ts", find: "${live && actor !== undefined ? profileHtml(actor) : \"\"}", replace: "${actor !== undefined ? profileHtml(actor) : profileHtml(\"\")}" },
+  { name: "ui: ideas blue again", file: "src/render/html.ts", find: ".ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--raised);border:1px solid var(--line-2);", replace: ".ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.

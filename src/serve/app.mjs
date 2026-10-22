@@ -7,7 +7,7 @@
 import { rank, parse } from "./rank.mjs";
 import "./theme.mjs";
 import { graph } from "./graph.mjs";
-import { fx } from "./layout.mjs";
+import { fx, tint } from "./layout.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -281,9 +281,12 @@ for (const g of groups) {
   });
 }
 
-// The workspace switcher, next to the mark: opened, it lists every workspace in the store (read
-// then, not on every page load), each with what's open and how many need you; the one you're in
-// is marked. Arrows move between them, Enter opens one, Esc or a click outside closes the list.
+// Projects, in the sidebar (a dropdown on a narrow screen): every project in the store, read from
+// /api/workspaces when the list first shows (not on every action's reload of the server's page),
+// each with its mark, what's open and how many need you; the one you're in is marked. Arrows move
+// between them, Enter opens one. You (the profile) open a small menu the same way. A dropdown
+// closes on Esc or a click outside; the sidebar's list stays as you left it.
+const wide = () => globalThis.matchMedia?.("(min-width: 900px)").matches === true;
 const switcher = document.querySelector("[data-workspaces]");
 if (switcher) {
   const menu = switcher.querySelector("[data-ws-menu]");
@@ -293,44 +296,64 @@ if (switcher) {
     a.className = "ws-item";
     a.href = w.href;
     if (w.current) a.setAttribute("aria-current", "page");
+    const mark = document.createElement("span");
+    mark.className = `pav t${tint(w.stream)}`;
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = ([...w.stream][0] ?? "?").toUpperCase();
     const t = document.createElement("span"); t.className = "ws-t";
     const name = document.createElement("b"); name.textContent = w.stream;
     const said = document.createElement("small");
-    said.textContent = w.tasks === 0 ? "no tasks yet" : `${w.open} open of ${w.tasks} task${w.tasks === 1 ? "" : "s"}`;
+    said.textContent = w.tasks === 0 ? "no tasks yet" : `${w.open} open of ${w.tasks}`;
     t.append(name, said);
     const n = document.createElement("span");
     n.className = w.attention > 0 ? "ws-n" : "ws-n calm";
     n.textContent = String(w.attention);
     n.title = `${w.attention} need${w.attention === 1 ? "s" : ""} you`;
-    a.append(t, n);
+    a.append(mark, t, n);
     return a;
   };
   let loaded = false;
+  const fill = async () => {
+    if (loaded) return;
+    try {
+      const list = await (await fetch(withW("/api/workspaces"))).json();
+      const head = document.createElement("p"); head.className = "ws-head"; head.textContent = "Projects";
+      menu.replaceChildren(head, ...list.map(entry), ...menu.querySelectorAll("[data-ws-extra]"));
+      loaded = true;
+    } catch {
+      menu.append(note("Couldn't load the projects: try again."));
+    }
+  };
+  if (!wide()) switcher.open = false; // a dropdown on a narrow screen: shut until asked
+  if (switcher.open) void fill();
   switcher.addEventListener("toggle", async () => {
     if (!switcher.open) return;
-    if (!loaded) {
-      try {
-        const list = await (await fetch(withW("/api/workspaces"))).json();
-        const head = document.createElement("p"); head.className = "ws-head"; head.textContent = "Workspaces";
-        menu.replaceChildren(head, ...list.map(entry));
-        loaded = true;
-      } catch {
-        menu.replaceChildren(note("Couldn't load the workspaces: try again."));
-      }
-    }
-    (menu.querySelector('[aria-current="page"]') ?? menu.querySelector("a"))?.focus();
+    await fill();
+    if (!wide()) (menu.querySelector('[aria-current="page"]') ?? menu.querySelector("a"))?.focus();
   });
   switcher.addEventListener("keydown", (e) => {
     const items = [...menu.querySelectorAll("a.ws-item")];
     const at = items.indexOf(document.activeElement);
-    if (e.key === "Escape" && switcher.open) { switcher.open = false; switcher.querySelector("summary")?.focus(); e.preventDefault(); }
-    else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length > 0) {
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length > 0) {
       items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
       e.preventDefault();
     }
   });
-  document.addEventListener("click", (e) => { if (switcher.open && e.target instanceof Node && !switcher.contains(e.target)) switcher.open = false; });
 }
+// dropdowns (the projects on a narrow screen, you): Esc or a click outside closes them
+const dropdowns = () => [...document.querySelectorAll("details.ws[open]")].filter((d) => d.matches("[data-profile]") || !wide());
+document.addEventListener("click", (e) => {
+  for (const d of dropdowns()) if (e.target instanceof Node && !d.contains(e.target)) d.open = false;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  for (const d of dropdowns()) {
+    if (!d.contains(document.activeElement)) continue;
+    d.open = false;
+    d.querySelector("summary")?.focus();
+    e.preventDefault();
+  }
+});
 
 // Onboarding, one time: the guide opens by itself on the first visit, then only on demand.
 try {

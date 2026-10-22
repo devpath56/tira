@@ -18,7 +18,7 @@ import { VERDICTS, type DivergenceReport } from "../divergence/divergence.ts";
 import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
 import { esc } from "./escape.ts";
-import { foundPath, fx, layout, treePath } from "../serve/layout.mjs";
+import { foundPath, fx, layout, tint, treePath } from "../serve/layout.mjs";
 import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -30,52 +30,24 @@ const spaced = (id: string) => id.replaceAll("_", " ");
 // A card's title wraps after an underscore, never inside a word (the text stays the exact id).
 const wraps = (id: string) => esc(id).replaceAll("_", "_<wbr>");
 
-// Jira's status colours and blue accent on calm surfaces: a warm off-white page under white
-// cards with soft shadows (light), near-black (dark), squared tags, no decoration. Living is
-// the fourth theme: the same page in moss greens, where a done task blooms, a task to do is a
-// bud and the active one breathes (it follows the system's light or dark). The theme follows
-// the system unless the switch at the top right picks one (radio inputs, so it is CSS only);
-// print is always light.
-const LIGHT = `--bg:#f7f6f3;--panel:#ffffff;--panel-2:#f9f8f6;--sunken:#f1f0ec;--raised:#ffffff;--hover:#f1f0ec;--line:#e4e2dd;--line-2:#c4c1ba;--fg:#25262a;--mut:#505258;--dim:#65676e;
---accent:#1868db;--accent-bg:#e9f2fe;--accent-text:#1558bc;--btn:#1868db;--btn-fg:#ffffff;
---prog:#1558bc;--prog-bg:#e9f2fe;--block:#ae2e24;--block-bg:#ffeceb;--done:#216e4e;--done-bg:#dcfff1;--gone:#62656c;--gone-bg:#efeeea;--warn:#a54800;--warn-bg:#fff7d6;
---shadow:0 1px 2px rgba(31,29,25,.06),0 2px 8px rgba(31,29,25,.04);--brand:#1868db`;
-const DARK = `--bg:#1f1f21;--panel:#242528;--panel-2:#2b2c2f;--sunken:#242528;--raised:#2b2c2f;--hover:#2f3034;--line:#3b3d42;--line-2:#56585e;--fg:#cecfd2;--mut:#a9abaf;--dim:#96999e;
---accent:#669df1;--accent-bg:#1c2b42;--accent-text:#8fb8f6;--btn:#669df1;--btn-fg:#1f1f21;
---prog:#8fb8f6;--prog-bg:#1c2b42;--block:#fd9891;--block-bg:#42221f;--done:#7ee2b8;--done-bg:#1c3329;--gone:#96999e;--gone-bg:#2b2c2f;--warn:#f5cd47;--warn-bg:#3a2f12;
---shadow:none;--brand:#1868db`;
-// Living (Sylva, and mockup B): moss, petal and pollen
-const LIVING_LIGHT = `--bg:#eef1e8;--panel:#fbfcf8;--panel-2:#f3f5ee;--sunken:#e6ebdf;--raised:#ffffff;--hover:#e7ece0;--line:#d5dccd;--line-2:#aab6a1;--fg:#18201a;--mut:#47524a;--dim:#566259;
---accent:#4f8a12;--accent-bg:#e1eecc;--accent-text:#3d6d0c;--btn:#4f7a2a;--btn-fg:#ffffff;
---prog:#3d6d0c;--prog-bg:#e1eecc;--block:#9e3a24;--block-bg:#f6e3dc;--done:#33602a;--done-bg:#dfecd6;--gone:#5c665e;--gone-bg:#e6eae2;--warn:#7f5900;--warn-bg:#f6ecca;
---shadow:0 1px 2px rgba(24,32,26,.07),0 2px 10px rgba(24,32,26,.05);--brand:#58773c;--petal:#f1c3cb;--pollen:#d6a52b;--moss:#6f9147`;
-const LIVING_DARK = `--bg:#141915;--panel:#1b221d;--panel-2:#212922;--sunken:#171d18;--raised:#212922;--hover:#28312a;--line:#2e3830;--line-2:#4a584c;--fg:#f1ecdf;--mut:#b6beb3;--dim:#959f95;
---accent:#c4f26a;--accent-bg:#27341c;--accent-text:#c4f26a;--btn:#a6d65e;--btn-fg:#141815;
---prog:#c4f26a;--prog-bg:#27341c;--block:#f39a7f;--block-bg:#3b231b;--done:#a9d68a;--done-bg:#1f2e1c;--gone:#9aa39a;--gone-bg:#252c26;--warn:#e7c35f;--warn-bg:#352e16;
---shadow:none;--brand:#7f9f5a;--petal:#f6eedf;--pollen:#e7c35f;--moss:#7f9f5a`;
-// what only Living draws: blooms, buds, a breathing active task, branches for lines
-const LIVING = `#th-living:checked~main`;
-const LIVING_CSS = `@media screen{body:has(#th-living:checked){background:radial-gradient(1200px 640px at 72% 0%,var(--panel-2),var(--bg) 70%) fixed,var(--bg)}}
-${LIVING} .st-done .sd{border:0;background:radial-gradient(circle,var(--pollen) 0 2.2px,transparent 2.7px),radial-gradient(circle at 50% 16%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 84% 41%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 71% 83%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 29% 83%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 16% 41%,var(--petal) 0 3.3px,transparent 3.8px);filter:drop-shadow(0 0 1px rgba(0,0,0,.35))}
-${LIVING} .st-done .sd svg,${LIVING} .st-unstarted .sd svg,${LIVING} .st-in_progress .sd svg{display:none}
-${LIVING} .st-unstarted .sd{border:2px solid var(--moss);background:radial-gradient(circle,var(--moss) 0 2px,transparent 2.5px),var(--panel);border-radius:50% 50% 50% 8%}
-${LIVING} .st-in_progress .sd{border:2px solid var(--accent);background:radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px),var(--panel);animation:breathe 2.6s ease-in-out infinite}
-${LIVING} .gn.st-in_progress,${LIVING} .gn.is-active{animation:breathe-box 2.6s ease-in-out infinite}
-${LIVING} .st-cancelled .sd{border-color:var(--gone);background:var(--gone-bg);transform:rotate(-24deg);border-radius:50% 8% 50% 8%}
-${LIVING} .edges path{stroke:var(--moss);stroke-width:2;stroke-linecap:round;opacity:.75}${LIVING} .edges path.done{stroke:var(--done);opacity:1}
-${LIVING} .graph-wrap.canvas{background-image:radial-gradient(circle,color-mix(in srgb,var(--moss) 45%,transparent) 1px,transparent 1.4px)}
-${LIVING} .big{color:var(--accent-text)}
-@keyframes breathe{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 22%,transparent)}}
-@keyframes breathe-box{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 16%,transparent)}}`;
+// After Linear: quiet greys, one indigo accent, a sidebar a shade off the page, status colours
+// that mean one thing each (green done, red blocked, indigo in progress), squared tags, no
+// decoration. The theme follows the system unless the switch picks one (radio inputs, so it is
+// CSS only); print is always light.
+const LIGHT = `--bg:#fcfcfd;--side-bg:#f5f5f7;--panel:#ffffff;--panel-2:#f7f7f9;--sunken:#f4f4f6;--raised:#ffffff;--hover:#efeff2;--line:#e6e6ea;--line-2:#cdced4;--fg:#1d1e21;--mut:#53555c;--dim:#64666e;
+--accent:#5e6ad2;--accent-bg:#eef0fc;--accent-text:#4f5bd5;--btn:#5e6ad2;--btn-fg:#ffffff;
+--prog:#4f5bd5;--prog-bg:#eef0fc;--block:#c2352b;--block-bg:#fdeeec;--done:#1f7a50;--done-bg:#e5f6ee;--gone:#62646b;--gone-bg:#efeff2;--warn:#9a5200;--warn-bg:#fff4dc;
+--shadow:0 1px 2px rgba(20,20,30,.05),0 0 0 1px rgba(20,20,30,.02);--brand:#5e6ad2`;
+const DARK = `--bg:#151517;--side-bg:#111113;--panel:#1b1b1e;--panel-2:#212124;--sunken:#18181b;--raised:#202024;--hover:#26262b;--line:#2a2a30;--line-2:#3d3e45;--fg:#e4e4e8;--mut:#a5a6ad;--dim:#90929a;
+--accent:#7c86ea;--accent-bg:#23253c;--accent-text:#8f97f3;--btn:#5e6ad2;--btn-fg:#ffffff;
+--prog:#8f97f3;--prog-bg:#23253c;--block:#f2918a;--block-bg:#3a2120;--done:#6fd3a3;--done-bg:#17301f;--gone:#9a9ca3;--gone-bg:#25252a;--warn:#eec46a;--warn-bg:#352c14;
+--shadow:none;--brand:#7c86ea`;
 export const CSS = `
 :root{color-scheme:light dark;${LIGHT};--r-lg:10px;--r:7px;
 --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--serif:ui-serif,"New York","Iowan Old Style",Palatino,Georgia,serif}
 @media screen and (prefers-color-scheme:dark){:root{${DARK}}}
 :root:has(#th-light:checked){color-scheme:light;${LIGHT}}
 @media screen{:root:has(#th-dark:checked){color-scheme:dark;${DARK}}}
-:root:has(#th-living:checked){color-scheme:light;${LIVING_LIGHT}}
-@media screen and (prefers-color-scheme:dark){:root:has(#th-living:checked){color-scheme:dark;${LIVING_DARK}}}
-${LIVING_CSS}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;color:var(--fg);font:13.5px/1.5 var(--sans);background:var(--bg);-webkit-font-smoothing:antialiased}
@@ -100,7 +72,14 @@ a{color:inherit;text-decoration:none}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
 #v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{color:var(--accent);border-bottom-color:var(--accent)}
 #v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--accent);outline-offset:-2px}
-.kbd{margin-left:auto;min-width:190px;text-align:left;font:500 13px var(--sans);color:var(--dim);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:6px 10px;cursor:pointer}
+.kbd{margin-left:auto;min-width:190px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;font:500 13px var(--sans);color:var(--dim);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:6px 10px;cursor:pointer}
+.kbd kbd{font:500 11px var(--sans);color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.help{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);border-radius:var(--r);padding:4px 8px}.help:hover{color:var(--fg);background:var(--hover)}.help svg{width:16px;height:16px}
+.side-foot{display:flex;align-items:center;gap:8px;margin-left:auto}
+.pav{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:5px;font:650 11px/1 var(--sans);color:#fff;background:var(--t)}
+.t0{--t:#5e6ad2}.t1{--t:#0f7b6c}.t2{--t:#b4426b}.t3{--t:#8a5a00}.t4{--t:#2f6fb0}.t5{--t:#7a4fc9}.t6{--t:#3d7a2e}.t7{--t:#b04a2a}
+.me .av{width:22px;height:22px;font-size:11px}.me>summary{gap:8px}
+.log-top{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:16px 0 4px}.log-top h3{margin:0}
 .kbd:hover{background:var(--hover)}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
 .verify{font-family:var(--mono);font-size:11.5px;color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r);padding:4px 9px;white-space:nowrap}
@@ -108,14 +87,14 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .theme{display:inline-flex;gap:2px;padding:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r)}.brand+.theme{margin-left:auto}
 .theme label{display:grid;place-items:center;width:28px;height:24px;border-radius:4px;color:var(--dim);cursor:pointer}
 .theme label:hover{color:var(--fg)}.theme svg{width:15px;height:15px}
-#th-system:checked~main .theme label[for=th-system],#th-light:checked~main .theme label[for=th-light],#th-dark:checked~main .theme label[for=th-dark],#th-living:checked~main .theme label[for=th-living]{color:var(--accent-text);background:var(--accent-bg)}
-#th-system:focus-visible~main .theme label[for=th-system],#th-light:focus-visible~main .theme label[for=th-light],#th-dark:focus-visible~main .theme label[for=th-dark],#th-living:focus-visible~main .theme label[for=th-living]{outline:2px solid var(--accent);outline-offset:1px}
+#th-system:checked~main .theme label[for=th-system],#th-light:checked~main .theme label[for=th-light],#th-dark:checked~main .theme label[for=th-dark]{color:var(--accent-text);background:var(--accent-bg)}
+#th-system:focus-visible~main .theme label[for=th-system],#th-light:focus-visible~main .theme label[for=th-light],#th-dark:focus-visible~main .theme label[for=th-dark]{outline:2px solid var(--accent);outline-offset:1px}
 .flash{margin:16px 0 0;padding:10px 14px;border-radius:var(--r);font-size:13px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-left-width:4px}
 .flash.ok{border-left-color:var(--done);background:var(--done-bg)}.flash.no{border-left-color:var(--block);background:var(--block-bg)}
 .hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 0;margin:36px 0 26px}
 .hero .who{display:contents}
 .hero h1{order:-1;flex:1 1 300px;margin:0 24px 0 0;font-size:32px;font-weight:650;letter-spacing:-.03em;line-height:1.1;overflow-wrap:anywhere}
-.hero h1::before{content:"stream";margin-right:.3em;font:italic 400 1em/1 var(--serif);letter-spacing:-.01em;color:var(--accent-text)}
+.hero h1{display:flex;align-items:center;gap:12px}.hero h1 .pav{width:30px;height:30px;border-radius:8px;font-size:15px}
 .big{flex:none;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
 .big small{font-size:.66em;font-weight:500;letter-spacing:0;color:var(--dim)}
 .big::before{content:attr(title);display:block;margin-bottom:5px}
@@ -220,21 +199,21 @@ details.att-group .names{min-width:0;flex:1;color:var(--mut);font-size:12.5px;ov
 .far .gn>*,.far .ghost>*,.far .fold{visibility:hidden}
 .far .gn{background:var(--line);border-color:var(--line-2);box-shadow:none}.far .gn.st-done{background:color-mix(in srgb,var(--done) 50%,var(--panel));border-color:transparent}
 .far .gn.st-in_progress{background:var(--prog);border-color:var(--prog)}.far .gn.st-blocked{background:var(--block);border-color:var(--block)}.far .gn.st-cancelled{background:var(--gone-bg)}
-.far .gn.is-next{box-shadow:0 0 0 calc(5px * var(--inv,1)) var(--accent)}.far .ghost{background:var(--accent-bg)}
+.far .gn.is-next{box-shadow:0 0 0 calc(5px * var(--inv,1)) var(--accent)}.far .ghost{background:var(--accent-bg);border-color:transparent}
 .branch-label{position:absolute;z-index:4;display:none;transform:translate(-50%,-50%);max-width:var(--w);padding:calc(2px * var(--inv,1)) calc(8px * var(--inv,1));border:calc(1px * var(--inv,1)) solid var(--line-2);border-radius:calc(6px * var(--inv,1));background:var(--panel);box-shadow:var(--shadow);font:650 calc(13px * var(--inv,1))/1.3 var(--sans);color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .far .branch-label.fits{display:block}
 .minimap{position:absolute;right:10px;bottom:10px;z-index:3;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);cursor:crosshair;touch-action:none}
 .minimap svg{display:block}.minimap rect{fill:var(--line-2)}.minimap .mm-done{fill:color-mix(in srgb,var(--done) 55%,var(--panel))}.minimap .mm-in_progress{fill:var(--prog)}.minimap .mm-blocked{fill:var(--block)}.minimap .mm-cancelled{fill:var(--gone-bg)}.minimap .mm-idea{fill:var(--accent)}
 .minimap .mm-view{fill:color-mix(in srgb,var(--accent) 10%,transparent);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .gn.pulse,.ghost.pulse{animation:changed 1.1s cubic-bezier(.2,.7,.2,1) 2;outline:2px solid var(--accent);outline-offset:3px}
-.ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);border-radius:var(--r-lg);color:var(--fg)}
-.ghost:hover{background:var(--hover)}.ghost[hidden]{display:none}.ghost.loose{border-color:var(--warn);background:var(--warn-bg)}
-.ghost .gt{display:flex;align-items:flex-start;gap:6px;min-width:0}.ghost .name{font-style:italic}
-.ghost .gm{padding-left:22px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ghost .sd{border-style:dashed;border-color:var(--accent);color:var(--accent)}
-.ghost .tag,.card .tag{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--panel);border:1px dashed var(--accent);border-radius:4px;padding:0 5px;white-space:nowrap}
+.ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r-lg);color:var(--fg);box-shadow:var(--shadow)}
+.ghost:hover{border-color:var(--accent);background:var(--hover)}.ghost[hidden]{display:none}
+.ghost .gt{display:flex;align-items:flex-start;gap:6px;min-width:0}
+.ghost .gm{padding-left:21px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ghost .tag,.card .tag,.lg-idea{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:1px 5px;white-space:nowrap}
 .ghost .tag{position:absolute;top:-10px;left:10px}.card .tag{display:inline-block;margin-bottom:6px}
-.edges path.idea{stroke:var(--accent);stroke-dasharray:5 4}.lg-idea{display:block;width:16px;height:10px;border:1.5px dashed var(--accent);border-radius:3px;background:var(--accent-bg)}
-.card.idea{border:1.5px dashed var(--accent);background:var(--accent-bg)}.card.idea .t{font-style:italic}.chip.stage{color:var(--accent-text);border-color:var(--accent)}.chip.stage.loose{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.edges path.idea{stroke:var(--line-2);stroke-dasharray:5 4}
+.chip.stage{color:var(--accent-text);border-color:var(--accent)}.chip.stage.loose{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
 .s-idea{color:var(--accent-text);background:var(--accent-bg)}.idea-file{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:14px 0 0;font-size:13.5px}.idea-file dt{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding-top:2px}.idea-file dd{margin:0;overflow-wrap:anywhere}
 .hide-found .edges path.found{stroke:var(--line-2);stroke-dasharray:none}.hide-found .edges path.done.found{stroke:var(--done)}
 .edges path.blocks{stroke:var(--block);stroke-dasharray:7 4;stroke-width:2}.edges path.blocks.done{stroke:var(--done)}.lg-blocks{display:block;width:16px;border-top:2px dashed var(--block)}
@@ -247,7 +226,7 @@ details.att-group .names{min-width:0;flex:1;color:var(--mut);font-size:12.5px;ov
 .meter{flex:1;min-width:40px;height:6px;border-radius:3px;background:var(--gone-bg);overflow:hidden;display:flex}.meter i{display:block;height:100%}
 .m-done{background:var(--done)}.m-cancelled{background:var(--gone)}.m-in_progress{background:var(--prog)}.m-blocked{background:var(--block)}
 .ct{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
-.cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(184px,1fr);gap:12px;align-items:start;overflow-x:auto;scrollbar-width:thin;padding-bottom:6px}
+.cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(172px,1fr);gap:12px;align-items:start;overflow-x:auto;scrollbar-width:thin;padding-bottom:6px}
 .col{min-width:0;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px}
 .ch{display:flex;align-items:center;gap:8px;padding:4px 6px 10px;font-weight:650;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
 .dot{width:8px;height:8px;border-radius:2px}
@@ -359,6 +338,26 @@ button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:
 .pal-list li[aria-selected=true]{background:var(--accent-bg)}
 .pal-list .pid{font-weight:600}.pal-list .ppath{color:var(--dim);font-size:12px;overflow-wrap:anywhere}.pal-list .pverb{margin-left:auto;font-size:12px;font-weight:600;color:var(--accent)}
 .pal-hint{padding:8px 14px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);background:var(--panel-2)}
+@media screen and (min-width:900px){
+:root{--side:236px}
+main[data-stream]{max-width:none;margin:0;padding:0 40px 72px calc(var(--side) + 40px)}
+main[data-stream]>.top{position:fixed;z-index:6;left:0;top:0;bottom:0;width:var(--side);flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:2px;min-height:0;padding:14px 10px 12px;background:var(--side-bg);border-right:1px solid var(--line);border-image:none;overflow-y:auto}
+main[data-stream]>.top .brand{padding:2px 8px 12px}
+main[data-stream]>.top .kbd{margin:0 0 10px;min-width:0}
+main[data-stream]>.top .tabs{flex-direction:column;align-self:stretch;margin:0 0 14px;gap:1px}
+main[data-stream]>.top .tabs label{padding:6px 10px;border:0;border-radius:var(--r);font-size:13.5px;color:var(--mut)}
+main[data-stream]>.top .tabs label:hover{background:var(--hover)}
+#v-board:checked~main[data-stream] .tabs label[for=v-board],#v-lanes:checked~main[data-stream] .tabs label[for=v-lanes],#v-log:checked~main[data-stream] .tabs label[for=v-log]{color:var(--fg);background:var(--hover)}
+main[data-stream]>.top .projects>summary{height:auto;max-width:none;padding:6px 10px;border:0;background:none;font-size:12px;font-weight:600;color:var(--dim)}
+main[data-stream]>.top .projects>summary svg{width:11px;height:11px}.projects:not([open])>summary svg{transform:rotate(-90deg)}
+main[data-stream]>.top .projects .ws-menu{position:static;width:auto;max-height:none;padding:0;border:0;box-shadow:none;background:none}
+main[data-stream]>.top .projects .ws-item{padding:6px 10px;gap:9px}.projects .ws-item small{font-size:11.5px}
+main[data-stream]>.top .projects .ws-head{display:none}
+main[data-stream]>.top .side-foot{margin:auto 0 0;padding-top:10px;border-top:1px solid var(--line);flex-direction:column;align-items:stretch;gap:6px}
+main[data-stream]>.top .side-foot .theme{align-self:flex-start}
+main[data-stream]>.top .me>summary{max-width:none;width:100%;border:0;background:none;padding:0 8px}
+main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px)}
+}
 @media (max-width:720px){.split{grid-template-columns:1fr}}
 @media (max-width:640px){
 main{padding:0 16px 48px}
@@ -383,8 +382,8 @@ const ICON = {
   system: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.8" width="12" height="8.7" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/></svg>`,
   sun: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>`,
   moon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.5 5.5 0 0 1 6.4 2.8a5.5 5.5 0 1 0 6.8 6.8z"/></svg>`,
+  help: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.2a1.8 1.8 0 0 1 3.5.6c0 1.2-1.8 1.5-1.8 2.6M8 11.4v.1"/></svg>`,
   chev: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>`,
-  leaf: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13c0-6 4-10 10.5-10.5C13 9 9 13 3 13z"/><path d="M3 13l6-6"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
   kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
   graph: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="3.4" rx="1"/><rect x="1.5" y="10.8" width="4.4" height="3.4" rx="1"/><rect x="10.1" y="10.8" width="4.4" height="3.4" rx="1"/><path d="M8 5.2v2.6M3.7 10.8V7.8h8.6v3"/></svg>`,
@@ -505,8 +504,8 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
 }
 
 // ---------- ideas (D5, the vapor catch) ----------
-// An open idea is on the board too, never as a task: a dashed card in the Ideas column, and on the
-// Graph a dashed ghost under the task tira proposed for it. One tira hasn't placed yet (its file
+// An open idea is on the board too, never as a task: a card tagged IDEA in the Ideas column, and on
+// the Graph a box tagged IDEA under the task tira proposed for it. One tira hasn't placed yet (its file
 // isn't approved), or one waiting for a person to pick its parent, sits on the top row. Each opens
 // its own dialog (#i<n>). Ghosts carry data-idea, never data-key: the M1 count is the tree's alone.
 interface Ghost { idea: IdeaRow; i: number; parent?: string } // parent: the proposed parent's key, on the tree
@@ -579,7 +578,7 @@ function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean, q: string)
 
 // What the graph's colours and marks mean, beside the switch while the graph shows.
 const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done"></i>done</span><span><i class="m-in_progress"></i>in progress</span><span><i class="m-blocked"></i>blocked</span><span><i></i>to do</span><span><i class="m-cancelled"></i>dropped</span>`
-  + `<span><b class="lg-next">◆</b>next</span><span>${ICON.auto}closed by tira</span><span><b class="lg-ring"></b>tira closes it when you move on</span><span><b class="lg-found"></b>found while working on</span><span><b class="lg-blocks"></b>blocks</span><span><b class="lg-idea"></b>idea, not a task yet</span></span>`;
+  + `<span><b class="lg-next">◆</b>next</span><span>${ICON.auto}closed by tira</span><span><b class="lg-ring"></b>tira closes it when you move on</span><span><b class="lg-found"></b>found while working on</span><span><b class="lg-blocks"></b>blocks</span><span><b class="lg-idea">idea</b>not a task yet</span></span>`;
 
 // The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
 // Kanban by default; live, app.mjs remembers the choice so it survives the reload after
@@ -976,13 +975,13 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
 
 // ---------- activity ----------
 
-function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: EntityState[], rejections: Rejection[], dumpHash: string): string {
+function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: EntityState[], rejections: Rejection[], dumpHash: string, chip: string): string {
   const alert = anomalies.length === 0 ? "" : `<div class="alert">${anomalies.length} ${anomalies.length === 1 ? "anomaly" : "anomalies"} on replay</div><ol class="feed">${anomalies.map((a) => `<li class="ev refused"><span class="av" aria-hidden="true">!</span><div class="ev-body"><div class="ev-head"><span class="ev-what">${esc(a.type)}</span><span class="ev-seq">seq ${a.seq}</span></div><div class="ev-detail">${esc(a.problem)}</div></div></li>`).join("")}</ol>`;
   const feed = all.length === 0 ? `<p class="empty">No events yet</p>` : `<ol class="feed">${[...all].reverse().map((x) => entryHtml(x, true)).join("")}</ol>`;
   const othersHtml = others.length === 0 ? "" : `<h3>Other entities</h3><div class="others">${others.map((e) => `<span class="chip">${esc(e.key)} · ${esc(Object.values(e.regions).join(" "))}</span>`).join("")}</div>`;
   const legacy = all.filter((x) => x.legacy).length;
   const legacyNote = legacy === 0 ? "" : ` · ${legacy} legacy`;
-  return `<div class="log">${alert}<h3>Newest first · ${all.length} events · ${rejections.length} rejected${legacyNote}</h3>${feed}${othersHtml}<h3>Dump hash</h3><div class="hash">sha256:${esc(dumpHash)}</div></div>`;
+  return `<div class="log"><div class="log-top"><h3>Newest first · ${all.length} events · ${rejections.length} rejected${legacyNote}</h3>${chip}</div>${alert}${feed}${othersHtml}<h3>Dump hash</h3><div class="hash">sha256:${esc(dumpHash)}</div></div>`;
 }
 
 // ---------- page ----------
@@ -991,9 +990,9 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
 // Three short paragraphs, opened from the nav and from the hash chip.
 function guideHtml(dumpHash: string): string {
   return `<section class="drawer guide" id="guide" aria-label="How to read this page" role="dialog" aria-modal="true" data-guide>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
-    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on. A dashed card is an idea, not a task yet: it waits in the Ideas column and, on the Graph, under the task tira proposes for it; approve its file, then where it goes, and it becomes a task.</p>`
+    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on. A card tagged IDEA is an idea, not a task yet: it waits in the Ideas column and, on the Graph, under the task tira proposes for it; approve its file, then where it goes, and it becomes a task.</p>`
     + `<p><b>By tira.</b> A bolt on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
-    + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
+    + `<p><b>The fingerprint.</b> The chip at the top of History is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
 }
 
 // The product mark, on every page's top bar (the confirm page's too): a link home, to the
@@ -1001,16 +1000,25 @@ function guideHtml(dumpHash: string): string {
 export const brand = (href: string) => `<a class="brand" href="${esc(href)}" title="Home: the board" data-home>${ICON.brand}tira</a>`;
 export const BRAND = brand("/");
 
-// Live, the workspace you're in, next to the mark: a click lists every workspace in the store
-// (app.mjs fetches /api/workspaces when it opens), each one click away.
-const workspaceSwitch = (stream: string) =>
-  `<details class="ws" data-workspaces><summary title="Switch workspace" aria-label="Workspace ${esc(stream)}: switch workspace"><span class="ws-name">${esc(stream)}</span>${ICON.chev}</summary>`
-  + `<div class="ws-menu" data-ws-menu><p class="ws-note">Loading workspaces…</p></div></details>`;
+// A project's mark: its first letter on a colour picked from its name (the same everywhere).
+const initial = (name: string) => esc(([...name][0] ?? "?").toUpperCase());
+export const projectMark = (name: string) => `<span class="pav t${tint(name)}" aria-hidden="true">${initial(name)}</span>`;
 
-// The theme switch, top right on every page: System (the default), Light, Dark or Living. Radio
+// Live, every project in the store, in the sidebar (like Linear's teams): the one you're in
+// first, the rest when app.mjs has read /api/workspaces, each one click away.
+const projectsHtml = (stream: string, home: string) =>
+  `<details class="ws projects" data-workspaces open><summary title="Your projects">Projects${ICON.chev}</summary>`
+  + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page">${projectMark(stream)}<span class="ws-t"><b>${esc(stream)}</b></span></a></div></details>`;
+
+// Live, you: who the page acts as, and your settings.
+const profileHtml = (actor: string) =>
+  `<details class="ws me" data-profile><summary title="You: ${esc(actor)}"><span class="av">${initial(actor)}</span><span class="ws-name">${esc(actor)}</span>${ICON.chev}</summary>`
+  + `<div class="ws-menu me-menu" data-me-menu><p class="ws-head">Acting as ${esc(actor)}</p></div></details>`;
+
+// The theme switch, on every page: System (the default), Light or Dark. Radio
 // inputs before <main> and labels in the top bar, so it works with no script; under
 // tira serve, theme.mjs remembers the choice per browser.
-const THEMES: [string, string, string][] = [["system", "System", ICON.system], ["light", "Light", ICON.sun], ["dark", "Dark", ICON.moon], ["living", "Living", ICON.leaf]];
+const THEMES: [string, string, string][] = [["system", "System", ICON.system], ["light", "Light", ICON.sun], ["dark", "Dark", ICON.moon]];
 export const THEME_RADIOS = THEMES.map(([t, label]) => `<input class="view-radio" type="radio" name="theme" id="th-${t}"${t === "system" ? " checked" : ""} aria-label="${label} theme" data-theme-choice="${t}">`).join("");
 export const THEME_SWITCH = `<span class="theme" data-theme-switch>${THEMES.map(([t, label, icon]) => `<label for="th-${t}" title="${label}">${icon}</label>`).join("")}</span>`;
 
@@ -1064,12 +1072,20 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
-function navHtml(dumpHash: string, lastSeq: number, live: boolean, views: [string, string][], home: string, stream: string): string {
-  const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
+// The sidebar (after Linear; a top bar on a narrow screen): the mark (home), search, the views,
+// live the projects and you, then help and the theme.
+function navHtml(live: boolean, views: [string, string][], home: string, stream: string, actor: string | undefined): string {
   const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
-  const search = live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : "";
-  return `<nav class="top">${brand(home)}${live ? workspaceSwitch(stream) : ""}<div class="tabs">${tabs}</div>${search}<a class="how" href="#guide">How to read this page</a>`
-    + `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a>${THEME_SWITCH}</nav>`;
+  const search = live ? `<button class="kbd" type="button" data-open-palette><span>Search</span><kbd>⌘K</kbd></button>` : "";
+  return `<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${live ? projectsHtml(stream, home) : ""}`
+    + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${THEME_SWITCH}${live && actor !== undefined ? profileHtml(actor) : ""}</div></nav>`;
+}
+
+// The History view's fingerprint: the sha256 of the replayed log, for whoever checks the page
+// against tira dump --hash (an audit, not a daily read).
+function fingerprintHtml(dumpHash: string, lastSeq: number): string {
+  const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
+  return `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a>`;
 }
 
 // The last action's result, under tira serve.
@@ -1083,7 +1099,8 @@ export interface RenderOptions {
   // palette loads, and the last action's result shows. A rendered file never carries any of it.
   // `changed`: the keys the last action wrote to; their cards and boxes glow once.
   // `query`: the workspace ("w=…") when it isn't the one the server started on, kept on every link.
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string };
+  // `actor`: who the page acts as, shown with your settings.
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -1161,14 +1178,13 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
 <body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
-${navHtml(dumpHash, v.lastSeq, live, views, home, stream)}
+${navHtml(live, views, home, stream, opts.live?.actor)}
 ${flashHtml(opts.live?.flash)}
-<header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
-${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}
+<header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${projectMark(stream)}${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
 <section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed) : `<p class="empty">No tree yet.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
-<section class="view view-log" aria-label="History">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
+<section class="view view-log" aria-label="History">${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}</section>
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${guideHtml(dumpHash)}

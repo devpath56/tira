@@ -26,3 +26,4 @@ export declare function centreAt(x: number, y: number, s: number, vw: number, vh
 export declare function ease(t: number): number;
 export declare function viewBetween(a: View, b: View, t: number, vw: number, vh: number): View;
 export declare function placesBetween(nodes: readonly LayoutNode[], from: ReadonlyMap<string, Point>, to: ReadonlyMap<string, Point>, t: number): { at: Map<string, Point>; fade: Map<string, number> };
+export declare const tint: (name: string) => number;

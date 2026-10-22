@@ -333,13 +333,16 @@ test("needs attention escapes reasons, labels a blank one, and is left out of a 
   assert.ok(!factory.includes('class="attention'));
 });
 
-test("trust and reading aids: the hash chip says what it is and opens the guide; lanes carry section labels", async () => {
+test("trust and reading aids: Help opens the guide; the fingerprint says what it is, in History (an audit, not the board's); lanes carry section labels", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "a".repeat(64), events);
-  assert.match(html, /<a class="how" href="#guide">How to read this page<\/a><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a>/);
+  assert.match(html, /<div class="side-foot"><a class="help" href="#guide" title="How to read this page"><svg[^]*?<\/svg><span>Help<\/span><\/a>/);
+  const history = /<section class="view view-log" aria-label="History">[^]*?<\/section>/.exec(html)?.[0] ?? "";
+  assert.match(history, /<div class="log-top"><h3>Newest first · [^<]*<\/h3><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a><\/div>/);
+  assert.equal((html.match(/class="verify"/g) ?? []).length, 1); // nowhere else: not in the sidebar, not on the board
   const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
   assert.equal((guide.match(/<p>/g) ?? []).length, 3); // the brief: three short paragraphs
-  for (const topic of ["The board.", "By tira.", "The hash."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
+  for (const topic of ["The board.", "By tira.", "The fingerprint."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
   assert.ok(guide.includes(`<code>${"a".repeat(64)}</code>`));
   // a factory stream: the lanes say what each block is
   const store = new SqliteEventStore();
@@ -355,22 +358,17 @@ test("trust and reading aids: the hash chip says what it is and opens the guide;
   assert.match(lanes, /<h3 class="lanes-label">Handoffs: 0 waiting, 1 done<\/h3>/);
 });
 
-test("the theme switch: System, Light, Dark and Living at the top right; System by default; a picked theme beats the system's, on screen only", async () => {
+test("the theme switch: System, Light and Dark in the sidebar; System by default; a picked theme beats the system's, on screen only", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
   const radios = [...html.matchAll(/<input class="view-radio" type="radio" name="theme" id="th-(\w+)"( checked)? aria-label="\w+ theme" data-theme-choice="(\w+)">/g)];
-  assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"], ["living", false, "living"]]);
-  assert.ok(html.indexOf('id="th-living"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
-  assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<label for="th-living" title="Living">[^]*?<\/span><\/nav>/);
-  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#1f1f21;/); // System: the computer's setting
-  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#f7f6f3;/); // Light (warm off-white) beats a dark system
-  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#1f1f21;/); // Dark, on screen only: print stays light
-  // Living follows the system's light or dark, on screen; its blooms, buds and breathing only under it, and still for reduced motion
-  assert.match(CSS, /:root:has\(#th-living:checked\)\{color-scheme:light;--bg:#eef1e8;/);
-  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root:has\(#th-living:checked\)\{color-scheme:dark;--bg:#141915;/);
-  assert.match(CSS, /#th-living:checked~main \.st-done \.sd\{border:0;background:radial-gradient\(circle,var\(--pollen\)/); // a done task blooms
-  assert.match(CSS, /#th-living:checked~main \.st-in_progress \.sd\{[^}]*animation:breathe /);
-  assert.match(CSS, /@media screen\{body:has\(#th-living:checked\)\{background:/); // print stays plain
+  assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"]]);
+  assert.ok(html.indexOf('id="th-dark"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
+  assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<\/span><\/div><\/nav>/);
+  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#151517;/); // System: the computer's setting
+  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#fcfcfd;/); // Light beats a dark system
+  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#151517;/); // Dark, on screen only: print stays light
+  assert.doesNotMatch(html + CSS, /th-living|--pollen/); // three choices, no more (Isha, 2026-10-21)
   assert.match(CSS, /@media \(prefers-reduced-motion:reduce\)\{\*,\*::before,\*::after\{transition:none!important;animation:none!important\}\}/);
   assert.ok(!html.includes("<script"), "the switch is CSS only: the rendered file has no script");
 });
@@ -803,7 +801,7 @@ async function flat(opts: { done?: number; todo?: number; dropped?: number; bloc
 }
 
 test("Kanban at 100+ tasks: the columns stay in one row; Done and Dropped show their newest 8, the rest behind 'N more'; the work columns show every card", async () => {
-  assert.match(CSS, /\.cols\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(184px,1fr\);[^}]*overflow-x:auto/); // never wraps a column under the others
+  assert.match(CSS, /\.cols\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(172px,1fr\);[^}]*overflow-x:auto/); // never wraps a column under the others
   const { r, events } = await flat({ done: 12, todo: 10, dropped: 3 });
   const html = renderHtml(r, S, "h", events);
   const cols = kanbanColumns(html);
@@ -871,10 +869,21 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
   assert.match(CSS, /@media \(prefers-reduced-motion:reduce\)\{\.changed\{outline:2px solid var\(--accent\)/); // no motion: a ring instead
 });
 
-test("the header in plain words, calmer: the stream's name with a serif accent, and its numbers in one quiet row", async () => {
+test("after Linear: a sidebar; the project's mark and name in the header (no 'stream') with its numbers in one quiet row; audit parts in History; ideas tagged, not blue", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
-  assert.match(html, /<h1>tasktree-dash<\/h1><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
-  assert.match(CSS, /\.hero h1::before\{content:"stream";margin-right:\.3em;font:italic 400 1em\/1 var\(--serif\)/);
+  assert.match(html, /<h1><span class="pav t\d" aria-hidden="true">T<\/span>tasktree-dash<\/h1><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  assert.doesNotMatch(CSS, /content:"stream"/);
+  assert.match(CSS, /\.t0\{--t:#5e6ad2\}/);
+  // a sidebar on a wide screen (a top bar on a narrow one); the board page only, not a decision's page
+  assert.match(CSS, /@media screen and \(min-width:900px\)\{\n:root\{--side:236px\}\nmain\[data-stream\]\{[^}]*\}\nmain\[data-stream\]>\.top\{position:fixed;z-index:6;left:0;top:0;bottom:0;width:var\(--side\);flex-direction:column/);
+  // the audit parts live in History: the divergence check sits there, not over the board
+  const withPanel = renderHtml(r, S, "h", events, { divergence: { unevaluable: "no factory file" } });
+  assert.match(withPanel, /<section class="view view-log" aria-label="History"><section class="divergence unevaluable"/);
+  assert.equal((withPanel.match(/<section class="divergence/g) ?? []).length, 1);
+  // an idea is a plain card or box with its IDEA tag: no blue fill, no dashed border
+  assert.match(CSS, /\.ghost\{position:absolute;[^}]*background:var\(--raised\);border:1px solid var\(--line-2\);/);
+  assert.doesNotMatch(CSS, /\.card\.idea\{|dashed var\(--accent\)/);
+  assert.match(html, /<a class="card idea" href="#i0"[^>]*><span class="tag">idea<\/span>/);
   assert.match(CSS, /\.stats li\{[^}]*border-left:1px solid var\(--line\)\}/); // dividers, not boxes
 });

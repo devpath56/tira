@@ -694,12 +694,12 @@ test("the page's script: the palette moves to a task on the Graph, dialogs offer
 test("the mark goes home: the workspace's board live (and from a decision), the top of a rendered file", async () => {
   const s = await serving();
   try {
-    assert.match((await s.http("GET", "/")).body, /<nav class="top"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match((await s.http("GET", "/")).body, /<nav class="top" aria-label="tira"><a class="brand" href="\/" title="Home: the board" data-home>/);
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=START")).body, /<nav class="top"><a class="brand" href="\/" title="Home: the board" data-home>[^]*?<a class="how" href="\/">← the page<\/a>/);
     const events = await s.store.readStream(S);
     const file = renderHtml(fold(events, s.registry), S, "h", events);
-    assert.match(file, /<nav class="top"><a class="brand" href="#" title="Home: the board" data-home><svg[^]*?<\/svg>tira<\/a><div class="tabs">/);
-    assert.doesNotMatch(file, /data-workspaces|data-ws-menu/); // a rendered file is one workspace: no switcher
+    assert.match(file, /<nav class="top" aria-label="tira"><a class="brand" href="#" title="Home: the board" data-home><svg[^]*?<\/svg>tira<\/a><div class="tabs">/);
+    assert.doesNotMatch(file, /data-workspaces|data-ws-menu|data-profile/); // a rendered file is one project, and no one acts on it
   } finally {
     await s.done();
   }
@@ -717,7 +717,9 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
   try {
     // the switcher, live only: the workspace you're in, its list read when it opens
     const home = (await s.http("GET", "/")).body;
-    assert.match(home, /<details class="ws" data-workspaces><summary title="Switch workspace" aria-label="Workspace tasktree-dash: switch workspace"><span class="ws-name">tasktree-dash<\/span>/);
+    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><\/details>/);
+    // you: who the page acts as
+    assert.match(home, /<details class="ws me" data-profile><summary title="You: isha"><span class="av">I<\/span><span class="ws-name">isha<\/span>/);
     assert.doesNotMatch(home, /[?&]w=/); // the first workspace's links stay as they were
     const list = JSON.parse((await s.http("GET", "/api/workspaces")).body);
     assert.deepEqual(list, [
