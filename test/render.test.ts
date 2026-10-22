@@ -16,7 +16,7 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { canonicalJson, fold } from "../src/fold/fold.ts";
-import { CSS, divergenceHtml, renderHtml } from "../src/render/html.ts";
+import { CSS, divergenceHtml, isAgent, renderHtml } from "../src/render/html.ts";
 import { streamView, textTree } from "../src/render/tree-view.ts";
 
 const S = "tasktree-dash";
@@ -256,6 +256,8 @@ test("needs attention: blocked work grouped by its reason, then the active task,
   const section = /<section class="attention"[^>]*>(.*?)<\/section>/s.exec(html)?.[0] ?? "";
   assert.match(section, /data-attention-count="4"/);
   assert.match(section, /<h2><b>4<\/b>need you<\/h2><span class="sum">3 blocked · 1 in progress<\/span>/);
+  // the whole panel folds to that line (remembered per browser), and opens on its own with no script
+  assert.match(section, /^<section class="attention" data-attention-count="4" aria-label="Needs attention"><details class="att-fold" open data-remember="tira-needs-you"><summary class="att-head"[^>]*><h2>/);
   // groups in the order they first blocked; rows in the order they blocked
   assert.deepEqual([...section.matchAll(/data-reason="([^"]*)"/g)].map((m) => m[1]), ["waiting on tokens", "waiting on review"]);
   assert.deepEqual([...section.matchAll(/data-attention-key="([^"]*)"/g)].map((m) => m[1]), ["node:b", "node:c", "node:a", "node:d"]);
@@ -267,7 +269,7 @@ test("needs attention: blocked work grouped by its reason, then the active task,
   }
   // the M1 count is untouched: rows carry data-attention-key, never data-key
   assert.equal((html.match(/ data-key="/g) ?? []).length, 6);
-  assert.match(html, /#v-lanes:checked~main \.attention,#v-log:checked~main \.attention\{display:none\}/);
+  assert.match(html, /#v-lanes:checked~main \.attention\{display:none\}/);
   // unblocked and finished, nothing needs you; the next task is offered instead
   await send("d", "COMPLETE", { evidenceRef: "e" }); // one active task at a time: finish d before unblocking a
   await send("a", "UNBLOCK");
@@ -340,11 +342,11 @@ test("needs attention escapes reasons, labels a blank one, and is left out of a 
   assert.ok(!factory.includes('class="attention'));
 });
 
-test("trust and reading aids: Help opens the guide; the fingerprint says what it is, in History (an audit, not the board's); lanes carry section labels", async () => {
+test("trust and reading aids: Help opens the guide; the fingerprint says what it is, in the History dialog (an audit, not the board's); lanes carry section labels", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "a".repeat(64), events);
   assert.match(html, /<div class="side-foot"><a class="help" href="#guide" title="How to read this page"><svg[^]*?<\/svg><span>Help<\/span><\/a>/);
-  const history = /<section class="view view-log" aria-label="History">[^]*?<\/section>/.exec(html)?.[0] ?? "";
+  const history = /<section class="drawer log-dialog" id="history" aria-label="History" role="dialog" aria-modal="true" data-log>[^]*?<\/section>/.exec(html)?.[0] ?? "";
   assert.match(history, /<div class="log-top"><h3>Newest first · [^<]*<\/h3><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a><\/div>/);
   assert.equal((html.match(/class="verify"/g) ?? []).length, 1); // nowhere else: not in the sidebar, not on the board
   const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
@@ -372,12 +374,23 @@ test("the theme switch: System, Light and Dark in the sidebar; System by default
   assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"]]);
   assert.ok(html.indexOf('id="th-dark"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
   assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<\/span><\/div><\/nav>/);
-  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#151517;/); // System: the computer's setting
-  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#fcfcfd;/); // Light beats a dark system
-  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#151517;/); // Dark, on screen only: print stays light
+  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#1f1f21;/); // System: the computer's setting
+  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#ffffff;/); // Light beats a dark system (Jira's palette, both themes)
+  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#1f1f21;/); // Dark, on screen only: print stays light
   assert.doesNotMatch(html + CSS, /th-living|--pollen/); // three choices, no more (Isha, 2026-10-21)
   assert.match(CSS, /@media \(prefers-reduced-motion:reduce\)\{\*,\*::before,\*::after\{transition:none!important;animation:none!important\}\}/);
   assert.ok(!html.includes("<script"), "the switch is CSS only: the rendered file has no script");
+});
+
+test("Apple's finish (the HIG) on Jira's colours: rounder corners, capsule buttons that give when pressed, the system font for the header's labels", () => {
+  assert.match(CSS, /:root\{color-scheme:light dark;[^}]*?--r-lg:12px;--r:8px;--ease:cubic-bezier\(/); // cards 12, controls 8
+  assert.match(CSS, /\.act\{[^}]*?border-radius:999px;/); // buttons are capsules
+  assert.match(CSS, /\.act:active,\.find:active,\.seg label:active\{transform:scale\(\.97\)\}/); // that give a little when pressed
+  assert.match(CSS, /\.history-btn\{[^}]*?border-radius:999px;/);
+  assert.match(CSS, /\.big::before,\.stats li\{font:600 11px\/1\.3 var\(--sans\);/); // the header's labels in the system font
+  assert.doesNotMatch(CSS, /var\(--mono\);letter-spacing:\.0[68]em;text-transform:uppercase/); // no typewriter capitals for labels
+  assert.doesNotMatch(CSS, /font-size:(?:\d|10)(?:\.\d+)?px|font:(?:\d{3} )?(?:\d|10)(?:\.\d+)?px/); // Apple's smallest text is 11
+  assert.match(CSS, /@media \(pointer:coarse\)\{\.act,\.tool,[^{]*\{min-height:44px\}/); // 44-point touch targets on a touch screen
 });
 
 test("text tree: nesting, markers, and the same flags as the page", async () => {
@@ -604,7 +617,7 @@ test("a task's dialog lists its subtasks with their states, shows proof of work 
   assert.deepEqual(acts("filters"), ["START", "BLOCK", "ADD_SUBTASK", "CANCEL"]); // unstarted
 });
 
-test("Lanes shows only when the stream has something for it; the whole log is called History", async () => {
+test("Lanes shows only when the stream has something for it; the whole log is called History, a dialog from under the project's name", async () => {
   const labels = (page: string) => [...page.matchAll(/<label for="v-(\w+)">([^<]+)<\/label>/g)].map((m) => m[2]);
   // a plain task tree: nothing for Lanes
   const store = new SqliteEventStore();
@@ -612,17 +625,18 @@ test("Lanes shows only when the stream has something for it; the whole log is ca
   await new WritePath(store, registry).submit({ stream: "plain", kind: "create", entity: { type: "node", id: "a" }, actor: "isha" });
   const pe = await store.readStream("plain");
   const tree = renderHtml(fold(pe, registry), "plain", "h", pe);
-  assert.deepEqual(labels(tree), ["Board", "History"]);
-  assert.doesNotMatch(tree, /id="v-lanes"|class="view view-lanes"/);
-  assert.match(tree, /<section class="view view-log" aria-label="History">/);
+  assert.deepEqual(labels(tree), ["Board"]);
+  assert.doesNotMatch(tree, /id="v-lanes"|class="view view-lanes"|id="v-log"/);
+  assert.match(tree, /<div class="title"><h1>[^]*?<\/h1><div class="title-acts"><a class="history-btn" href="#history" data-open-log><svg[^]*?<\/svg>History<span class="k">1<\/span><\/a><\/div><\/div>/);
+  assert.match(tree, /<section class="drawer log-dialog" id="history" aria-label="History"[^>]*><a class="scrim"[^]*?<h2>History<\/h2>/);
   // a tree with an idea in its stream: the idea lives in Lanes, so the tab shows
   const { r, events } = await scenario();
-  assert.deepEqual(labels(renderHtml(r, S, "h", events)), ["Board", "Lanes", "History"]);
+  assert.deepEqual(labels(renderHtml(r, S, "h", events)), ["Board", "Lanes"]);
   const d = new (await import("../src/write/dispatcher.ts")).Dispatcher(store, registry);
   await d.submit({ stream: "f", kind: "create", entity: { type: "session", id: "s1" }, actor: "s1" });
   const fe = await store.readStream("f");
   const factory = renderHtml(fold(fe, registry), "f", "h", fe);
-  assert.deepEqual([...factory.matchAll(/<label for="v-(\w+)">([^<]+)<\/label>/g)].map((m) => m[2]), ["Board", "Lanes", "History"]);
+  assert.deepEqual([...factory.matchAll(/<label for="v-(\w+)">([^<]+)<\/label>/g)].map((m) => m[2]), ["Board", "Lanes"]);
 });
 
 test("one Board view, two styles: Kanban by default, Graph a click away, switched with CSS alone", async () => {
@@ -807,7 +821,7 @@ async function flat(opts: { done?: number; todo?: number; dropped?: number; bloc
   return { r: fold(events, registry), events };
 }
 
-test("Kanban at 100+ tasks: the columns stay in one row; Done and Dropped show their newest 8, the rest behind 'N more'; the work columns show every card", async () => {
+test("Kanban at 100+ tasks: the columns stay in one row; Done and Dropped show their newest 8, the rest behind 'N more', and 'Show fewer' at the foot; the work columns show every card", async () => {
   assert.match(CSS, /\.cols\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(172px,1fr\);[^}]*overflow-x:auto/); // never wraps a column under the others
   const { r, events } = await flat({ done: 12, todo: 10, dropped: 3 });
   const html = renderHtml(r, S, "h", events);
@@ -815,13 +829,13 @@ test("Kanban at 100+ tasks: the columns stay in one row; Done and Dropped show t
   // newest first: d11 was completed last
   assert.deepEqual(cols.Done, ["d11", "d10", "d9", "d8", "d7", "d6", "d5", "d4", "d3", "d2", "d1", "d0"]);
   const done = /<span class="dot" style="background:var\(--done\)"><\/span>Done[^]*?<\/div><div class="col">/.exec(html)?.[0] ?? "";
-  const [shown, rest] = done.split('<details class="more"');
+  const [shown, rest] = done.split('<div class="more"');
   assert.equal((shown?.match(/<a class="card/g) ?? []).length, 8);
-  assert.match(done, /<details class="more" data-more="4"><summary><span class="m-show">Show 4 more<\/span><span class="m-hide">Show fewer<\/span><\/summary>/);
-  assert.equal((rest?.match(/<a class="card/g) ?? []).length, 4); // the older four, a click away (no script)
+  assert.match(done, /<div class="more" data-more="4"><input type="checkbox" class="more-tog" id="more-done"><div class="more-cards">(?:<a class="card[^]*?<\/a>){4}<\/div><label class="more-btn" for="more-done"><span class="m-show">Show 4 more<\/span><span class="m-hide">Show fewer<\/span><\/label><\/div>/);
+  assert.equal((rest?.match(/<a class="card/g) ?? []).length, 4); // the older four, a click away (no script); then the button, at the foot
   // To do holds the work: never folded, however long; Dropped (3) is under the cap
   assert.equal(cols["To do"]?.length, 10);
-  assert.equal((html.match(/<details class="more"/g) ?? []).length, 1);
+  assert.equal((html.match(/<div class="more"/g) ?? []).length, 1);
   // a card's title wraps after an underscore, never inside a word; its text is the exact id
   const { r: r2, events: e2 } = await scenario();
   assert.match(renderHtml(r2, S, "h", e2), /<div class="t">improve_<wbr>visual<\/div>/);
@@ -867,7 +881,7 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
     else assert.match(live, new RegExp(`<a class="gn[^"]*" href="#${id}"[^>]*data-key="${key}"`), `${id}: its graph box is ${key}`);
   }
   // the changed task: its card, its graph box; the idea's card and ghost
-  assert.match(live, /<a class="card changed" href="#t\d+"><div class="t">colors<\/div>/);
+  assert.match(live, /<a class="card changed" href="#t\d+"[^>]*><div class="t">colors<\/div>/);
   assert.match(live, /<a class="gn st-done changed" href="#t\d+"[^>]*data-key="node:colors"/);
   assert.match(live, /<a class="card idea changed" href="#i0"/);
   assert.match(live, /<a class="ghost changed" href="#i0"/);
@@ -879,18 +893,31 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
 test("after Linear: a sidebar; the project's mark and name in the header (no 'stream') with its numbers in one quiet row; audit parts in History; ideas tagged, not blue", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
-  assert.match(html, /<h1><span class="pav t\d" aria-hidden="true">T<\/span>tasktree-dash<\/h1><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  assert.match(html, /<h1><span class="pav t\d" aria-hidden="true">T<\/span>tasktree-dash<\/h1><div class="title-acts"><a class="history-btn"[^]*?<\/a><\/div><\/div><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
   assert.doesNotMatch(CSS, /content:"stream"/);
   assert.match(CSS, /\.t0\{--t:#5e6ad2\}/);
   // a sidebar on a wide screen (a top bar on a narrow one); the board page only, not a decision's page
   assert.match(CSS, /@media screen and \(min-width:900px\)\{\n:root\{--side:236px\}\nmain\[data-stream\]\{[^}]*\}\nmain\[data-stream\]>\.top\{position:fixed;z-index:6;left:0;top:0;bottom:0;width:var\(--side\);flex-direction:column/);
   // the audit parts live in History: the divergence check sits there, not over the board
   const withPanel = renderHtml(r, S, "h", events, { divergence: { unevaluable: "no factory file" } });
-  assert.match(withPanel, /<section class="view view-log" aria-label="History"><section class="divergence unevaluable"/);
+  assert.match(withPanel, /id="history" aria-label="History"[^>]*>[^]*?<h2>History<\/h2><section class="divergence unevaluable"/);
   assert.equal((withPanel.match(/<section class="divergence/g) ?? []).length, 1);
   // an idea is a plain card or box with its IDEA tag: no blue fill, no dashed border
   assert.match(CSS, /\.ghost\{position:absolute;[^}]*background:var\(--raised\);border:1px solid var\(--line-2\);/);
   assert.doesNotMatch(CSS, /\.card\.idea\{|dashed var\(--accent\)/);
   assert.match(html, /<a class="card idea" href="#i0"[^>]*><span class="tag">idea<\/span>/);
   assert.match(CSS, /\.stats li\{[^}]*border-left:1px solid var\(--line\)\}/); // dividers, not boxes
+});
+
+test("who moved each card, an agent told from a person; a card in progress has a turning edge; no Latest strip, no Live pill", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "h", events);
+  assert.equal(renderHtml(r, S, "h", events), html); // the rendered file stays the same, run after run
+  assert.match(html, /<a class="card[^"]*" href="#t\d+" data-card-key="node:[^"]+" data-state="(?:unstarted|in_progress|blocked|done|cancelled)">/);
+  assert.match(html, /<span class="mover t\d" title="isha">I<\/span><span class="hist"/);
+  for (const a of ["claude", "codex-2", "s1", "orchestrator", "review-agent", "tira", "sync"]) assert.equal(isAgent(a), true, a);
+  for (const p of ["isha", "isha-gh", "octo", "devansh", "jira:Isha", "claudia"]) assert.equal(isAgent(p), false, p);
+  assert.doesNotMatch(html, /data-now|data-live|class="now"/); // no Latest, no Live (Isha, 2026-10-22)
+  // a card being worked on has a turning edge; it stills when less motion is asked for
+  assert.match(CSS, /\.card\[data-state="in_progress"\]\{[^}]*conic-gradient\(from var\(--spin\)[^}]*animation:spin 4s linear infinite\}/);
 });

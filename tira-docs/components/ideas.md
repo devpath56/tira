@@ -13,7 +13,7 @@ approve", or "needs a parent" in amber when tira couldn't settle one) and, once 
 "under table". Graph: a **ghost** box, tagged IDEA, joined by a dashed grey line under
 the task tira proposed; until tira proposes (the file isn't approved yet), or while a person
 must pick the parent, it sits on the top row. A dropped idea, or one that became a task,
-leaves the board; its history stays in History. Click a card or a ghost for the idea's
+leaves the board; its history stays in History (the dialog under the project's name). Click a card or a ghost for the idea's
 dialog: its summary, why, where it goes and why (tira's proposal and its basis, or the
 candidates), what happens next, and its history. Under `tira serve` the dialog offers its
 stage's approvals, each through the decision dialog (`confirm-page.md`): **Approve file** /

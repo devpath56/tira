@@ -20,7 +20,7 @@ export interface AtlassianAuthApi {
   exchange(keys: AtlassianKeys, code: string, redirectUri: string): Promise<AtlassianAuth>;
   sites(access: string): Promise<JiraSite[]>;
   // Jira as the person, on the site their sign-in picked; `save` keeps each rotated token
-  jira(keys: AtlassianKeys, auth: AtlassianAuth, save: (next: AtlassianAuth) => void): JiraClient;
+  jira(keys: AtlassianKeys, auth: AtlassianAuth, save: (next: AtlassianAuth) => void | Promise<void>): JiraClient;
 }
 
 export class AtlassianOAuth implements AtlassianAuthApi {
@@ -59,13 +59,13 @@ export class AtlassianOAuth implements AtlassianAuthApi {
     return all.filter((r) => (r.scopes ?? []).some((s) => s.includes("jira"))).flatMap((r) => (r.id && r.url ? [{ id: r.id, url: r.url, name: r.name ?? r.url }] : []));
   }
 
-  jira(keys: AtlassianKeys, auth: AtlassianAuth, save: (next: AtlassianAuth) => void): JiraClient {
+  jira(keys: AtlassianKeys, auth: AtlassianAuth, save: (next: AtlassianAuth) => void | Promise<void>): JiraClient {
     let now = auth;
     const bearer = async () => {
       if (now.expiresAt - 60_000 < Date.now() && now.refresh) {
         const fresh = await this.token({ grant_type: "refresh_token", client_id: keys.clientId, client_secret: keys.secret, refresh_token: now.refresh });
         now = { ...now, ...fresh };
-        save(now);
+        await save(now); // kept before it's used: the old refresh token stops working
       }
       return `Bearer ${now.access}`;
     };

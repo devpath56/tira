@@ -102,7 +102,7 @@ load().catch(() => {}); // the first ⌘K loads it again
 let opener = null;
 const openDialog = () => document.querySelector(".drawer:target");
 document.addEventListener("click", (e) => {
-  const link = e.target instanceof Element ? e.target.closest('a[href^="#t"], a[href^="#i"], a[href="#guide"]') : null;
+  const link = e.target instanceof Element ? e.target.closest('a[href^="#t"], a[href^="#i"], a[href="#guide"], a[href="#history"]') : null;
   if (link) opener = link;
 });
 window.addEventListener("hashchange", () => {
@@ -295,13 +295,14 @@ if (switcher) {
     const a = document.createElement("a");
     a.className = "ws-item";
     a.href = w.href;
+    a.dataset.stream = w.stream;
     if (w.current) a.setAttribute("aria-current", "page");
     const mark = document.createElement("span");
     mark.className = `pav t${tint(w.stream)}`;
     mark.setAttribute("aria-hidden", "true");
-    mark.textContent = ([...w.stream][0] ?? "?").toUpperCase();
+    mark.textContent = ([...(w.title ?? w.stream)][0] ?? "?").toUpperCase();
     const t = document.createElement("span"); t.className = "ws-t";
-    const name = document.createElement("b"); name.textContent = w.stream;
+    const name = document.createElement("b"); name.textContent = w.title ?? w.stream;
     const said = document.createElement("small");
     said.textContent = w.tasks === 0 ? "no tasks yet" : `${w.open} open of ${w.tasks}`;
     t.append(name, said);
@@ -326,11 +327,48 @@ if (switcher) {
   };
   if (!wide()) switcher.open = false; // a dropdown on a narrow screen: shut until asked
   if (switcher.open) void fill();
+  const search = document.querySelector("[data-project-search]");
   switcher.addEventListener("toggle", async () => {
     if (!switcher.open) return;
     await fill();
-    if (!wide()) (menu.querySelector('[aria-current="page"]') ?? menu.querySelector("a"))?.focus();
+    if (!wide() && document.activeElement !== search) (menu.querySelector('[aria-current="page"]') ?? menu.querySelector("a"))?.focus();
   });
+  // Search projects (the sidebar's search): the list keeps the projects whose names hold what you
+  // type; Enter opens the first, Esc clears it.
+  if (search) {
+    const apply = () => {
+      const q = search.value.trim().toLowerCase();
+      let shown = 0;
+      for (const a of menu.querySelectorAll("a.ws-item")) {
+        a.hidden = q !== "" && !`${a.querySelector("b")?.textContent ?? ""} ${a.dataset.stream ?? ""}`.toLowerCase().includes(q); // its name, or the one it was made with
+        if (!a.hidden) shown++;
+      }
+      menu.querySelector("[data-no-project]")?.remove();
+      if (shown === 0 && q !== "") {
+        const p = note(`No project named "${search.value.trim()}".`);
+        p.dataset.noProject = "";
+        menu.append(p);
+      }
+    };
+    search.addEventListener("input", async () => {
+      if (!switcher.open) switcher.open = true;
+      await fill();
+      apply();
+    });
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const first = [...menu.querySelectorAll("a.ws-item")].find((a) => !a.hidden);
+        if (first) location.href = first.href;
+        e.preventDefault();
+      } else if (e.key === "Escape") {
+        search.value = "";
+        apply();
+      } else if (e.key === "ArrowDown") {
+        [...menu.querySelectorAll("a.ws-item")].find((a) => !a.hidden)?.focus();
+        e.preventDefault();
+      }
+    });
+  }
   switcher.addEventListener("keydown", (e) => {
     const items = [...menu.querySelectorAll("a.ws-item")];
     const at = items.indexOf(document.activeElement);
@@ -361,4 +399,89 @@ try {
   localStorage.setItem("tira-guide-seen", "1");
 } catch {
   // storage blocked: the guide stays on demand only
+}
+
+// Live: the page follows the log by itself. Every few seconds while it's in view it asks where the
+// log is (/api/live); when anyone (a person or an agent) wrote since, it reloads in place, back
+// where you were, and the cards that moved glow once. While you type or a dialog is open it waits,
+// then shows them. The header's numbers count up once.
+const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const liveMain = document.querySelector("main[data-stream]");
+const LIVE_KEY = `tira-live:${location.pathname}${location.search}`;
+let backFromLive = false;
+let triedFor = 0; // the log position the last live reload was for: never reload twice for it
+try {
+  const was = JSON.parse(sessionStorage.getItem(LIVE_KEY) ?? "null");
+  sessionStorage.removeItem(LIVE_KEY);
+  if (was) {
+    backFromLive = true;
+    triedFor = Number(was.for ?? 0);
+    scrollTo(0, was.y ?? 0);
+    const cols = document.querySelector(".cols");
+    if (cols) cols.scrollLeft = was.x ?? 0;
+    for (const c of document.querySelectorAll(".card[data-card-key]")) {
+      if (was.states?.[c.dataset.cardKey] !== c.dataset.state) c.classList.add("changed");
+    }
+  }
+} catch {
+  // storage blocked: the page just reloads
+}
+if (liveMain) {
+  const seen = Number(liveMain.dataset.lastSeq ?? 0);
+  let waiting = false;
+  const busy = () => {
+    const a = document.activeElement;
+    return (a instanceof HTMLElement && a.matches("input, textarea, select, [contenteditable]"))
+      || (location.hash.length > 1 && location.hash !== "#_")
+      || !root.hidden
+      || document.querySelector("dialog[open]") !== null;
+  };
+  let latest = 0;
+  const reload = () => {
+    const states = Object.fromEntries([...document.querySelectorAll(".card[data-card-key]")].map((c) => [c.dataset.cardKey, c.dataset.state]));
+    try {
+      sessionStorage.setItem(LIVE_KEY, JSON.stringify({ y: scrollY, x: document.querySelector(".cols")?.scrollLeft ?? 0, states, for: latest }));
+    } catch {
+      // storage blocked: it reloads at the top
+    }
+    location.reload();
+  };
+  const tick = async () => {
+    if (document.visibilityState !== "visible") return;
+    try {
+      const { seq } = await (await fetch(withW("/api/live"), { cache: "no-store" })).json();
+      latest = seq;
+      if (seq > seen && seq > triedFor) {
+        if (busy()) waiting = true;
+        else reload();
+      }
+    } catch {
+      // the server is away for a moment: ask again next time
+    }
+  };
+  setInterval(tick, 5000);
+  // waiting changes show as soon as you're done
+  const later = () => setTimeout(() => {
+    if (waiting && !busy()) reload();
+  }, 300);
+  addEventListener("hashchange", later);
+  document.addEventListener("focusout", later);
+}
+
+
+// the header's numbers count up, once, on a fresh load (not after a live reload, not when the
+// computer asks for less motion)
+if (!calm && !backFromLive) {
+  for (const el of document.querySelectorAll(".big, .stats b")) {
+    const node = [...el.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && /^\d+$/.test(n.textContent ?? ""));
+    const to = Number(node?.textContent ?? NaN);
+    if (!node || !Number.isFinite(to) || to < 2) continue;
+    const t0 = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / 700);
+      node.textContent = String(Math.round(to * (1 - (1 - k) ** 3)));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 }

@@ -447,7 +447,8 @@ test("D2 page: a factory stream opens on Lanes — one lane per region, captured
   assert.match(html, /<b>2<\/b> handoffs<\/li><li title="handoffs still waiting"><b>1<\/b> waiting<\/li>/);
   // a tree stream still opens on the tree, with an empty Lanes view
   const tree = renderHtml(fold([], t.registry), "tasktree-x", "h", []);
-  assert.match(tree, /id="v-log" checked/); // nothing at all: activity
+  assert.match(tree, /id="v-board" checked/); // nothing at all: the (empty) board, its History a click away
+  assert.match(tree, /<a class="history-btn" href="#history" data-open-log>/);
 });
 
 // ---------- found by the adversarial review ----------

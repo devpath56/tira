@@ -5,7 +5,7 @@
 **What / why.** Exposition one time and on demand, never on the worksurface (no pop-up). Under
 `tira serve` the guide opens by itself on the first visit (once per browser); after that, and
 always on the rendered page, **Help** (a ? at the foot of the sidebar, titled "How to read this
-page") opens it as a dialog over the page, and History's fingerprint chip opens it too.
+page") opens it as a dialog over the page, and the fingerprint chip in the History dialog opens it too.
 
 **How to read it.** Three short paragraphs: the board (Kanban and Graph), "by tira", and the fingerprint.
 

@@ -10,19 +10,31 @@ home: a click on it opens the board of the project you're in, at the top, with n
 (in a rendered file it goes to the top of the page).
 
 **How to read it.** Under `tira serve`, the sidebar's **Projects** lists every project in the
-store, by name, each with its mark (its first letter on its own colour, the same as in the
+store (but deleted ones), by name as people see it (renamed in Project settings: its new name), each with its mark (its first letter on its own colour, the same as in the
 page's header), "N open of M" and, in a badge, how many tasks need you there (blocked, or being
 worked on); the one you're in is marked. The header click folds the list away, like Linear's
-sections. Arrows move between projects, Enter opens one. On a narrow screen the sidebar is a
-top bar and Projects is a dropdown (Esc or a click outside closes it). At the foot, **you**: who
-the page acts as, and your settings. The project the server started on (`--stream`) opens at
+sections. Arrows move between projects, Enter opens one. **Search projects**, at the top of the
+sidebar, keeps the projects whose names (or the names they were made with) hold what you type (Enter opens the first, Esc clears it;
+"No project named …" when none does); tasks are searched in the board's header
+(`command-palette.md`). Under the views, **Project settings** opens this project's settings: its
+GitHub repo, its Jira project, Sync, and **Delete** (`integrations-page.md`). On a narrow screen the sidebar is a
+top bar and Projects is a dropdown (Esc or a click outside closes it). At the foot, **you**: your name,
+and a menu to your Profile settings (and Sign out, signed in with GitHub). The project the server started on (`--stream`) opens at
 `/`, any other at `/?w=<name>`; every link and form the server makes carries that on, so a page,
 its decisions and their writes stay in the project they were opened in, and an action's result
-comes back to it. **+ New project** takes a name and opens the connect step for it (its GitHub
-repo, then Jira if you use one); signed in with GitHub, the new project's board opens once its
-repo is linked. Without GitHub sign-in, a name the store doesn't hold is a "No project named …
-yet" page that says how to start it (Settings and integrations, for that project) and the way
-home.
+comes back to it. **+ New project** opens a page of its own (`/projects/new`, after Jira's and Vercel's): the steps
+on the left, the project's name, GitHub repo and Jira project across the middle, and on the right a
+preview of its mark and name as you type, with what happens next. Your accounts fill it in: your
+GitHub repos as suggestions (owner/name; tira's rules want a project born linked) and, if you've
+connected Jira, its projects to pick from (or none for now); if you haven't, **Connect with Jira**
+does it in a tab of its own, and the page reloads with the picker, keeping what you typed. **Create project** makes it as the person acting and
+opens on the new project's own board, where its linked bar offers **Add Jira** and **Sync**;
+**Cancel** and the tira mark go back to the board you came from. A taken name, a name that can't
+be one, or a repo that isn't owner/name writes nothing: the page comes back with what you typed,
+why, and the cursor on the field to fix. A deleted project leaves the list, its board says it was
+deleted and by whom (its history stays in the log: tira never erases), and its name isn't
+offered again. A name the store doesn't hold
+is a "No project named … yet" page that says how to start it and the way home.
 
 ## Devtool hook
 
@@ -30,7 +42,7 @@ home.
 - `[data-workspaces]` on Projects (live page only); `[data-ws-menu]` holds its list, one `.ws-item` per project (`aria-current="page"` on the one you're in), each with its `.pav` mark.
 - `[data-profile]` on you (live page only).
 - `GET /api/workspaces` (read when the list first shows): each project's name, where it opens, its tasks, the open ones and how many need you.
-- `[data-no-workspace]` on the page for a name the store doesn't hold, `[data-start-project]` on its way to start it; `[data-new-project]` on + New project.
+- `[data-no-workspace]` on the page for a name the store doesn't hold, `[data-start-project]` on its way to start it; `[data-project-search]` on Search projects; `[data-project-settings]` on Project settings. `[data-new-project]` on + New project; `[data-new-project-page]` on its page, `[data-new-project-form]` on the form (it posts to `/projects`), `[data-np-preview]` on the preview, `[data-np-problem]` on why it wasn't made.
 
 Assertion: a write made from a workspace's page lands in that workspace's stream and in no
 other; the list's counts are the page's own (tasks as the Kanban counts them, needs-you as

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 579 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 662 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -156,12 +156,22 @@ it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgre
   machine needs TLS: `sslmode=verify-full` (or at least `require`). tira never prints it.
 - **`$TIRA_SCHEMA`** (or `?schema=NAME` on the string) picks a schema in that database, default
   `tira`: a demo or a trial gets its own, and they never touch each other.
+- **People's accounts** live there too, beside the log (Isha, 2026-10-22): who may sign in,
+  each person's GitHub and Jira links, sessions (as hashes), display names and tira's app keys,
+  shared by everyone who runs `tira serve` on that database. Every token and secret is sealed
+  (AES-256-GCM) with **`$TIRA_SECRET_KEY`**, which is never stored there: the database alone signs
+  no one in. Set it to a long random string, the **same on every computer** (keep it with the
+  connection string); without it `tira serve` won't start on Postgres. A computer's old
+  `credentials.json` is brought over by its first `tira serve` (what the database lacks; nothing it
+  holds changes). Jira API-token logins (`tira connect-jira`) and the page token stay on each
+  computer.
 - **Old SQLite logs** come over once: `tira import <file.db>` copies every event as it was (id,
   seq, stream, data, metadata, record time) into an empty schema, checks each stream's
   fingerprint before and after, and adds nothing when run again.
 
 ```
 export TIRA_DATABASE_URL='postgresql://…?sslmode=verify-full'    # your hosted database (docs/hosted-postgres.md)
+export TIRA_SECRET_KEY='<a long random string, the same for everyone>'   # seals people's tokens
 node scripts/tira.ts create node dashboard --actor isha       # first use makes the tables and triggers, in schema "tira"
 TIRA_SCHEMA=demo node scripts/tira.ts import ~/old/live.db    # once: an old log into its own schema, fingerprints checked
 ```
@@ -176,7 +186,13 @@ tests work in their own schemas and drop them after. A local Docker Postgres for
 
 In production the schema is made once by its owner; tira then connects as a login that owns
 nothing and may only insert into and read the events table (and update its counter): the
-triggers refuse edits, deletes and truncates, and not owning the table refuses a drop.
+triggers refuse edits, deletes and truncates, and not owning the table refuses a drop. The
+accounts tables (`account_apps`, `account_access`, `account_github`, `account_atlassian`,
+`account_names`, `account_sessions`) are the one place that login also updates and deletes:
+the owner makes them once (the first `tira serve` with the owner's string does it; later runs
+create nothing), then grants that login SELECT, INSERT, UPDATE and DELETE on those six, and
+nothing more. Other systems sharing the database (the factory's own schema and roles) get no
+rights on schema `tira`.
 
 ### Demo D0 script (manual test M0)
 
@@ -652,17 +668,20 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
 **Who gets in.** The first person to sign in becomes this tira's admin. After that only the
 admin and the people they add (by GitHub username, under People on Integrations) can sign in.
 Anyone else is told who to ask: the admin's name and email, which the admin types in there
-(kept in the private store, not in the code). Removing someone signs them out at once, and tira
-forgets their sign-ins.
+(kept in the private store, not in the code). Removing someone signs them out at once; their
+GitHub and Jira links stay until they unlink them themselves (Profile settings).
 
 Until someone signs in, every page leads to the landing and nothing can be changed. Later
-changes (another repo, Jira, Sync) are on **Integrations** in the top bar, where each choice
+changes (another repo, Jira, Sync) are in **Project settings** in the sidebar (your accounts and
+who gets in, in **Profile settings**), where each choice
 shows its `tira link` command under **Show the command**. `tira serve --actor NAME` still runs
 without sign-in, as NAME, until GitHub sign-in is set up.
 
-Tokens, app keys and the secret live only in a private file on this machine
-(`$TIRA_HOME/credentials.json`, default `~/.config/tira`, readable only by its owner), never in
-the history or on a page. Sessions are kept there as hashes, so the file can't sign anyone in.
+Tokens, app keys and the secret live in the private store, never in the history or on a page:
+on Postgres, the accounts tables, each token sealed with `$TIRA_SECRET_KEY` ("Running on
+Postgres"); with no database, a private file on this machine (`$TIRA_HOME/credentials.json`,
+default `~/.config/tira`, readable only by its owner). Sessions are kept as hashes, so neither can
+sign anyone in, and last 30 days.
 
 **In a terminal** (and for agents), the same links without a browser:
 

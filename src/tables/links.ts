@@ -4,7 +4,11 @@
 // table is untouched (each new table needs Devansh's sign-off):
 //
 //   workspace   one per stream (id "workspace"), versioned: v1 born LINKED, each change a new
-//               version RELINKED. {repo?, jira_site?, jira_project?}, set by a person.
+//               version RELINKED. {repo?, jira_site?, jira_project?}, set by a person. Two more,
+//               2026-10-22 (Isha): {title} renames the project as people see it (its stream, its
+//               address and its history keep the name it was made with), and {deleted: true} takes
+//               it out of tira's lists and closes its board; tira never erases, so its history
+//               stays. Both stick: a later version that doesn't mention them keeps them.
 //   jira-issue  one per task (id = the task's id): the Jira issue tira made for it, {task, key}.
 //               PUSHED records the status category tira last set, so the next sync can tell a
 //               person's move in Jira from its own.
@@ -35,6 +39,8 @@ export const JIRA_SITE = /^https:\/\/[a-z0-9.-]+(:\d+)?$/i;
 
 const s = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 const optional = (v: unknown, test: RegExp) => v === undefined || (typeof v === "string" && test.test(v));
+// a project's name as people see it: 1 to 80 characters, no control characters, no spaces around it
+export const TITLE = /^(?! )[^\u0000-\u001f\u007f]{1,80}(?<! )$/;
 
 export const LINK_GUARDS: Record<string, GuardFn> = {
   // a person links a workspace; a Jira project needs its site
@@ -42,7 +48,8 @@ export const LINK_GUARDS: Record<string, GuardFn> = {
     s(actor) && actor !== SYNC
     && optional(payload.repo, REPO) && optional(payload.jira_site, JIRA_SITE) && optional(payload.jira_project, JIRA_PROJECT)
     && (payload.jira_project === undefined || payload.jira_site !== undefined)
-    && [payload.repo, payload.jira_site, payload.jira_project].some((v) => v !== undefined),
+    && (payload.deleted === undefined || payload.deleted === true) && optional(payload.title, TITLE)
+    && ([payload.repo, payload.jira_site, payload.jira_project, payload.title].some((v) => v !== undefined) || payload.deleted === true),
   jiraIssueLinked: ({ actor, payload }) => actor === SYNC && s(payload.task) && typeof payload.key === "string" && JIRA_KEY.test(payload.key),
   prLinked: ({ actor, payload }) =>
     actor === SYNC && s(payload.task) && typeof payload.repo === "string" && REPO.test(payload.repo)

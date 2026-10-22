@@ -10,7 +10,8 @@ with text (2026-10-20), so a new blocked row always says why; a legacy log's bar
 closes it when work moves on (ruling 2026-10-20); it stays in the tree. Stale work joins once
 its time limit is ruled.
 
-**How to read it.** "N need you", then one group per reason ("Blocked · waiting on the
+**How to read it.** "N need you" (a click on that line folds the whole section to it, and back;
+under `tira serve` it stays as you left it, per browser), then one group per reason ("Blocked · waiting on the
 design-token decision"), then "In progress". When more than 3 tasks need you, each blocked
 group folds to one line (its reason, the tasks' names, how many), so the board stays near the
 top of the page; a click opens it. The task being worked on never folds, and a group holding
@@ -23,7 +24,7 @@ action. Nothing needs you: "Nothing needs you", and the next task.
 
 ## Devtool hook
 
-- `[data-attention-count]` on the section: the number of rows.
+- `[data-attention-count]` on the section: the number of rows; `.att-fold` (`details[data-remember]`) folds it.
 - `[data-attention-key]` on each row: the task's key. Rows don't reuse the train's per-task marker, so the M1 node count is untouched.
 - `[data-reason]` on each blocked group: the reason, as given; folded, the group's line carries the tasks' `.names`.
 - `[data-blocked-by]` on a row's blocker ticket; `[data-ready]` once that ticket is closed.

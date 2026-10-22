@@ -16,6 +16,7 @@ import { esc } from "../src/render/escape.ts";
 import { filesMatching, srcCode } from "./src-text.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
 import { priority, rank, score } from "../src/serve/rank.mjs";
+import { answerFor, words } from "../src/serve/help.mjs";
 
 const S = "tasktree-dash";
 
@@ -158,8 +159,9 @@ test("every decision has two views: the work in a nutshell with tira's recommend
     assert.doesNotMatch(unblock.body, /— run it/);
     // a refusal says what to do instead
     assert.match(unblock.body, /<p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p>/);
-    // the same theme switch as the page, and the script that remembers the choice
-    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?data-theme-switch[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/);
+    // the theme, and the script that remembers the choice
+    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/); // the theme you picked (in Profile settings) carries here
+    assert.doesNotMatch(unblock.body, /data-theme-switch/); // and is picked there, not here
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(complete.status, 200);
     assert.match(complete.body, /<p class="nutshell" data-nutshell><b>Decision:<\/b> loading_state is in progress under improve_visual since seq 11\. Completing it moves it in progress → done\. Recorded as isha\.<\/p>/);
@@ -595,7 +597,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   // browser scripts never build markup from data
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
-  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/new-project.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
   assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
   assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
   // total over the class, and nothing else changes
@@ -624,6 +626,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
       "a verb the page doesn't take": await confirm(`t${M}`, `X${M}`),
       "a post on a log that moved, shown again": (await s.form({ token: "t0k3n", type: "node", id: `t${M}`, event: "BLOCK", seen: "1", command: `tira send node t${M} BLOCK reason=r${M}` })).body,
       "a post missing its reason, shown again": (await s.form({ token: "t0k3n", type: "node", id: `t${M}`, event: "BLOCK", command: `tira send node t${M} BLOCK note=n${M}` })).body,
+      "a new project refused, shown again": (await s.http("POST", "/projects", { headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: "t0k3n", name: `n${M}`, repo: `r${M}` }).toString() })).body,
     };
     for (const [name, body] of Object.entries(pages)) {
       const copies = body.match(/QX.{0,60}?XQ/g) ?? [];
@@ -642,7 +645,7 @@ test("after an action, what it changed glows once: the task it moved, or a block
     const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
     const page = (await s.http("GET", String(ok.headers.location))).body;
     assert.deepEqual(glowing(page), ["node:loading_state"]);
-    assert.match(page, /<a class="card changed" href="#t\d+"><div class="t">loading_<wbr>state<\/div>/);
+    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><div class="t">loading_<wbr>state<\/div>/);
     assert.deepEqual(glowing((await s.http("GET", "/")).body), []); // once: the next load is quiet
     // a refusal changed nothing
     await s.send("filters", "START");
@@ -718,7 +721,14 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
   try {
     // the switcher, live only: the workspace you're in, its list read when it opens
     const home = (await s.http("GET", "/")).body;
-    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><details class="new-project" data-new-project><summary>\+ New project<\/summary><form method="get" action="\/connect"><input name="w" required pattern="[^"]+" placeholder="its name, e\.g\. mobile-app"[^>]*><button class="act" type="submit">Connect<\/button><\/form><\/details><\/details>/);
+    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page" data-stream="tasktree-dash"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><a class="new-project" href="\/projects\/new" data-new-project><svg[^]*?<\/svg>New project<\/a><\/details>/);
+    // the sidebar searches projects by name, and has this project's settings; the header searches
+    // this project's tasks (the palette, ⌘K)
+    const side = /<nav class="top"[^]*?<\/nav>/.exec(home)?.[0] ?? "";
+    assert.match(side, /<label class="proj-search"><svg[^]*?<\/svg><input type="search" placeholder="Search projects" aria-label="Search projects by name" autocomplete="off" spellcheck="false" data-project-search><\/label>/);
+    assert.doesNotMatch(side, /data-open-palette/);
+    assert.match(side, /<a class="side-link" href="\/integrations" data-project-settings>/);
+    assert.match(home, /<button class="find" type="button" data-open-palette><svg[^]*?<\/svg><span>Search tasks in tasktree-dash<\/span><kbd>⌘K<\/kbd><\/button><\/header>/);
     // you: who the page acts as
     assert.match(home, /<details class="ws me" data-profile><summary title="You: isha"><span class="av">I<\/span><span class="ws-name">isha<\/span>/);
     assert.doesNotMatch(home, /[?&]w=/); // the first workspace's links stay as they were
@@ -751,7 +761,7 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
     // a workspace the store doesn't hold is a 404 with the way home; a name that can't be one, a 400
     const missing = await s.http("GET", "/?w=nope");
     assert.equal(missing.status, 404);
-    assert.match(missing.body, /No project named nope yet[^]*?<a class="how" href="\/integrations\?w=nope" data-start-project>Settings and integrations for nope<\/a>[^]*?<a class="how" href="\/">Back to your board<\/a>/);
+    assert.match(missing.body, /No project named nope yet[^]*?<a class="how" href="\/integrations\?w=nope" data-start-project>Project settings for nope<\/a>[^]*?<a class="how" href="\/">Back to your board<\/a>/);
     assert.equal((await s.http("GET", `/?w=${encodeURIComponent("a\u0001b")}`)).status, 400);
   } finally {
     await s.done();
@@ -775,4 +785,42 @@ test("the page's script keeps the workspace: the palette's index and verbs, and 
   assert.match(app, /if \(verb\) void openConfirm\(withW\(`\/confirm\?/);
   assert.match(app, /await fetch\(form\.getAttribute\("action"\) \?\? "\/act", \{ method: "POST", body \}\)/);
   assert.match(app, /await fetch\(withW\("\/api\/workspaces"\)\)/);
+});
+
+test("the Help centre's answers: the one what you typed fits best (a rarer word counts for more; a tie goes to the first), or none", () => {
+  const qa = [
+    { q: "How do I make tira's GitHub app?", keys: "github app oauth client id device flow setup create" },
+    { q: "How do I make the Atlassian app for Jira?", keys: "atlassian jira app oauth scopes console client secret create" },
+    { q: "Where are my keys and tokens kept?", keys: "keys tokens secret stored kept saved private safe credentials password" },
+    { q: "What does Sync do?", keys: "sync syncing pull request pr issue mirror update proof merge" },
+    { q: "Who can sign in?", keys: "sign signin login admin people access invite add user member team" },
+    { q: "Why does Jira need localhost?", keys: "localhost callback redirect connect address url port" },
+  ];
+  assert.equal(answerFor("where is my jira secret stored", qa), 2); // "stored" fits one answer; "jira" and "secret" two each
+  assert.equal(answerFor("GitHub app", qa), 0);
+  assert.equal(answerFor("jira", qa), 1); // a tie: the first
+  assert.equal(answerFor("who's the admin?", qa), 4);
+  assert.equal(answerFor("syncing pull requests", qa), 3); // a word's other forms
+  assert.equal(answerFor("localhost", qa), 5);
+  assert.equal(answerFor("banana", qa), -1);
+  assert.equal(answerFor("how do I", qa), -1); // small words alone
+  assert.deepEqual(words("Where's my Jira token?"), ["jira", "token"]);
+});
+
+test("live: the page asks /api/live where its log is (the last event only), with no pill to say so; after a write the answer moves on, and the page knows where it was", async () => {
+  const s = await serving();
+  try {
+    const page = (await s.http("GET", "/")).body;
+    assert.match(page, /<div class="title-acts"><a class="history-btn"[^]*?<\/a><\/div>/); // History alone (no Live pill)
+    assert.doesNotMatch(page, /data-live|data-now/);
+    const at = Number(/data-last-seq="(\d+)"/.exec(page)?.[1]);
+    const before = (JSON.parse((await s.http("GET", "/api/live")).body) as { seq: number }).seq;
+    assert.equal(before, at); // nothing new: the page is where the log is, so it doesn't reload
+    await s.send("font", "CANCEL");
+    const after = (JSON.parse((await s.http("GET", "/api/live")).body) as { seq: number }).seq;
+    assert.ok(after > before, `${after} > ${before}`);
+    assert.match(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /fetch\(withW\("\/api\/live"\), \{ cache: "no-store" \}\)[^]*?if \(seq > seen && seq > triedFor\)/);
+  } finally {
+    await s.done();
+  }
 });
