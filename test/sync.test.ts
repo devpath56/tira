@@ -822,7 +822,8 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.equal(await s.flash(made), "Created tablet, linked to GitHub acme/tablet. Add its Jira project, or sync, from here.");
     assert.deepEqual(workspaceOf(fold(await s.store.readAll(), s.registry), "tablet"), { version: 1, repo: "acme/tablet", by: "isha-gh" });
     const tablet = (await s.http("GET", "/?w=tablet")).body;
-    assert.match(tablet, /<main data-stream="tablet"/);
+    assert.match(tablet, /<main data-stream="tablet"[^>]* data-q="w=tablet">/); // the page names its project for its script
+    assert.doesNotMatch(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /location\.search/); // never from the address bar
     assert.match(tablet, /<a class="act" href="\/integrations\?w=tablet#jira" data-add-jira>/); // add Jira, or sync, from its own page
     // opened from another project, it goes back there
     const fromTablet = (await s.http("GET", "/projects/new?w=tablet")).body;

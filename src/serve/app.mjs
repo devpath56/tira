@@ -13,8 +13,10 @@ const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", B
 
 // The workspace this page shows (?w=…, none for the one the server started on): every request
 // the script makes carries it on, as the server's own links do.
-const W = new URLSearchParams(location.search).get("w");
-const withW = (path) => (W ? `${path}${path.includes("?") ? "&" : "?"}w=${encodeURIComponent(W)}` : path);
+// The server writes it into the page (data-q: "w=<name>", already encoded); the script never reads
+// it from the address bar, so nothing typed there reaches a request or the browser's storage.
+const Q = document.querySelector("main")?.dataset.q ?? "";
+const withW = (path) => (/^w=[\w.%!~*'()-]+$/.test(Q) ? `${path}${path.includes("?") ? "&" : "?"}${Q}` : path);
 const STREAM = document.querySelector("main")?.dataset.stream ?? "";
 
 let tasks = [];
@@ -407,7 +409,7 @@ try {
 // then shows them. The header's numbers count up once.
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const liveMain = document.querySelector("main[data-stream]");
-const LIVE_KEY = `tira-live:${location.pathname}${location.search}`;
+const LIVE_KEY = `tira-live:${STREAM}`; // one per project, named by the page, not the address
 let backFromLive = false;
 let triedFor = 0; // the log position the last live reload was for: never reload twice for it
 try {

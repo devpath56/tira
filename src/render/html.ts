@@ -1388,7 +1388,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(name)}</title><style>${CSS}</style></head>
 <body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
-<main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
+<main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}"${q === "" ? "" : ` data-q="${esc(q)}"`}>
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}${esc(name)}</h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>
