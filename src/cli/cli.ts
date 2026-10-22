@@ -542,6 +542,16 @@ export function divergencePanel(file: string | undefined, events: StoredEvent[],
   }
 }
 
+// One stream's events, from a store opened for this read only.
+async function readStreamOnce(open: () => ClosableStore, stream: string): Promise<StoredEvent[]> {
+  const store = open();
+  try {
+    return await store.readStream(stream);
+  } finally {
+    await store.close();
+  }
+}
+
 async function divergenceCmd(values: Values, open: () => ClosableStore, io: Io): Promise<number> {
   const file = factoryFile(values, io);
   if (file === undefined) throw new UsageError("usage: tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]");
@@ -555,12 +565,7 @@ async function divergenceCmd(values: Values, open: () => ClosableStore, io: Io):
     const named = values.stream ?? io.env.TIRA_STREAM;
     if (named === undefined) throw new UsageError("tira divergence reads the store by stream: pass --stream (or --tira-log FILE)");
     stream = named;
-    const store = open();
-    try {
-      events = await store.readStream(stream);
-    } finally {
-      await store.close();
-    }
+    events = await readStreamOnce(open, stream);
     if (events.length === 0) throw new UsageError(`stream ${stream} has no events in the database`);
   } else {
     events = readTiraLog(values["tira-log"] as string);
@@ -622,15 +627,17 @@ async function importCmd(args: string[], values: Values, registry: Registry, io:
     const lastOf = new Map(events.map((e) => [e.stream, e.seq]));
     const before = new Map(await Promise.all(streams.map(async (st) => [st, fingerprint(fold(await source.readStream(st), registry))] as const)));
     const { added } = await target.importLog(events);
-    let same = true;
-    for (const st of streams) {
+    const checks = await Promise.all(streams.map(async (st) => {
       const here = (await target.readStream(st)).filter((e) => e.seq <= (lastOf.get(st) as number));
       const after = fingerprint(fold(here, registry));
-      const ok = after === before.get(st);
-      same &&= ok;
+      return { st, after, ok: after === before.get(st) };
+    }));
+    for (const { st, after, ok } of checks) {
       const n = events.filter((e) => e.stream === st).length;
-      io.out(`${ok ? "same" : "DIFFERENT"}  ${st} · ${n} event(s) · sha256:${after}${ok ? "" : ` (was sha256:${before.get(st) ?? ""})`}`);
+      const was = ok ? "" : ` (was sha256:${before.get(st) ?? ""})`;
+      io.out(`${ok ? "same" : "DIFFERENT"}  ${st} · ${n} event(s) · sha256:${after}${was}`);
     }
+    const same = checks.every((c) => c.ok);
     io.out(added > 0 ? `imported ${added} event(s) from ${file}` : `already imported: nothing added (${events.length} event(s) from ${file} are here as they were)`);
     if (!same) {
       io.err("tira: the fingerprints differ: the copy doesn't fold the same; don't delete the old file");

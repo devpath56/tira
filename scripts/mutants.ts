@@ -737,6 +737,7 @@ await pool(runnable, jobs, async (m) => {
 const names = new Set(MUTANTS.map((m) => m.name));
 writeFileSync(CATCHERS, JSON.stringify(Object.fromEntries(Object.entries(catchers).filter(([k]) => names.has(k)).sort(([a], [b]) => a.localeCompare(b))), null, 1) + "\n");
 const seconds = Math.round((performance.now() - t0) / 1000);
-console.log(`\n${runnable.length - survived - broken}/${runnable.length} killed, ${survived} survived, ${broken} broken${unrunnable.length > 0 ? `; ${unrunnable.length} not run (no Postgres)` : ""}`);
+const notRun = unrunnable.length > 0 ? `; ${unrunnable.length} not run (no Postgres)` : "";
+console.log(`\n${runnable.length - survived - broken}/${runnable.length} killed, ${survived} survived, ${broken} broken${notRun}`);
 console.log(`${jobs} at a time, ${seconds}s; caught by last time's test: ${how.test}, by the first file tried: ${how.file}, later: ${how.later}`);
 process.exit(survived || broken ? 1 : 0);

@@ -103,7 +103,7 @@ export class PostgresEventStore implements EventStore {
   readonly schema: string;
   private readonly pool: pg.Pool;
   private readonly pollIntervalMs: number;
-  private readonly ready: Promise<void>;
+  private setup: Promise<void> | undefined;
   private closed = false;
 
   constructor(opts: PostgresStoreOptions) {
@@ -113,9 +113,12 @@ export class PostgresEventStore implements EventStore {
     // an idle connection the server drops must not take the process down; the next query reconnects
     this.pool.on("error", () => {});
     this.pollIntervalMs = opts.pollIntervalMs ?? 50;
-    // Set up only what is missing: re-creating a trigger locks the table against writes, and
-    // every CLI command opens a store.
-    this.ready = this.transaction(async (c) => {
+  }
+
+  // The schema, set up on first use. Only what is missing: re-creating a trigger locks the table
+  // against writes, and every CLI command opens a store. A failure is reported by each call.
+  private ready(): Promise<void> {
+    this.setup ??= this.transaction(async (c) => {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-schema:${this.schema}`]);
       const made = await c.query<{ n: number }>(
         `SELECT count(*)::int AS n FROM pg_trigger t JOIN pg_class r ON r.oid = t.tgrelid JOIN pg_namespace ns ON ns.oid = r.relnamespace
@@ -124,12 +127,12 @@ export class PostgresEventStore implements EventStore {
       );
       if ((made.rows[0]?.n ?? 0) < 3) await c.query(ddl(this.schema));
     });
-    this.ready.catch(() => {}); // reported by the first call that waits on it
+    return this.setup;
   }
 
   // Run SQL as this store's connection (tests, and the manual tamper checks in the README).
   async exec(sql: string): Promise<void> {
-    await this.ready;
+    await this.ready();
     await this.pool.query(sql);
   }
 
@@ -162,7 +165,7 @@ export class PostgresEventStore implements EventStore {
         throw new TypeError("eventId must be a non-empty string");
       }
     }
-    await this.ready;
+    await this.ready();
     const s = this.schema;
     return this.transaction(async (c) => {
       // the one writer: the counter row stays locked until this append commits or rolls back
@@ -215,7 +218,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   async readStream(stream: string, opts: ReadStreamOptions = {}): Promise<StoredEvent[]> {
-    await this.ready;
+    await this.ready();
     const backwards = opts.direction === "backwards";
     const from = opts.fromRevision ?? (backwards ? 2147483647 : 0);
     const r = await this.pool.query<Row>(
@@ -227,7 +230,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   async readAll(opts: ReadAllOptions = {}): Promise<StoredEvent[]> {
-    await this.ready;
+    await this.ready();
     const r = await this.pool.query<Row>(
       `SELECT * FROM ${this.schema}.events WHERE seq >= $1 ORDER BY seq ASC LIMIT $2`,
       [opts.fromSeq ?? 1, opts.limit ?? null],
@@ -240,7 +243,7 @@ export class PostgresEventStore implements EventStore {
   // fingerprint) is the same as there. Into an empty schema only, in one transaction: all or
   // nothing. A re-run, when the first events here are exactly these, adds nothing.
   async importLog(events: readonly StoredEvent[]): Promise<{ added: number }> {
-    await this.ready;
+    await this.ready();
     const s = this.schema;
     return this.transaction(async (c) => {
       const counter = await c.query<{ last: string }>(`SELECT last FROM ${s}.event_seq WHERE one FOR UPDATE`);

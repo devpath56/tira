@@ -19,8 +19,9 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_USER: tira
-          POSTGRES_PASSWORD: tira-ci
           POSTGRES_DB: tira
+          # no password: a throwaway database reachable only from this job's own machine
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -29,7 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      TIRA_PG_URL: postgres://tira:tira-ci@localhost:5432/tira
+      TIRA_PG_URL: postgres://tira@localhost:5432/tira
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

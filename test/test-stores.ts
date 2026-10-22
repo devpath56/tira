@@ -26,7 +26,7 @@ after(async () => {
   if (made.length === 0 || !PG) return;
   const admin = new pg.Pool({ connectionString: PG });
   try {
-    for (const s of made) await admin.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`);
+    await Promise.all(made.map((s) => admin.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`)));
   } finally {
     await admin.end();
   }
