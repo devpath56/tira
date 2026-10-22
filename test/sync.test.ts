@@ -3,6 +3,7 @@
 // request tira's rules may refuse. Run against the stand-ins in sync-fakes.ts; the real Jira
 // client is checked against a local HTTP server, and the GitHub one with a recorded gh.
 import "./hermetic.ts";
+import { sqliteFile } from "./test-stores.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, statSync, readFileSync } from "node:fs";
@@ -733,7 +734,7 @@ test("the CLI: tira link keeps what it isn't told and clears what's empty; tira 
       const code = await run(["--db", join(dir, "t.db"), "--actor", "isha", ...argv], {
         out: (l) => out.push(l), err: (l) => err.push(l), env: { TIRA_HOME: dir },
         secret: async (prompt) => { asked.push(prompt); return "tok-cli"; },
-        jira: () => jira, github,
+        jira: () => jira, github, openStore: sqliteFile,
       });
       return { code, out: out.join("\n"), err: err.join("\n") };
     };

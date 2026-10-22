@@ -9,7 +9,9 @@ import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderHtml, type DivergencePanel } from "../render/html.ts";
 import { streamView, textTree } from "../render/tree-view.ts";
-import { dbLabel, openStore, type ClosableStore } from "../store/open.ts";
+import { liveDatabase, openStore, type ClosableStore } from "../store/open.ts";
+import { ImportRefused } from "../store/postgres-store.ts";
+import { SqliteEventStore } from "../store/sqlite-store.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { checkCommand, type Command, type WriteResult } from "../write/write-path.ts";
 import { Dispatcher, type HandoffWrite } from "../write/dispatcher.ts";
@@ -19,9 +21,9 @@ import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
+import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
-import { makeView } from "../fold/view.ts";
 import { JIRA_PROJECT, JIRA_SITE, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
 import { JiraCloud, type JiraClient } from "../sync/jira.ts";
@@ -39,6 +41,8 @@ export interface Io {
   // stand-ins for tests; absent: the real Jira Cloud and the GitHub CLI
   jira?(site: string, login: JiraLogin): JiraClient;
   github?: GitHubClient;
+  // tests only: their own throwaway store for a --db value (live, tira opens Postgres only)
+  openStore?: (db: string) => ClosableStore;
 }
 
 export const HELP = `tira — manual-testing CLI for the Phase 1 core
@@ -91,6 +95,9 @@ Usage:
                                                   first (a landing page, then connect a repo and, optionally,
                                                   a Jira project); the divergence section is recomputed on every
                                                   page load. Ctrl-C stops it
+  tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
+                                                  event as it was, into an empty schema; a re-run adds nothing.
+                                                  Each stream's fingerprint must match before and after
   tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]
                                                   the factory's file state against tira's log, one verdict per
                                                   fx: event id (B3): OK, MISSING, PHANTOM, WRONG-ENTITY,
@@ -102,8 +109,10 @@ Usage:
                                                   --json prints the per-id verdict map with the report
 
 Options:
-  --db PATH|URL    the store: a SQLite file, or a postgres:// URL for the shared Postgres store
-                   (default: $TIRA_DB, else ./tira.db). Put a URL with a password in $TIRA_DB, not on the command line
+  --db URL         the database: a postgres:// connection string (default: $TIRA_DATABASE_URL). tira keeps its
+                   data in Postgres only; a SQLite file is refused. Put the string in $TIRA_DATABASE_URL (or the
+                   repo's .env), not on the command line. A database on another machine needs ?sslmode=require.
+                   $TIRA_SCHEMA picks a schema in it (default "tira"): a demo or a trial of its own
   --stream NAME    stream / tree (default: $TIRA_STREAM, else tasktree-main)
   --actor NAME     who is acting, for create/send (default: $TIRA_ACTOR)
   --version N      entity version (versioned entity types only)
@@ -284,10 +293,11 @@ async function idea(args: string[], values: Values, store: ClosableStore, regist
   return exitOf(r);
 }
 
-const whatNext = (p: Placement): string =>
-  p.parent === undefined
-    ? `a person approves the file, then picks where it goes when approving the placement${p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : ""}`
-    : `a person approves the file; tira then proposes it under ${p.parent}, and a person approves that`;
+const candidatesNote = (p: Placement): string => (p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : "");
+const whatNext = (p: Placement): string => {
+  if (p.parent !== undefined) return `a person approves the file; tira then proposes it under ${p.parent}, and a person approves that`;
+  return `a person approves the file, then picks where it goes when approving the placement${candidatesNote(p)}`;
+};
 
 // The stream's ideas, for an agent checking on what it pushed.
 async function ideas(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
@@ -695,7 +705,17 @@ export function divergencePanel(file: string | undefined, events: StoredEvent[],
   }
 }
 
-async function divergenceCmd(values: Values, db: string, io: Io): Promise<number> {
+// One stream's events, from a store opened for this read only.
+async function readStreamOnce(open: () => ClosableStore, stream: string): Promise<StoredEvent[]> {
+  const store = open();
+  try {
+    return await store.readStream(stream);
+  } finally {
+    await store.close();
+  }
+}
+
+async function divergenceCmd(values: Values, open: () => ClosableStore, io: Io): Promise<number> {
   const file = factoryFile(values, io);
   if (file === undefined) throw new UsageError("usage: tira divergence --factory FILE [--tira-log FILE] [--stream NAME] [--json]");
   const bytes = factoryBytes(file);
@@ -708,13 +728,8 @@ async function divergenceCmd(values: Values, db: string, io: Io): Promise<number
     const named = values.stream ?? io.env.TIRA_STREAM;
     if (named === undefined) throw new UsageError("tira divergence reads the store by stream: pass --stream (or --tira-log FILE)");
     stream = named;
-    const store = openStore(db);
-    try {
-      events = await store.readStream(stream);
-    } finally {
-      await store.close();
-    }
-    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in ${dbLabel(db)}`);
+    events = await readStreamOnce(open, stream);
+    if (events.length === 0) throw new UsageError(`stream ${stream} has no events in the database`);
   } else {
     events = readTiraLog(values["tira-log"] as string);
     const streams = [...new Set(events.map((e) => e.stream))];
@@ -760,13 +775,54 @@ function types(registry: Registry, values: Values, io: Io): number {
   return 0;
 }
 
+// tira import <file.db>: a one-time copy of an old SQLite log into the live Postgres database,
+// every event as it was (id, seq, stream, data, metadata, record time). Into an empty schema;
+// a re-run adds nothing. Each stream's fold is fingerprinted before and after: they must match.
+async function importCmd(args: string[], values: Values, registry: Registry, io: Io): Promise<number> {
+  const file = args[0];
+  if (file === undefined || args.length > 1) throw new UsageError("usage: tira import <file.db>");
+  if (!existsSync(file)) throw new UsageError(`no such file: ${file}`);
+  const source = new SqliteEventStore({ path: file });
+  const target = openStore(liveDatabase(values.db, io.env), io.env.TIRA_SCHEMA);
+  try {
+    const events = await source.readAll();
+    const streams = [...new Set(events.map((e) => e.stream))].sort(compareCodeUnits);
+    const lastOf = new Map(events.map((e) => [e.stream, e.seq]));
+    const before = new Map(await Promise.all(streams.map(async (st) => [st, fingerprint(fold(await source.readStream(st), registry))] as const)));
+    const { added } = await target.importLog(events);
+    const checks = await Promise.all(streams.map(async (st) => {
+      const here = (await target.readStream(st)).filter((e) => e.seq <= (lastOf.get(st) as number));
+      const after = fingerprint(fold(here, registry));
+      return { st, after, ok: after === before.get(st) };
+    }));
+    for (const { st, after, ok } of checks) {
+      const n = events.filter((e) => e.stream === st).length;
+      const was = ok ? "" : ` (was sha256:${before.get(st) ?? ""})`;
+      io.out(`${ok ? "same" : "DIFFERENT"}  ${st} · ${n} event(s) · sha256:${after}${was}`);
+    }
+    const same = checks.every((c) => c.ok);
+    io.out(added > 0 ? `imported ${added} event(s) from ${file}` : `already imported: nothing added (${events.length} event(s) from ${file} are here as they were)`);
+    if (!same) {
+      io.err("tira: the fingerprints differ: the copy doesn't fold the same; don't delete the old file");
+      return 1;
+    }
+    return 0;
+  } catch (err) {
+    if (err instanceof ImportRefused) throw new UsageError(err.message);
+    throw err;
+  } finally {
+    source.close();
+    await target.close();
+  }
+}
+
 // The page, live (src/serve/server.ts). Runs until Ctrl-C; the store closes on the way out.
-async function serve(db: string, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+async function serve(open: () => ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
   // without a name, everyone signs in with GitHub: the page starts at its landing
   const actor = values.actor ?? io.env.TIRA_ACTOR;
   const port = values.port === undefined ? 4747 : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
-  const store = openStore(db);
+  const store = open();
   const file = factoryFile(values, io);
   // the page token is kept in the private store: pages opened before a restart still work. The
   // divergence section only when there is a factory file to compare (a plain workspace has none;
@@ -812,22 +868,25 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence"].includes(cmd)) {
+  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence", "import"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
     return 1;
   }
 
-  const db = values.db ?? io.env.TIRA_DB ?? "tira.db";
+  // The live database: Postgres only, from --db or $TIRA_DATABASE_URL; a SQLite file is refused,
+  // and nothing is made in the current folder. Asked only by commands that read or write it.
+  const open = (): ClosableStore => (io.openStore ? io.openStore(values.db ?? io.env.TIRA_DATABASE_URL ?? "") : openStore(liveDatabase(values.db, io.env), io.env.TIRA_SCHEMA));
   const stream = values.stream ?? io.env.TIRA_STREAM ?? "tasktree-main";
   let store: ClosableStore | undefined;
   try {
     if (cmd === "key") return key(args, values, registry, stream, io);
-    if (cmd === "divergence") return await divergenceCmd(values, db, io);
+    if (cmd === "divergence") return await divergenceCmd(values, open, io);
+    if (cmd === "import") return await importCmd(args, values, registry, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
-    if (cmd === "serve") return await serve(db, registry, stream, values, io);
-    store = openStore(db);
+    if (cmd === "serve") return await serve(open, registry, stream, values, io);
+    store = open();
     switch (cmd) {
       case "create":
       case "send":

@@ -237,6 +237,17 @@ const viewOf = (r: FoldResult, stream: string) => makeView(new Map(r.entities.fi
 // An idea's approval, in the same two views. The verdict is the write path's, said in plain words
 // when it is a stage skip; approving the placement is also judged on the task it becomes (the
 // birth tira writes next): the parent must take it.
+// What the idea dialog says: tira's refusal of a stage skip, a parent that can't take the task,
+// or the plain preview.
+function ideaVerdict(pv: Preview, refusal: { why: string; todo: string } | undefined, misplaced: string | undefined): { verdict: string; hint: string | undefined } {
+  if (refusal) {
+    const code = pv.ok ? "" : `${pv.code}: ${pv.detail}`;
+    return { verdict: `tira would refuse this: ${refusal.why} (${code}).`, hint: refusal.todo };
+  }
+  if (misplaced) return { verdict: `tira would refuse this: ${misplaced}.`, hint: "Put it under another task: change parent_id." };
+  return { verdict: verdictOf(pv), hint: undefined };
+}
+
 async function ideaPacketFor(ask: PacketAsk): Promise<Packet> {
   const { r, events, registry, stream, id, event } = ask;
   const verb = PAGE_VERBS[event];
@@ -253,10 +264,7 @@ async function ideaPacketFor(ask: PacketAsk): Promise<Packet> {
   const misplaced = pv.ok && parent !== undefined ? placeProblem(viewOf(r, stream), registry, id, parent) : undefined;
   const hit = registry.resolve(IDEA, event);
   const guard = hit?.table.pairs.find((x) => x.from === idea.stage && x.event === event)?.guard;
-  let verdict = verdictOf(pv);
-  if (refusal) verdict = `tira would refuse this: ${refusal.why} (${pv.ok ? "" : `${pv.code}: ${pv.detail}`}).`;
-  else if (misplaced) verdict = `tira would refuse this: ${misplaced}.`;
-  const hint = refusal?.todo ?? (misplaced ? "Put it under another task: change parent_id." : undefined);
+  const { verdict, hint } = ideaVerdict(pv, refusal, misplaced);
   return {
     ok: pv.ok && misplaced === undefined, title, verdict, ...(hint ? { hint } : {}), seen, suggestions: [],
     // the tasks tira found, as buttons, unless the one it found is already filled in

@@ -12,7 +12,7 @@
 > **Exec Note**
 > - **Phase 1 is a vertical slice, not a foundation layer.** It ships a generic core for work management: the event store, the storage interface, the fold, and the write gates — events in, derived state out, guards enforced on every write. It is *not* a product, *not* storage without logic, and *not* a second source of truth.
 > - **The factory is customer #1.** The substrate thesis gets tested against the hardest real user immediately — real event types, real edge cases — instead of against demo scenarios.
-> - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** SQLite implements it on one machine, Postgres for a shared tira — the fold, guards, and UI never touch storage directly.
+> - **The storage interface keeps the core generic: the factory is the first vocabulary, never the only one.** Postgres implements it for every live tira (hosted, the only live store), SQLite for tests — the fold, guards, and UI never touch storage directly.
 > - **Phase 1's falsifier is armed: we will learn exactly where the simple model breaks — and that lesson is the deliverable.** Factory work orders track three things independently (authorized, picked up with proof, finished); the machine models a task on one dial. Where the three won't fit the one, the pinch points show precisely how the core must generalize — discovered now, not after four more phases are built on the wrong shape.
 
 # tira — deterministic task-tree tracking
@@ -27,7 +27,7 @@ Nothing is stored as "current" — the fold is authoritative.
    Keyboard: `n` next, `b` back.
 2. **The plan** — `build-plan.md`: phases, in/out scope, JTBDs, test plan, acceptance criteria.
 3. **The packing** — `packing.md`: build/buy/clone per layer, the storage interface
-   (SQLite on one machine, Postgres for a shared tira), UI scope, decision log.
+   (Postgres, hosted, the only live store; SQLite for tests), UI scope, decision log.
 4. **The spec** — `charts/`: the transition tables in executable form. These are not diagrams;
    they are the transition functions the implementation must honor.
 
@@ -68,9 +68,9 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 ## Code — Phase 1: Track A (generic core) + Track C1 (tree)
 
-TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). SQLite via the
-built-in `node:sqlite`; Postgres via `pg`. Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 443 known bugs and fails unless the suite catches every one;
+TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
+(the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
+`npm run mutants` plants 579 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -81,7 +81,7 @@ dependency, used only by the chart verifiers.
 
 | Path | What it is |
 |---|---|
-| `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite and Postgres implementations, held to the same contract tests: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision`; `open.ts` picks one from `--db` |
+| `src/store/` | `EventStore` interface (`packing.md` §3) + SQLite and Postgres implementations, held to the same contract tests: append-only triggers, gapless `seq`, idempotent `eventId`, `expectedRevision`; `open.ts` opens the live Postgres store from `$TIRA_DATABASE_URL` and refuses anything else |
 | `src/tables/` | Runner over `charts/*.json`: `step()` returns the **outcome** (transition / no-op / denied / guard-failed). Registry: entity type → one or more tables (regions, coupled only by handoff events — no cross-region invariant), versioned identity, per-type birth name (`node.born`), and a same-lifecycle `tree` config |
 | `src/fold/` | `fold(log, {upToSeq, now, vantage})`: replay-to-N, derived predicates (incl. `drained`), per-stream tree summary (roots, cursor, active), rejections, anomalies; `canonicalJson` for byte-identical refolds. `evaluate()` is the one legality function shared with the write path; `tree.ts` holds the tree rules |
 | `src/write/` | Guarded write path: replay → evaluate → append the event, or append `command.rejected`. Submits to one stream of one store are queued across all `WritePath` instances (many actors, one writer); cross-process races retry on `expectedRevision` with jittered backoff |
@@ -137,34 +137,46 @@ node scripts/tira.ts dump --hash                                      # sha256 o
 node scripts/tira.ts sweep                                            # health checks; exit 3 if something is broken
 ```
 
-Store: `--db` (default `$TIRA_DB`, else `./tira.db`; `*.db` and `tira.html` are git-ignored).
+Store: the Postgres database in `$TIRA_DATABASE_URL` (or `--db URL`), in schema `$TIRA_SCHEMA` (default `tira`); see "Running on Postgres" below. `tira.html` is git-ignored.
 Tree: `--stream` (default `$TIRA_STREAM`, else `tasktree-main`). `key=value` payload values
 are strings; use `--payload '{"k":1}'` for other types. `--event-id` makes a re-send a
 `duplicate`. Event names work in either form (`COMPLETE` or `complete`, `ADD_CHILD` or
 `add-child`). `--json` on any command. Exit codes: 0 ok · 2 rejected by the rules · 3 the health
 sweep found something broken · 1 usage/error.
 
-### Running on Postgres (a shared tira)
+### Running on Postgres (the only live store)
 
-`--db` / `$TIRA_DB` takes a `postgres://` URL as well as a SQLite file: every command, `tira
-serve` included, then reads and writes the shared Postgres store (`src/store/postgres-store.ts`;
-`packing.md` §3 and D11). Put a URL with a password in `$TIRA_DB`, not on the command line;
-tira never prints the password. `?schema=NAME` on the URL picks the schema (default `tira`), so
-several tiras, or a trial run, can share one database without touching each other.
+tira keeps its data in one Postgres database, hosted from day one (`packing.md` D11, D12;
+`docs/decision-log.md`). Every command, `tira serve` and factory emission included, reads and
+writes it; a SQLite file is refused, and nothing is made in the folder you ran from. Setting
+it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgres.md).
+
+- **The connection string** goes in `$TIRA_DATABASE_URL` (your shell, or the repo's gitignored
+  `.env`), not on the command line. Any standard Postgres string works; a database on another
+  machine needs TLS: `sslmode=verify-full` (or at least `require`). tira never prints it.
+- **`$TIRA_SCHEMA`** (or `?schema=NAME` on the string) picks a schema in that database, default
+  `tira`: a demo or a trial gets its own, and they never touch each other.
+- **Old SQLite logs** come over once: `tira import <file.db>` copies every event as it was (id,
+  seq, stream, data, metadata, record time) into an empty schema, checks each stream's
+  fingerprint before and after, and adds nothing when run again.
 
 ```
-docker run -d --name tira-pg -e POSTGRES_USER=tira -e POSTGRES_PASSWORD=<pick one> -e POSTGRES_DB=tira -p 127.0.0.1:5433:5432 postgres:17
-export TIRA_DB=postgres://tira:<that password>@127.0.0.1:5433/tira
-node scripts/tira.ts create node dashboard --actor isha   # first use makes the tables and triggers, in schema "tira"
-TIRA_PG_URL=$TIRA_DB npm test                               # the store's contract tests, every scenario and the ideas tests, on Postgres too
+export TIRA_DATABASE_URL='postgresql://…?sslmode=verify-full'    # your hosted database (docs/hosted-postgres.md)
+node scripts/tira.ts create node dashboard --actor isha       # first use makes the tables and triggers, in schema "tira"
+TIRA_SCHEMA=demo node scripts/tira.ts import ~/old/live.db    # once: an old log into its own schema, fingerprints checked
 ```
 
-Without `TIRA_PG_URL` the Postgres tests are skipped, and `npm run mutants` lists the Postgres
-store's planted bugs as not run; CI runs both against a throwaway Postgres service. The tests
-work in their own schemas and drop them after. In production the schema is made once by its
-owner; tira then connects as a login that owns nothing and may only insert into and read the
-events table (and update its counter): the triggers refuse edits, deletes and truncates, and
-not owning the table refuses a drop.
+Tests need no network: they use SQLite in memory (or a throwaway file they open themselves). The
+Postgres store's contract tests, the scenario suite and the ideas tests on Postgres, the import,
+and the tests that run tira as its own process need a database: `TIRA_PG_URL=<a local or CI database> npm test`.
+Without it they're skipped, and `npm run mutants` lists the Postgres planted bugs as not run;
+CI runs everything against a throwaway Postgres service container (no secret involved). The
+tests work in their own schemas and drop them after. A local Docker Postgres for that:
+`docker run -d --name tira-pg -e POSTGRES_USER=tira -e POSTGRES_PASSWORD=<pick one> -e POSTGRES_DB=tira -p 127.0.0.1:5433:5432 postgres:17`.
+
+In production the schema is made once by its owner; tira then connects as a login that owns
+nothing and may only insert into and read the events table (and update its counter): the
+triggers refuse edits, deletes and truncates, and not owning the table refuses a drop.
 
 ### Demo D0 script (manual test M0)
 
@@ -173,25 +185,24 @@ replays the raw log from scratch. So step 4's "wipe derived state, replay" is sh
 replaying in a fresh store that holds only a copy of the raw log, and comparing hashes.
 
 ```
-export TIRA_DB=d0.db
+export TIRA_SCHEMA=demo_d0                                                 # a schema of its own in your database
 node scripts/tira.ts create node a && node scripts/tira.ts create node b && node scripts/tira.ts create node c   # 1
 node scripts/tira.ts send node a START && node scripts/tira.ts send node a COMPLETE evidenceRef=proof.png        # 2: a -> done
 node scripts/tira.ts send node b START && node scripts/tira.ts send node b COMPLETE                              # 3: REJECTED, exit 2
 node scripts/tira.ts log                                                   # 3: command.rejected row in the log
 node scripts/tira.ts state                                                 # 3: ...and b is still in_progress (never applied)
-node scripts/tira.ts dump --hash                                           # 4: hash of the derived state
-cp d0.db d0-fresh.db && node scripts/tira.ts --db d0-fresh.db dump --hash  # 4: same hash from a fresh replay
-node scripts/tira.ts dump --hash                                           # M0 re-run: identical again
+node scripts/tira.ts dump --hash                                           # 4: hash of the derived state, replayed from the raw log
+node scripts/tira.ts dump --hash                                           # M0 re-run: replayed again from scratch, identical
 ```
 
 M0 passes when both hashes match and the `command.rejected` row is in the log but `b`
-never reached `done`. `rm d0.db d0-fresh.db` to start over. Stores written before C1 hold
+never reached `done`. Pick a new `TIRA_SCHEMA` to start over. Stores written before C1 hold
 `node.created` births, which now show as anomalies: start them over.
 
 ### Demo D1 script (manual test M1): S3 backtrack, visible — tira closes the branch
 
 ```
-export TIRA_DB=d1.db TIRA_STREAM=tasktree-dash TIRA_ACTOR=isha
+export TIRA_SCHEMA=demo_d1 TIRA_STREAM=tasktree-dash TIRA_ACTOR=isha
 t() { node scripts/tira.ts "$@"; }
 t create node dashboard && t create node metrics_card --parent dashboard
 t create node fetch_metrics --parent metrics_card && t create node improve_visual --parent metrics_card
@@ -348,7 +359,7 @@ Waiting is a legitimate state, not an error.
 ### Demo D2 script (manual test M2): regions composed, handoffs paired
 
 ```bash
-export TIRA_DB=d2.db TIRA_STREAM=factory-main
+export TIRA_SCHEMA=demo_d2 TIRA_STREAM=factory-main
 t() { node scripts/tira.ts "$@"; }
 t create session s1 --actor s1 && t create session s2 --actor s2
 t create brief api --version 1 --actor orchestrator slice_ref=slice/api
@@ -867,7 +878,7 @@ Internal knowledge (runbooks, decision logs) lives in BookStack, not here.
 
 **Resolved** (see `packing.md` §5 for rationale):
 - Claim-pipeline approvals happen in chat (Muse/Claude).
-- Event store: SQLite behind the storage interface (`packing.md` §3) on one machine; Postgres for a shared tira (decided 2026-10-21, `packing.md` D11; it replaces KurrentDB as the upgrade).
+- Event store: Postgres behind the storage interface (`packing.md` §3), hosted, the only live store (decided 2026-10-22 with Devansh, `packing.md` D12; it replaces the 2026-10-16 SQLite row and D11's "SQLite on one machine"). SQLite stays for tests and `tira import`.
 - Claim pipeline lives in our store (single source of truth).
 - Transition tables are the spec; JSON + tiny runner preferred over a framework vehicle.
 - Lean UI is in MVP scope, for manual edge testing.

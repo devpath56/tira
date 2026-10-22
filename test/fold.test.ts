@@ -2,6 +2,7 @@
 // predicates over now + vantage (B0 G6), and anomaly detection for writes that
 // bypassed the write path.
 import "./hermetic.ts";
+import { sqliteFile } from "./test-stores.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -279,7 +280,7 @@ test("canonical-array-order: every canonical surface keeps array order: canonica
     for (const id of order) await wp.submit({ stream: "s", kind: "create", entity: { type: "node", id }, actor: "isha", payload: { parent_id: "p" } });
     const r = fold(await store.readStream("s"), registry);
     const out: string[] = [];
-    await run(["--db", db, "--stream", "s", "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {} });
+    await run(["--db", db, "--stream", "s", "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {}, openStore: sqliteFile });
     const server = tiraServer({ store, registry, stream: "s", actor: "isha", token: "t0k3n" });
     await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
     const page = await (await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`)).text();

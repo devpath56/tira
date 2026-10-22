@@ -13,6 +13,14 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
   return (emitWarning as (...a: unknown[]) => void)(warning, ...rest);
 }) as typeof process.emitWarning;
 
+// The database's connection string may sit in this repo's own .env (gitignored): read it if it's
+// there. A setting already in the environment wins. Never printed.
+try {
+  process.loadEnvFile(new URL("../.env", import.meta.url));
+} catch {
+  // no .env: the environment alone
+}
+
 const { run } = await import("../src/cli/cli.ts");
 // A secret typed at the terminal (tira connect-jira's API token): nothing echoes. Piped in, the
 // first line is read.

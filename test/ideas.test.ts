@@ -22,6 +22,7 @@ import { tiraServer } from "../src/serve/server.ts";
 import { ideaBriefFor, ideaRefusal } from "../src/serve/brief.ts";
 import { parseCommand } from "../src/serve/command.ts";
 import { run } from "../src/cli/cli.ts";
+import { sqliteFile } from "./test-stores.ts";
 
 const S = "tasktree-dash";
 
@@ -178,7 +179,8 @@ function sandbox() {
   const tira = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {} });
+    // a throwaway SQLite file, or (under ideas-postgres) a Postgres schema of its own, opened as live
+    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {}, ...(db.startsWith("postgres") ? {} : { openStore: sqliteFile }) });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
   return { tira, done: () => rmSync(dir, { recursive: true, force: true }) };
