@@ -517,7 +517,7 @@ const MUTANTS: Mutant[] = [
   { name: "live: a SQLite file is opened", file: "src/store/open.ts", find: "  if (!isPostgresUrl(db)) {\n    throw new DatabaseRefused(", replace: "  if (false) {\n    throw new DatabaseRefused(" },
   { name: "live: no database falls back to ./tira.db", file: "src/store/open.ts", find: "    throw new DatabaseRefused(`no database: set ${DATABASE_ENV}", replace: "    return \"tira.db\"; throw new DatabaseRefused(`no database: set ${DATABASE_ENV}" },
   { name: "live: a hosted database without TLS is accepted", file: "src/store/open.ts", find: "  if (!LOCAL.has(u.hostname) && !tls) {", replace: "  if (false) {" },
-  { name: "live: a message holds the connection string", file: "src/store/open.ts", find: "with ?sslmode=require (or verify-full)`", replace: "with ?sslmode=require (or verify-full): ${db}`" },
+  { name: "live: a message holds the connection string", file: "src/store/open.ts", find: "with ?sslmode=verify-full`", replace: "with ?sslmode=verify-full: ${db}`" },
   { name: "live: $TIRA_SCHEMA is ignored", file: "src/store/open.ts", find: "u.searchParams.get(\"schema\") ?? (schema?.trim() || null)", replace: "u.searchParams.get(\"schema\")" },
   { name: "import: a re-run is refused instead of adding nothing", file: "src/store/postgres-store.ts", find: "        if (have.length === events.length && have.every((h, i) => sameEvent(h, events[i] as StoredEvent))) return { added: 0 };\n", replace: "", needs: "postgres" },
   { name: "import: into a schema that holds other events", file: "src/store/postgres-store.ts", find: "        throw new ImportRefused(`schema ${s} already holds other events", replace: "        return { added: 0 }; throw new ImportRefused(`schema ${s} already holds other events", needs: "postgres" },

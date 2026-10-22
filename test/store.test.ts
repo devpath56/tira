@@ -321,7 +321,7 @@ test("live, tira opens Postgres only: a file or no setting is refused in plain w
   assert.match(refused("tira.db", {}), /Postgres only, and --db names a file\. Set TIRA_DATABASE_URL[^]*tira import <file>/);
   assert.match(refused(undefined, { TIRA_DB: "old.db" }), /the database setting names a file/);
   const hosted = "postgres://u:s3cret@db.example.com/tira";
-  assert.match(refused(hosted, {}), /^a database on another machine needs TLS: end TIRA_DATABASE_URL with \?sslmode=require/);
+  assert.match(refused(hosted, {}), /^a database on another machine needs TLS: end TIRA_DATABASE_URL with \?sslmode=verify-full$/);
   assert.match(refused(undefined, { TIRA_DATABASE_URL: `${hosted}?sslmode=disable` }), /needs TLS/);
   for (const m of [refused(hosted, {}), refused("tira.db", {})]) assert.doesNotMatch(m, /s3cret|db\.example|u:/);
   assert.equal(liveDatabase(undefined, { TIRA_DATABASE_URL: `${hosted}?sslmode=require` }), `${hosted}?sslmode=require`);

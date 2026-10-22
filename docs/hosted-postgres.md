@@ -7,9 +7,14 @@ connection string stays with you: never paste it into a chat, a PR or a commit.
 ## 1. Make the database
 
 1. Sign up at neon.tech and create a project (any name, e.g. `tira`; pick the region nearest you).
-2. On the project's dashboard, open **Connect**. Choose the default branch and database, and copy
-   the **connection string**. It looks like `postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require`
-   and already ends with `sslmode=require`, which tira needs for a database on another machine.
+2. On the project's dashboard, open **Connect**. Choose the default branch and database, turn
+   connection pooling off, and copy the **connection string**. It looks like
+   `postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require`. Change `sslmode=require` to
+   `sslmode=verify-full`: the same encryption, plus a check that the server is really Neon (and
+   the database driver stops warning about it). tira needs one or the other for a database on
+   another machine.
+
+You don't need Neon's own CLI (`neon init`, `neon deploy`): tira only needs the connection string.
 
 ## 2. Give it to tira
 

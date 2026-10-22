@@ -147,7 +147,7 @@ it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgre
 
 - **The connection string** goes in `$TIRA_DATABASE_URL` (your shell, or the repo's gitignored
   `.env`), not on the command line. Any standard Postgres string works; a database on another
-  machine needs `sslmode=require` (or stricter). tira never prints it.
+  machine needs TLS: `sslmode=verify-full` (or at least `require`). tira never prints it.
 - **`$TIRA_SCHEMA`** (or `?schema=NAME` on the string) picks a schema in that database, default
   `tira`: a demo or a trial gets its own, and they never touch each other.
 - **Old SQLite logs** come over once: `tira import <file.db>` copies every event as it was (id,
@@ -155,7 +155,7 @@ it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgre
   fingerprint before and after, and adds nothing when run again.
 
 ```
-export TIRA_DATABASE_URL='postgresql://…?sslmode=require'    # your hosted database (docs/hosted-postgres.md)
+export TIRA_DATABASE_URL='postgresql://…?sslmode=verify-full'    # your hosted database (docs/hosted-postgres.md)
 node scripts/tira.ts create node dashboard --actor isha       # first use makes the tables and triggers, in schema "tira"
 TIRA_SCHEMA=demo node scripts/tira.ts import ~/old/live.db    # once: an old log into its own schema, fingerprints checked
 ```

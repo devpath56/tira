@@ -44,7 +44,7 @@ export function liveDatabase(flag: string | undefined, env: Record<string, strin
   }
   const tls = TLS_MODES.has(u.searchParams.get("sslmode") ?? "") || ["true", "1"].includes(u.searchParams.get("ssl") ?? "");
   if (!LOCAL.has(u.hostname) && !tls) {
-    throw new DatabaseRefused(`a database on another machine needs TLS: end ${DATABASE_ENV} with ?sslmode=require (or verify-full)`);
+    throw new DatabaseRefused(`a database on another machine needs TLS: end ${DATABASE_ENV} with ?sslmode=verify-full`);
   }
   return db;
 }
