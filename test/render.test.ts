@@ -101,8 +101,10 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?3 of 3 subtasks closed/);
   assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?1 of 3 subtasks closed/);
   // Kanban holds the work (leaves), with the cursor's card marked next; no strip of parents above
-  // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards
-  assert.deepEqual(kanbanColumns(html), { "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "colors", "tokens"], Dropped: ["font"] });
+  // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards;
+  // the open idea waits in Ideas, first
+  assert.deepEqual(Object.keys(kanbanColumns(html))[0], "Ideas");
+  assert.deepEqual(kanbanColumns(html), { Ideas: ["7"], "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "colors", "tokens"], Dropped: ["font"] });
   assert.match(html, /<div class="t">improve_visual<\/div><div class="row"><span class="chip">metrics_card<\/span><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
   assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
   // the halo marks the active task only; payloads read as words, not JSON
@@ -546,7 +548,7 @@ test("divergence panel: one read + render at ~2,800 tira events costs under 1 s"
   assert.ok(ms < 1000, `read+render took ${ms.toFixed(1)} ms at ${tlOut.length} events: continuous-at-read is falsified`);
 });
 
-test("a task opens as a dialog over the page, never a side panel or a new page: centred box, dimmed page behind it that closes it, a close button", async () => {
+test("a task (or an idea) opens as a dialog over the page, never a side panel or a new page: centred box, dimmed page behind it that closes it, a close button", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
   const dialogs = [...html.matchAll(/<section class="drawer( guide)?" id="([^"]+)"[^>]*>/g)];
@@ -556,9 +558,10 @@ test("a task opens as a dialog over the page, never a side panel or a new page: 
     const body = new RegExp(`id="${id}"[^>]*><a class="scrim" href="#_" tabindex="-1" aria-hidden="true"></a><div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`);
     assert.match(html, body, String(id));
   }
-  // every way to a task stays on the page: links to its dialog, no target, no other page
-  const links = [...html.matchAll(/<a class="(?:gn[^"]*|card[^"]*|name)" href="([^"]+)"/g)].map((m) => m[1] as string);
-  assert.ok(links.length > 0 && links.every((h) => /^#t\d+$/.test(h)), links.join(" "));
+  // every way to a task (or an idea: #i) stays on the page: links to its dialog, no target, no other page
+  const links = [...html.matchAll(/<a class="(?:gn[^"]*|ghost[^"]*|card[^"]*|name)" href="([^"]+)"/g)].map((m) => m[1] as string);
+  assert.ok(links.length > 0 && links.every((h) => /^#[ti]\d+$/.test(h)), links.join(" "));
+  assert.ok(links.includes("#i0"), "the idea's card and ghost open its dialog");
   assert.doesNotMatch(html, /target="_blank"/);
   // the box is centred over a dimmed page; the page behind doesn't scroll while it's open
   assert.match(html, /\.drawer\{position:fixed;inset:0;[^}]*display:grid;place-items:center/);
@@ -618,7 +621,7 @@ test("one Board view, two styles: Kanban by default, Graph a click away, switche
   // the cards live in the Kanban style, every task's node in the Graph style
   const kanban = /<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(html)?.[0] ?? "";
   const graph = /<div class="bv bv-graph">[^]*?<\/section>/.exec(html)?.[0] ?? "";
-  assert.equal((kanban.match(/<a class="card[ "]/g) ?? []).length, 7); // 5 leaf tasks and the 2 parents tira closed
+  assert.equal((kanban.match(/<a class="card[ "]/g) ?? []).length, 8); // 5 leaf tasks, the 2 parents tira closed, and idea 7 (in Ideas)
   assert.equal((graph.match(/<a class="gn[ "]/g) ?? []).length, r.entities.filter((e) => e.tree).length);
   assert.doesNotMatch(kanban, /data-key=/); // the fold's flags are on the graph's nodes only (M1)
   // a parent sits a row above its children, centred over them; no two nodes on a row overlap

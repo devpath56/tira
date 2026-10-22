@@ -211,7 +211,7 @@ const MUTANTS: Mutant[] = [
   { name: "block relay: verdicts before a claim", file: "src/fold/handoffs.ts", find: "    return HELD.has(b.regions.claim as string) ? undefined : `${show(reason)} blocks need a claimed brief`;", replace: "    return undefined;" },
   { name: "block relay: anyone can ask", file: "src/fold/handoffs.ts", find: "  if (actor !== ORCHESTRATOR) return \"only the orchestrator can ask to block a brief\";\n", replace: "" },
   { name: "dispatcher: writes only the first handoff", file: "src/write/dispatcher.ts", find: "    for (let n = 0; n < MAX_HANDOFFS; n++) {", replace: "    for (let n = 0; n < 1; n++) {" },
-  { name: "dispatcher: tries handoffs the rules refuse", file: "src/write/dispatcher.ts", find: "return due(view, idx).find((r) => evaluate(this.registry, entities, view, intentOf(r, DISPATCHER)).ok);", replace: "return due(view, idx)[0];" },
+  { name: "dispatcher: tries handoffs the rules refuse", file: "src/write/dispatcher.ts", find: "return due(view, idx, this.registry).find((r) => evaluate(this.registry, entities, view, intentOf(r, DISPATCHER)).ok);", replace: "return due(view, idx, this.registry)[0];" },
   { name: "dispatcher: no correlation id", file: "src/write/dispatcher.ts", find: "        correlationId: next.correlationId,\n", replace: "" },
   { name: "render: lanes show the wrong region state", file: "src/render/html.ts", find: "data-region=\"${esc(region)}\" data-state=\"${esc(state)}\">${pill(state)}", replace: "data-region=\"${esc(region)}\" data-state=\"${esc(Object.values(e.regions)[0] as string)}\">${pill(state)}" },
   { name: "render: handoff pairs not grouped by correlation", file: "src/render/html.ts", find: "    if (e.metadata.actor === \"dispatcher\" && c !== undefined) groups.set(c, [...(groups.get(c) ?? []), e]);", replace: "    if (e.metadata.actor === \"dispatcher\" && c !== undefined) groups.set(e.eventId, [e]);" },
@@ -374,7 +374,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: any Host answers", file: "src/serve/server.ts", find: "    if (!LOCAL_HOST.test(host)) return send(res, 403,", replace: "    if (false) return send(res, 403," },
   { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403,", replace: "    if (false) { send(res, 403," },
   { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) { send(res, 403, text,", replace: "    if (false) { send(res, 403, text," },
-  { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !registry.get(type)?.tree || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
+  { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined) || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
   { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, opts.stream, opts.actor);", replace: "const cmd = commandOf(ask, opts.stream, form.get(\"actor\") ?? opts.actor);" },
   { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
   { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
@@ -457,9 +457,9 @@ const MUTANTS: Mutant[] = [
   { name: "command: an unclosed quote is run", file: "src/serve/command.ts", find: "  if (text.replaceAll(WORD, \"\").trim() !== \"\") return { why: \"a quote is never closed\" };\n", replace: "" },
   { name: "command: found work under another task", file: "src/serve/command.ts", find: "(kv.kind !== \"discovered\" || kv.discovered_during !== parent)", replace: "kv.kind !== \"discovered\"" },
   { name: "command: a missing proof isn't caught", file: "src/serve/command.ts", find: "  if (!field || PAGE_VERBS[a.event]?.creates) return undefined;", replace: "  return undefined;" },
-  { name: "command: the value to fill isn't offered", file: "src/serve/command.ts", find: "const toFill = verb?.field ? \" \" + pair(verb.field.name, \"\") : \"\";", replace: "const toFill = \"\";" },
+  { name: "command: the value to fill isn't offered", file: "src/serve/command.ts", find: "const toFill = verb?.field ? \" \" + pair(verb.field.name, value) : \"\";", replace: "const toFill = \"\";" },
   { name: "act: an edited action runs without its preview", file: "src/serve/server.ts", find: "if (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event) {", replace: "if (false) {" },
-  { name: "act: a typed refusal is written to the log", file: "src/serve/server.ts", find: "      if (!pv.ok) return `tira would still refuse", replace: "      if (false) return `tira would still refuse" },
+  { name: "act: a typed refusal is written to the log", file: "src/serve/server.ts", find: "      if (pv.ok) continue;\n", replace: "      continue;\n" },
   { name: "brief: tira's close promised for a blocked parent", file: "src/serve/brief.ts", find: "  if (p.closable) return", replace: "  if (true) return" },
   { name: "brief: every start looks like the next task", file: "src/serve/brief.ts", find: "  if (f.next === f.id) return", replace: "  if (true) return" },
   { name: "brief: the wait looks over whatever it waited on", file: "src/serve/brief.ts", find: "  if (w && CLOSED.has(w.state)) return", replace: "  if (w) return" },
@@ -479,7 +479,7 @@ const MUTANTS: Mutant[] = [
   { name: "links: what a ticket blocks not shown", file: "src/render/html.ts", find: "    blocks.set(since.blocker, [...(blocks.get(since.blocker) ?? []), key]);\n", replace: "" },
   { name: "links: never ready to unblock", file: "src/render/html.ts", find: "const ready = blocker !== undefined && CLOSED.has(blocker.state) ?", replace: "const ready = false ?" },
   { name: "links: the blocks line looks like any line", file: "src/render/html.ts", find: "    const blocking = links.blockedBy.get(p.row.key) === n.row.key;", replace: "    const blocking = false;" },
-  { name: "links: no arc to a blocker elsewhere", file: "src/render/html.ts", find: "${found.join(\"\")}${blockArcs.join(\"\")}</svg>", replace: "${found.join(\"\")}</svg>" },
+  { name: "links: no arc to a blocker elsewhere", file: "src/render/html.ts", find: "${found.join(\"\")}${blockArcs.join(\"\")}${ideaLines.join(\"\")}</svg>", replace: "${found.join(\"\")}${ideaLines.join(\"\")}</svg>" },
   { name: "brief: the blocker ticket's state ignored", file: "src/serve/server.ts", find: "  const ticket = state === \"blocked\" ? since?.blocker : undefined;", replace: "  const ticket = undefined;" },
   { name: "brief: a refusal recommended anyway", file: "src/serve/brief.ts", find: "  if (!pv.ok) return `Don't run it:", replace: "  if (false) return `Don't run it:" },
   { name: "add subtask: the discovered box ignored", file: "src/serve/server.ts", find: "form.get(\"discovered\") === \"1\" ? { kind: \"discovered\", discovered_during: id } : {}", replace: "{}" },
@@ -501,6 +501,30 @@ const MUTANTS: Mutant[] = [
   { name: "labels: an oracle may write non-label events at the write path", file: "src/write/write-path.ts", find: "if (!internal && isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (!internal && isOracle(intent.actor) && isLabelBirth(intent)) {" },
   { name: "labels: an oracle may write non-label events in the fold", file: "src/fold/fold.ts", find: "if (isOracle(intent.actor) && !isLabelBirth(intent)) {", replace: "if (isOracle(intent.actor) && isLabelBirth(intent)) {" },
   { name: "labels: a refused self-label still appends a rejection", file: "src/write/write-path.ts", find: "batch: [] as NewEvent[],", replace: "batch: [toRejectedEvent(intent, \"bad-label\", problem.detail, moveId)]," },
+  // Ideas to tickets (D5, the vapor catch): tira's two writes, where it puts an idea, the agent's
+  // command, the approvals' guards and plain refusals, and the idea on the board
+  { name: "ideas: tira never drafts the file", file: "src/fold/handoffs.ts", find: "if (born && said && i.regions.lifecycle === \"declared\") on(\"V1\", i, \"DRAFT_FILE\", { ...said }, born);", replace: "" },
+  { name: "ideas: tira drafts a file for an idea that said nothing", file: "src/fold/handoffs.ts", find: "if (born && said && i.regions.lifecycle === \"declared\")", replace: "if (born && i.regions.lifecycle === \"declared\")" },
+  { name: "ideas: tira never proposes the parent", file: "src/fold/handoffs.ts", find: "if (approved && file) on(\"V2\"", replace: "if (false) on(\"V2\"" },
+  { name: "ideas/placement: the declared parent wins over a text that disagrees", file: "src/fold/ideas.ts", find: "return { candidates: [named, ...usable], basis: `needs you: it was declared under ${named}, but its text names ${list(usable)}` };", replace: "return { parent: named, candidates: [named], basis: `declared under ${named}` };" },
+  { name: "ideas/placement: a declared parent that can't take it is proposed", file: "src/fold/ideas.ts", find: "if (problem !== undefined) return { candidates: usable, basis:", replace: "if (false) return { candidates: usable, basis:" },
+  { name: "ideas/placement: a closed task the text names is proposed", file: "src/fold/ideas.ts", find: "const usable = hits.filter((h) => parentProblem(view, registry, h) === undefined);", replace: "const usable = hits;" },
+  { name: "ideas/placement: a task and the one under it both count", file: "src/fold/ideas.ts", find: "return hits.filter((h) => !hits.some((o) => o !== h && above(h, o))).map((h) => h.id).sort(compareCodeUnits);", replace: "return hits.map((h) => h.id).sort(compareCodeUnits);" },
+  { name: "ideas/placement: one-letter and filler task names match", file: "src/fold/ideas.ts", find: "    if (name.trim().length < 3 || FILLER.has(name.trim())) return false;\n", replace: "" },
+  { name: "ideas/placement: a name inside a longer word matches", file: "src/fold/ideas.ts", find: "return t.includes(name) || t.includes(`${name.trimEnd()}s `);", replace: "return t.includes(name.trim());" },
+  { name: "ideas/placement: the why outranks the summary", file: "src/fold/ideas.ts", find: "const hits = summaryHits.length > 0 || file.why === undefined ? summaryHits : mentioned(view, file.why);", replace: "const hits = file.why === undefined ? summaryHits : mentioned(view, file.why);" },
+  { name: "ideas: an idea's id may be a task's", file: "src/fold/ideas.ts", find: "const free = (id: string) => !view.get({ type: IDEA, id }) && !view.get({ type: TASK, id });", replace: "const free = (id: string) => !view.get({ type: IDEA, id });" },
+  { name: "ideas/cli: an idea without a why is pushed", file: "src/cli/cli.ts", find: "  if (why === \"\") throw new UsageError(", replace: "  if (false) throw new UsageError(" },
+  { name: "ideas/serve: an idea's parent isn't checked before the placement is approved", file: "src/serve/server.ts", find: "    return placeProblem(viewOf((await now()).r, opts.stream), opts.registry, a.ask.id, parent.trim());", replace: "    return undefined;" },
+  { name: "ideas/serve: a stage skip is refused in the rules' words only", file: "src/serve/server.ts", find: "return { verdict: `tira would refuse this: ${refusal.why} (${code}).`, hint: refusal.todo };", replace: "return { verdict: verdictOf(pv), hint: refusal.todo };" },
+  { name: "ideas/refusal: placing before the file reads as 'already approved'", file: "src/serve/brief.ts", find: "if (stage === \"declared\" || stage === \"file_pending\") return {", replace: "if (stage === \"declared\") return {" },
+  { name: "ideas/command: an idea's verbs taken on a task", file: "src/serve/command.ts", find: "(verb.on === undefined ? isTreeType(type) : type === verb.on)", replace: "(isTreeType(type) || type === verb.on)" },
+  { name: "ideas/brief: the placement's candidates not offered", file: "src/serve/server.ts", find: "{ parents: (idea.proposal?.candidates ?? []).filter((c) => c !== parent) }", replace: "{ parents: [] }" },
+  { name: "ideas/render: a placed ghost floats on the top row", file: "src/render/html.ts", find: "...(p !== undefined && onTree.has(p) ? { parent: p } : {})", replace: "...{}" },
+  { name: "ideas/render: dropped and born ideas stay on the board", file: "src/render/html.ts", find: "ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage))", replace: "ideaRows(r, events, stream)" },
+  { name: "ideas/render: a ghost isn't marked as an idea", file: "src/render/html.ts", find: "    + `<span class=\"tag\">idea</span><span class=\"gt\">", replace: "    + `<span class=\"gt\">" },
+  { name: "ideas/render: no Ideas column", file: "src/render/html.ts", find: "  return `<div class=\"cols\">${ideasColumn(ghosts, trail)}${cols}</div>`;", replace: "  return `<div class=\"cols\">${cols}</div>`;" },
+  { name: "ideas/render: an idea's approvals in the rendered file", file: "src/render/html.ts", find: "const verbs = live ? IDEA_ACTIONS[i.stage] ?? [] : [];", replace: "const verbs = IDEA_ACTIONS[i.stage] ?? [];" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -521,7 +545,7 @@ function scratchCopy(): string {
   return dir;
 }
 
-const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels"];
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas"];
 // a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
 const SUITE_TIMEOUT = 60_000;
 const CATCHERS = join(ROOT, ".mutant-catchers.json");

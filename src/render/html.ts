@@ -19,6 +19,7 @@ import { flatten, streamView, type TreeRow } from "./tree-view.ts";
 import { show } from "../text.ts";
 import { esc } from "./escape.ts";
 import { foundPath, fx, layout, treePath } from "../serve/layout.mjs";
+import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
@@ -171,6 +172,15 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .canvas-hint{position:absolute;left:12px;bottom:10px;z-index:3;font-size:11.5px;color:var(--dim);pointer-events:none}
 .canvas-flash{position:absolute;left:50%;bottom:12px;z-index:3;transform:translateX(-50%);display:none;max-width:calc(100% - 24px);padding:8px 14px;border-radius:var(--r);font-size:13px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--done);box-shadow:var(--shadow)}
 .canvas-flash.no{border-left-color:var(--block)}.full .canvas-flash{display:block}.full .canvas-hint{display:none}
+.ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:2px;padding:6px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);border-radius:var(--r-lg);color:var(--fg)}
+.ghost:hover{background:var(--hover)}.ghost[hidden]{display:none}.ghost.loose{border-color:var(--warn);background:var(--warn-bg)}
+.ghost .gt{display:flex;align-items:center;gap:6px;min-width:0}.ghost .name{min-width:0;font-size:12.5px;font-weight:600;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ghost .gm{padding-left:22px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ghost .sd{border-style:dashed;border-color:var(--accent);color:var(--accent)}
+.ghost .tag,.card .tag{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--panel);border:1px dashed var(--accent);border-radius:4px;padding:0 5px;white-space:nowrap}
+.ghost .tag{position:absolute;top:-10px;left:10px}.card .tag{display:inline-block;margin-bottom:6px}
+.edges path.idea{stroke:var(--accent);stroke-dasharray:5 4}.lg-idea{display:block;width:16px;height:10px;border:1.5px dashed var(--accent);border-radius:3px;background:var(--accent-bg)}
+.card.idea{border:1.5px dashed var(--accent);background:var(--accent-bg)}.card.idea .t{font-style:italic}.chip.stage{color:var(--accent-text);border-color:var(--accent)}.chip.stage.loose{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.s-idea{color:var(--accent-text);background:var(--accent-bg)}.idea-file{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:14px 0 0;font-size:13.5px}.idea-file dt{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding-top:2px}.idea-file dd{margin:0;overflow-wrap:anywhere}
 .hide-found .edges path.found{stroke:var(--line-2);stroke-dasharray:none}.hide-found .edges path.done.found{stroke:var(--done)}
 .edges path.blocks{stroke:var(--block);stroke-dasharray:7 4;stroke-width:2}.edges path.blocks.done{stroke:var(--done)}.lg-blocks{display:block;width:16px;border-top:2px dashed var(--block)}
 .links{display:grid;gap:6px;margin-top:12px}.links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block);min-width:78px}.links a{font-weight:600;color:var(--accent)}.links a:hover{text-decoration:underline}
@@ -347,10 +357,11 @@ const word = (state: string) => STATE_WORD[state] ?? state;
 const nodeAttrs = (r: TreeRow, lines: number) =>
   `data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines}"`;
 
-function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
   const kids = new Map<Placed, Placed[]>();
   for (const n of nodes) if (n.parent) kids.set(n.parent, [...(kids.get(n.parent) ?? []), n]);
-  const L = layout(nodes.map((n) => ({ key: n.row.key, parent: n.parent?.row.key })));
+  // ideas after the tree, each under its proposed parent (layout.mjs: a parent before its children)
+  const L = layout([...nodes.map((n) => ({ key: n.row.key, parent: n.parent?.row.key })), ...ghosts.map((g) => ({ key: g.idea.key, parent: g.parent }))]);
   const at = (n: Placed) => L.at.get(n.row.key) ?? { x: 0, y: 0 };
   const byKey = new Map(nodes.map((n) => [n.row.key, n]));
   const tree = nodes.filter((n) => n.parent).map((n) => {
@@ -374,10 +385,13 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     return `<path class="e blocks${CLOSED.has(b.row.state) ? " done" : ""}" data-from="${esc(by)}" data-blocks="${esc(key)}" d="${foundPath(at(b), at(k))}"/>`;
   });
   const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length);
+  const ghostAt = (key: string) => L.at.get(key) ?? { x: 0, y: 0 };
+  const ideaLines = ghosts.filter((g) => g.parent !== undefined).map((g) =>
+    `<path class="e idea" data-from="${esc(g.parent as string)}" data-to="${esc(g.idea.key)}" d="${treePath(ghostAt(g.parent as string), ghostAt(g.idea.key))}"/>`);
   // Live, graph.mjs turns the box into a canvas (pan, zoom, folds); a rendered file scrolls.
   return `<div class="graph-wrap" data-graph><div class="graph" role="group" aria-label="Tasks as a tree" style="width:${fx(L.width)}px;height:${L.height}px">`
-    + `<svg class="edges" viewBox="0 0 ${fx(L.width)} ${L.height}" aria-hidden="true">${tree.join("")}${found.join("")}${blockArcs.join("")}</svg>`
-    + `${nodes.map(node).join("")}</div></div>`;
+    + `<svg class="edges" viewBox="0 0 ${fx(L.width)} ${L.height}" aria-hidden="true">${tree.join("")}${found.join("")}${blockArcs.join("")}${ideaLines.join("")}</svg>`
+    + `${nodes.map(node).join("")}${ghosts.map((g) => ghostHtml(g, ghostAt(g.idea.key), (trail.get(g.idea.key) ?? []).length)).join("")}</div></div>`;
 }
 
 // What a graph node says to a screen reader: the task, its state, and its links.
@@ -393,6 +407,9 @@ function nodeLabel(n: Placed, ks: Placed[], closed: number, byKey: ReadonlyMap<s
   if (r.active) said.push("active");
   return said.join(", ");
 }
+
+// Where a box sits on the graph (layout.mjs), in whole pixels.
+const placedAt = (p: { x: number; y: number }) => `style="left:${fx(p.x)}px;top:${p.y}px"`;
 
 // One task on the graph: a link to its dialog, carrying the fold's flags (M1).
 function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number): string {
@@ -412,26 +429,101 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
   const pinWord = r.active ? "now" : "next";
   const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
-  return `<a class="${cls}" href="#t${n.i}" style="left:${fx(p.x)}px;top:${p.y}px" aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
+  return `<a class="${cls}" href="#t${n.i}" ${placedAt(p)} aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
     + pin
     + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
     + `<span class="gm">${marks}${meta}</span></a>`;
 }
 
+// ---------- ideas (D5, the vapor catch) ----------
+// An open idea is on the board too, never as a task: a dashed card in the Ideas column, and on the
+// Graph a dashed ghost under the task tira proposed for it. One tira hasn't placed yet (its file
+// isn't approved), or one waiting for a person to pick its parent, sits on the top row. Each opens
+// its own dialog (#i<n>). Ghosts carry data-idea, never data-key: the M1 count is the tree's alone.
+interface Ghost { idea: IdeaRow; i: number; parent?: string } // parent: the proposed parent's key, on the tree
+
+function ghostsOf(ideas: IdeaRow[], onTree: ReadonlySet<string>): Ghost[] {
+  return ideas.map((idea, i) => {
+    const p = idea.proposal?.parent === undefined ? undefined : `${TASK}:${idea.proposal.parent}`;
+    return { idea, i, ...(p !== undefined && onTree.has(p) ? { parent: p } : {}) };
+  });
+}
+
+// waiting for a person to pick its parent
+const loose = (i: IdeaRow) => i.stage === "node_pending" && i.proposal?.parent === undefined;
+
+function ghostHtml(g: Ghost, p: { x: number; y: number }, history: number): string {
+  const i = g.idea;
+  let where = "not placed yet";
+  if (g.parent !== undefined) where = `proposed under ${bare(g.parent)}`;
+  else if (loose(i)) where = "needs a parent";
+  const said = i.summary ? `: ${i.summary}` : "";
+  const label = `idea ${i.id}${said}, ${stageWord(i)}, ${where}`;
+  const parentAttr = g.parent === undefined ? "" : ` data-parent="${esc(g.parent)}"`;
+  return `<a class="ghost${loose(i) ? " loose" : ""}" href="#i${g.i}" ${placedAt(p)} aria-label="${esc(label)}"${parentAttr} data-idea="${esc(i.key)}" data-stage="${esc(i.stage)}" data-history="${history}">`
+    + `<span class="tag">idea</span><span class="gt"><span class="sd">${ICON.spark}</span><span class="name" title="${esc(i.summary ?? i.id)}">${esc(short(i.id))}</span></span>`
+    + `<span class="gm">${esc(stageWord(i))}</span></a>`;
+}
+
+// The Ideas column: first on the board, while any idea is open.
+function ideasColumn(ghosts: Ghost[], trail: Map<string, TrailEntry[]>): string {
+  if (ghosts.length === 0) return "";
+  const cards = ghosts.map((g) => {
+    const i = g.idea;
+    const under = i.proposal?.parent === undefined ? "" : `<span class="chip">under ${esc(i.proposal.parent)}</span>`;
+    return `<a class="card idea" href="#i${g.i}" data-idea-card="${esc(i.key)}" data-stage="${esc(i.stage)}"><span class="tag">idea</span><div class="t">${esc(i.summary ?? i.id)}</div>`
+      + `<div class="row"><span class="chip stage${loose(i) ? " loose" : ""}">${esc(stageWord(i))}</span>${under}<span class="hist" title="history">${ICON.history}${(trail.get(i.key) ?? []).length}</span></div></a>`;
+  }).join("");
+  return `<div class="col"><div class="ch"><span class="dot" style="background:var(--accent)"></span>Ideas<span class="k">${ghosts.length}</span></div>${cards}</div>`;
+}
+
+// What an idea's dialog offers under `tira serve`, by stage: a person's two approvals. Between
+// them tira works (it drafts the file, then proposes the parent), so those stages offer nothing.
+const IDEA_ACTIONS: Record<string, [string, string][]> = {
+  file_pending: [["APPROVE_FILE", "Approve file"], ["REJECT_FILE", "Reject file"]],
+  node_pending: [["APPROVE_NODE", "Approve placement"], ["REJECT_NODE", "Reject placement"]],
+};
+
+// what happens next, in a sentence
+function ideaNext(i: IdeaRow): string {
+  if (i.stage === "declared") return i.summary ? "tira drafts its file from what it says." : "Its file is drafted by hand: tira send idea " + i.id + " DRAFT_FILE summary=\"…\" why=\"…\".";
+  if (i.stage === "file_pending") return "Approve the file if it's worth doing; then tira proposes where it goes, and you approve that.";
+  if (i.stage === "filed") return i.summary ? "tira proposes where it goes." : "Its placement is proposed by hand: tira send idea " + i.id + " PROPOSE_NODE.";
+  if (loose(i)) return "Pick its parent when you approve the placement; then it becomes a task.";
+  return `Approve the placement (you can change the parent), and it becomes the task ${i.id}.`;
+}
+
+function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean): string {
+  const i = g.idea;
+  const verbs = live ? IDEA_ACTIONS[i.stage] ?? [] : [];
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink({ type: IDEA, id: i.id }, ev, label)).join("")}</div>` : "";
+  const p = i.proposal;
+  let goes = "not proposed yet: tira proposes it once the file is approved" + (i.under === undefined ? "" : ` (declared under ${i.under})`);
+  if (p?.parent !== undefined) goes = `${p.parent}: ${p.basis} (tira's proposal, seq ${p.seq})`;
+  else if (p !== undefined) goes = p.basis + (p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : "");
+  const file: [string, string][] = [["Why", i.why ?? "not given"], ["Goes under", goes], ["Next", ideaNext(i)]];
+  const by = i.declaredBy === undefined ? "" : ` by ${i.declaredBy}`;
+  const fileHtml = file.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+  return `<section class="drawer" id="i${g.i}" aria-label="idea ${esc(i.id)}" role="dialog" aria-modal="true" data-idea-dialog="${esc(i.key)}">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
+    + `<div class="path">idea ${esc(i.id)} · declared${esc(by)} at seq ${i.declaredSeq}</div><h2>${esc(i.summary ?? i.id)}</h2><div class="badges"><span class="state s-idea">${esc(stageWord(i))}</span><span class="mark">not a task yet</span></div>`
+    + `<dl class="idea-file">${fileHtml}</dl>${acts}`
+    + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
+}
+
 // What the graph's colours and marks mean, beside the switch while the graph shows.
 const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done"></i>done</span><span><i class="m-in_progress"></i>in progress</span><span><i class="m-blocked"></i>blocked</span><span><i></i>to do</span><span><i class="m-cancelled"></i>dropped</span>`
-  + `<span><b class="lg-next">◆</b>next</span><span>${ICON.auto}closed by tira</span><span><b class="lg-ring"></b>tira closes it when you move on</span><span><b class="lg-found"></b>found while working on</span><span><b class="lg-blocks"></b>blocks</span></span>`;
+  + `<span><b class="lg-next">◆</b>next</span><span>${ICON.auto}closed by tira</span><span><b class="lg-ring"></b>tira closes it when you move on</span><span><b class="lg-found"></b>found while working on</span><span><b class="lg-blocks"></b>blocks</span><span><b class="lg-idea"></b>idea, not a task yet</span></span>`;
 
 // The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
 // Kanban by default; live, app.mjs remembers the choice so it survives the reload after
 // every action.
-function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
   const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
   const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
   const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
   return radios
     + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
-    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links)}</div>`;
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts)}</div>`;
 }
 
 // ---------- history ----------
@@ -448,11 +540,17 @@ interface TrailEntry {
 }
 
 // A payload in a few words: "under dashboard", "evidence palette.png", anything else as key value.
+function describeValue(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) return val.map(show).join(", ") || "none";
+  return JSON.stringify(val);
+}
+
 function describe(p: Record<string, unknown>): string {
   const words: Record<string, string> = { parent_id: "under", discovered_during: "found during", evidenceRef: "evidence", reason: "reason", blocker: "blocked by" };
   return Object.entries(p)
     .filter(([k, val]) => !(k === "kind" && (val === "discovered" || val === "planned")))
-    .map(([k, val]) => `${words[k] ?? k} ${typeof val === "string" ? val : JSON.stringify(val)}`)
+    .map(([k, val]) => `${words[k] ?? k} ${describeValue(val)}`)
     .join(" · ");
 }
 
@@ -637,9 +735,9 @@ const whyLabel = (reason: string | undefined) => (reason !== undefined && reason
 // Under `tira serve`, each row offers what its state allows. Every action opens the
 // confirm page first (what tira will do, then what you fill in): nothing fires from here.
 const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", "Unblock"]], in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"]] };
-const confirmHref = (r: TreeRow, event: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}`);
+const confirmHref = (r: { type: string; id: string }, event: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}`);
 
-const actLink = (r: TreeRow, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
+const actLink = (r: { type: string; id: string }, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
 
 const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
@@ -689,7 +787,7 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 // acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
 // started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
-function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links): string {
+function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
   const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== "unstarted");
   const columns: [string, string, string][] = [
@@ -714,7 +812,7 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     }).join("");
     return `<div class="col"><div class="ch"><span class="dot" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${cards || `<p class="empty">Nothing here</p>`}</div>`;
   }).join("");
-  return `<div class="cols">${cols}</div>`;
+  return `<div class="cols">${ideasColumn(ghosts, trail)}${cols}</div>`;
 }
 
 // ---------- lanes (D2: regions composed, handoffs paired) ----------
@@ -804,7 +902,7 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
 // Three short paragraphs, opened from the nav and from the hash chip.
 function guideHtml(dumpHash: string): string {
   return `<section class="drawer guide" id="guide" aria-label="How to read this page" role="dialog" aria-modal="true" data-guide>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
-    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on.</p>`
+    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on. A dashed card is an idea, not a task yet: it waits in the Ideas column and, on the Graph, under the task tira proposes for it; approve its file, then where it goes, and it becomes a task.</p>`
     + `<p><b>By tira.</b> A bolt on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
     + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
 }
@@ -944,14 +1042,16 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const views = VIEWS.filter(([t]) => t !== "lanes" || lanes !== "");
   // Open on the view that has something: the tree, else the lanes, else the history.
   const lanesFirst = lanes !== "" && (multiNow.length > 0 || (r.handoffs[stream]?.length ?? 0) > 0);
-  let first = "log";
-  if (v.roots.length > 0) first = "board";
-  else if (lanesFirst) first = "lanes";
   const skip = new Set(anomalies.map((a) => a.seq));
   const proofs = proofsOf(events, stream, skip);
   const indexOf = new Map(nodes.map((n) => [n.row.key, n.i]));
   const rowOf = new Map(nodes.map((n) => [n.row.key, n.row]));
   const links = linksOf(attentionSince(events, stream, skip).blocked, new Set(rowOf.keys()));
+  const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
+  const board = v.roots.length > 0 || ghosts.length > 0;
+  let first = "log";
+  if (board) first = "board";
+  else if (lanesFirst) first = "lanes";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
@@ -962,10 +1062,11 @@ ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 ${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip) : ""}
-<section class="view view-board" aria-label="Board">${v.roots.length > 0 ? boardView(nodes, trail, links) : `<p class="empty">No tree yet.</p>`}</section>
+<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts) : `<p class="empty">No tree yet.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 <section class="view view-log" aria-label="History">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, links, rowOf })).join("")}
+${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live)).join("")}
 ${guideHtml(dumpHash)}
 </main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>
 `;

@@ -90,7 +90,7 @@ load().catch(() => {}); // the first ⌘K loads it again
 let opener = null;
 const openDialog = () => document.querySelector(".drawer:target");
 document.addEventListener("click", (e) => {
-  const link = e.target instanceof Element ? e.target.closest('a[href^="#t"], a[href="#guide"]') : null;
+  const link = e.target instanceof Element ? e.target.closest('a[href^="#t"], a[href^="#i"], a[href="#guide"]') : null;
   if (link) opener = link;
 });
 window.addEventListener("hashchange", () => {
