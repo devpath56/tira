@@ -1,0 +1,122 @@
+{
+  "id": "brief-outcome",
+  "initial": "open",
+  "states": [
+    "open",
+    "dropped-unverified",
+    "done-verified",
+    "blocked"
+  ],
+  "events": [
+    "DROP_WRITTEN",
+    "VERIFIED_DONE",
+    "BLOCKED",
+    "UNBLOCKED"
+  ],
+  "pairs": [
+    {
+      "from": "open",
+      "event": "DROP_WRITTEN",
+      "outcome": "transition",
+      "to": "dropped-unverified",
+      "guard": "fromDispatcher"
+    },
+    {
+      "from": "open",
+      "event": "VERIFIED_DONE",
+      "outcome": "denied"
+    },
+    {
+      "from": "open",
+      "event": "BLOCKED",
+      "outcome": "transition",
+      "to": "blocked",
+      "guard": "blockReasonValid",
+      "capture": {
+        "block_reason": "payload.block_reason"
+      }
+    },
+    {
+      "from": "open",
+      "event": "UNBLOCKED",
+      "outcome": "denied"
+    },
+    {
+      "from": "dropped-unverified",
+      "event": "DROP_WRITTEN",
+      "outcome": "noop"
+    },
+    {
+      "from": "dropped-unverified",
+      "event": "VERIFIED_DONE",
+      "outcome": "transition",
+      "to": "done-verified",
+      "guard": "fromDispatcher"
+    },
+    {
+      "from": "dropped-unverified",
+      "event": "BLOCKED",
+      "outcome": "transition",
+      "to": "blocked",
+      "guard": "blockReasonValid",
+      "capture": {
+        "block_reason": "payload.block_reason"
+      }
+    },
+    {
+      "from": "dropped-unverified",
+      "event": "UNBLOCKED",
+      "outcome": "denied"
+    },
+    {
+      "from": "done-verified",
+      "event": "DROP_WRITTEN",
+      "outcome": "denied"
+    },
+    {
+      "from": "done-verified",
+      "event": "VERIFIED_DONE",
+      "outcome": "noop"
+    },
+    {
+      "from": "done-verified",
+      "event": "BLOCKED",
+      "outcome": "denied"
+    },
+    {
+      "from": "done-verified",
+      "event": "UNBLOCKED",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "DROP_WRITTEN",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "VERIFIED_DONE",
+      "outcome": "denied"
+    },
+    {
+      "from": "blocked",
+      "event": "BLOCKED",
+      "outcome": "noop"
+    },
+    {
+      "from": "blocked",
+      "event": "UNBLOCKED",
+      "outcome": "transition",
+      "to": "open",
+      "guard": "wasDependencyBlock",
+      "capture": {
+        "block_reason": null
+      }
+    }
+  ],
+  "guards": {
+    "fromDispatcher": "actor is the dispatcher (handoff receiver)",
+    "blockReasonValid": "actor is the dispatcher and payload.block_reason is one of dependency | verdict | retries-exhausted | defective",
+    "wasDependencyBlock": "actor is the dispatcher and the captured block_reason is dependency"
+  }
+}

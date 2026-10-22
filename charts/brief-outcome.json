@@ -51,7 +51,7 @@
       "event": "VERIFIED_DONE",
       "outcome": "transition",
       "to": "done-verified",
-      "guard": "fromDispatcher"
+      "guard": "dispatcherWithPass"
     },
     {
       "from": "dropped-unverified",
@@ -116,6 +116,7 @@
   ],
   "guards": {
     "fromDispatcher": "actor is the dispatcher (handoff receiver)",
+    "dispatcherWithPass": "actor is the dispatcher and payload.done_test_result is PASS",
     "blockReasonValid": "actor is the dispatcher and payload.block_reason is one of dependency | verdict | retries-exhausted | defective",
     "wasDependencyBlock": "actor is the dispatcher and the captured block_reason is dependency"
   }

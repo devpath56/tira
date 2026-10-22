@@ -101,7 +101,7 @@ test("a brief end to end: dispatch → claimable (H1), claim, drop → evidence 
   const log = await t.log();
   const id = (type: string) => log.find((e) => e.type === type)?.eventId;
   const corr = (type: string) => log.find((e) => e.type === type)?.metadata;
-  assert.deepEqual(corr("brief.claimable"), { actor: "dispatcher", correlationId: id("brief.dispatched"), causationId: id("brief.dispatched"), era: 2 }); // decided under today's rules era
+  assert.deepEqual(corr("brief.claimable"), { actor: "dispatcher", correlationId: id("brief.dispatched"), causationId: id("brief.dispatched"), era: 3 }); // decided under today's rules era
   assert.equal(corr("brief.evidence")?.correlationId, id("drop.filed"));
   assert.equal(corr("brief.drop-written")?.correlationId, id("drop.filed"));
   assert.equal(corr("brief.verified-done")?.correlationId, id("drop.verified"));
@@ -905,23 +905,44 @@ test("claimable-birth-order: every work queue is in birth order, never name orde
   assert.equal(r.trees[S]?.node?.cursor, "node:zeta_kid");
 });
 
-test("verify-vocabulary-pass: exactly the word PASS verifies a drop, read in one place: every near-miss is refused, whatever its casing, padding, lookalike or type", async () => {
+test("verify-vocabulary-pass: exactly the word PASS verifies a drop or a brief, read in one place: every near-miss is refused, whatever its casing, padding, lookalike or type", async () => {
   // structure: the word is written once in src, and a verdict is read only through verifies
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /["'`]PASS["'`]/), ["src/tables/factory.ts"]);
   assert.equal(src.get("src/tables/factory.ts")?.match(/["'`]PASS["'`]/g)?.length, 1);
   assert.deepEqual(filesMatching(src, /done_test_result\s*[!=]==?|done_test_result\)?\.(?:trim|to\w*Case|normalize)/), []);
+  // ... and every move into a verified state reads it: the drop's VERIFIED, and since rules era 3
+  // the brief's VERIFIED_DONE (before, the dispatcher's word was enough)
+  const r = defaultRegistry();
+  const moves = r.types().flatMap((def) => Object.values(def.regions).flatMap((table) =>
+    table.pairs.filter((p) => p.outcome === "transition" && /(^|-)verified$/.test(p.to ?? "")).map((p) => `${table.id}: ${p.from}+${p.event} ${p.guard}`)));
+  assert.deepEqual(moves, ["brief-outcome: dropped-unverified+VERIFIED_DONE dispatcherWithPass", "drop: filed+VERIFIED orchestratorVerifiesPass"]);
+  for (const g of ["dispatcherWithPass", "orchestratorVerifiesPass"]) assert.match(String(r.guards[g]), /verifies\(payload\.done_test_result\)/, g);
   const nearMisses: unknown[] = [
     "pass", "Pass", "pASS", " PASS", "PASS ", "PASS\n", "\tPASS", "​PASS", "PASS​",
     "ＰＡＳＳ", "PАSS", "PASSED", "PAS", "P A S S", "", null, true, 1, ["PASS"], { result: "PASS" },
   ];
   for (const v of nearMisses) assert.equal(verifies(v), false, JSON.stringify(v));
   assert.equal(verifies(PASS), true);
-  // the write path: each near-miss is refused, and so is no verdict at all; then PASS verifies
+  // the write path: each near-miss is refused, and so is no verdict at all, on the drop and on
+  // its brief (the dispatcher's own VERIFIED_DONE); then PASS verifies the drop, and H3 the brief
   const t = setup();
   await t.claimed("b", "s1");
   await t.make(dropRef("b"), "s1");
-  for (const v of nearMisses) assert.match(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: v })), /^rejected:/, JSON.stringify(v));
+  const done = async (payload: Record<string, unknown>) => {
+    const w = await t.d.writePath.submitAsDispatcher({ stream: S, kind: "event", entity: brief("b"), event: "VERIFIED_DONE", payload });
+    return w.status === "rejected" ? `rejected:${w.code}` : w.status;
+  };
+  for (const v of nearMisses) {
+    assert.match(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: v })), /^rejected:/, JSON.stringify(v));
+    assert.equal(await done({ done_test_result: v }), "rejected:guard-failed", JSON.stringify(v));
+  }
   assert.match(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator")), /^rejected:/, "no verdict");
-  assert.equal(st(await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: "PASS" })), "appended");
+  assert.equal(await done({}), "rejected:guard-failed", "no verdict");
+  assert.equal((await t.at(brief("b")))?.regions.outcome, "dropped-unverified");
+  const v = await t.ev(dropRef("b"), "VERIFIED", "orchestrator", { done_test_result: "PASS" });
+  assert.equal(st(v), "appended");
+  assert.deepEqual(rules(v), ["H3 brief.verified-done"]);
+  assert.equal((await t.at(brief("b")))?.regions.outcome, "done-verified");
+  await clean(t);
 });

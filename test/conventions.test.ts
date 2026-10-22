@@ -24,7 +24,9 @@ const withHome = (records: object[]) => {
 };
 const seeded = () => readFileSync(HOME, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
 const compiledRow = () => seeded().find((r) => r.state === "compiled") as Record<string, unknown>;
-const blindRow = () => seeded().find((r) => r.state === "blind-listed") as Record<string, unknown>;
+// The home has no blind-listed record left (2026-10-21), so the checker's blind-listed rules are
+// tested on a compiled record turned back into one.
+const blindRow = (): Record<string, unknown> => ({ ...compiledRow(), state: "blind-listed", assertion: null, compiled_at: null });
 
 test("the seeded home passes the checker and prints its standing count", () => {
   const r = check();
@@ -32,7 +34,8 @@ test("the seeded home passes the checker and prints its standing count", () => {
   const rows = seeded();
   const n = (s: string) => rows.filter((x) => x.state === s).length;
   assert.equal(r.out.trim(), `PASS: compiled ${n("compiled")} / blind-listed ${n("blind-listed")} / struck ${n("struck")}`);
-  assert.ok(n("compiled") > 0 && n("blind-listed") > 0, "the seed holds both resting states");
+  assert.ok(n("compiled") > 0, "the seed holds compiled conventions");
+  assert.equal(withHome([blindRow()]).code, 0, "a blind-listed record rests too");
 });
 
 test("a record resting at stated is refused", () => {
