@@ -96,7 +96,7 @@ export function askAdmin(a: Access): string {
   return who ? `Ask the admin, ${who}, to add your GitHub account.` : "Ask this tira's admin to add your GitHub account.";
 }
 const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
-const EMAIL = /^[^\s@<>"']{1,64}@[^\s@<>"']+\.[^\s@<>"']{2,}$/;
+const EMAIL = /^[^\s@<>"']{1,64}@(?:[^\s@<>"'.]+\.)+[^\s@<>"'.]{2,}$/; // dot-free parts: linear, nothing to backtrack over
 const NAME = /^[^\u0000-\u001f\u007f<>]{1,60}$/;
 
 // where a form may send its person back to (never an address it names itself)

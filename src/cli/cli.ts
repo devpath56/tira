@@ -32,6 +32,13 @@ import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from ".
 import { join } from "node:path";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
 
+// s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
+const trimEnd = (s: string, ch: string): string => {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === ch) end--;
+  return s.slice(0, end);
+};
+
 export interface Io {
   out(line: string): void;
   err(line: string): void;
@@ -318,7 +325,8 @@ async function ideas(store: ClosableStore, registry: Registry, stream: string, v
 async function link(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
   const actor = values.actor ?? io.env.TIRA_ACTOR;
   if (actor === undefined) throw new UsageError("tira link needs --actor NAME (or TIRA_ACTOR): who is linking it");
-  const given = { repo: values.repo?.trim(), jira_site: values["jira-site"]?.trim().replace(/\/+$/, ""), jira_project: values.jira?.trim() };
+  const siteFlag = values["jira-site"]?.trim();
+  const given = { repo: values.repo?.trim(), jira_site: siteFlag === undefined ? undefined : trimEnd(siteFlag, "/"), jira_project: values.jira?.trim() };
   if (Object.values(given).every((v) => v === undefined)) throw new UsageError("usage: tira link [--repo OWNER/NAME] [--jira-site https://YOUR-SITE.atlassian.net] [--jira KEY] (an empty value clears it)");
   // an empty value clears that link; anything else must be well-formed
   if (given.repo && !REPO.test(given.repo)) throw new UsageError(`--repo is a GitHub repo as owner/name, got "${given.repo}"`);
@@ -343,7 +351,8 @@ const linkWords = (l: Record<string, unknown>) =>
 
 // The Jira login: asked for here, checked against the site, kept outside the log.
 async function connectJira(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
-  const site = (values.site ?? workspaceOf(fold(await store.readStream(stream), registry), stream)?.jira_site)?.replace(/\/+$/, "");
+  const siteGiven = (values.site ?? workspaceOf(fold(await store.readStream(stream), registry), stream)?.jira_site);
+  const site = siteGiven === undefined ? undefined : trimEnd(siteGiven, "/");
   if (site === undefined) throw new UsageError("which Jira site? link it first (tira link --jira-site …) or pass --site https://YOUR-SITE.atlassian.net");
   if (!JIRA_SITE.test(site)) throw new UsageError(`--site is the site's https address, got "${site}"`);
   const email = values.email?.trim();

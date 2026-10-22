@@ -6,6 +6,13 @@ import { compareCodeUnits } from "./view.ts";
 import { JIRA_ISSUE, JIRA_KEY, PR, WORKSPACE, type Category } from "../tables/links.ts";
 import type { Pull } from "../sync/github.ts";
 
+// s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
+const trimEnd = (s: string, ch: string): string => {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === ch) end--;
+  return s.slice(0, end);
+};
+
 export interface WorkspaceLink { version: number; repo?: string; jira_site?: string; jira_project?: string; by?: string; title?: string; deleted?: true }
 
 // The workspace's current link: its latest version's links; its name (title) and whether it was
@@ -66,7 +73,7 @@ export function tasksNamed(p: Pull, tasks: ReadonlySet<string>, byKey: ReadonlyM
   const text = [p.title, p.body, ...p.commits].join("\n");
   const found = new Set<string>();
   for (const m of text.matchAll(/\btira:\s*([A-Za-z0-9][\w.-]*)/gi)) {
-    const id = (m[1] ?? "").replace(/[.]+$/, "");
+    const id = trimEnd(m[1] ?? "", ".");
     if (tasks.has(id)) found.add(id);
   }
   for (const seg of p.branch.split("/")) if (tasks.has(seg)) found.add(seg);

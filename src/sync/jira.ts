@@ -6,6 +6,13 @@
 // Errors name the call and Jira's answer, never the login.
 import type { Category } from "../tables/links.ts";
 
+// s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
+const trimEnd = (s: string, ch: string): string => {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === ch) end--;
+  return s.slice(0, end);
+};
+
 export interface JiraIssue {
   key: string;
   summary: string;
@@ -52,7 +59,7 @@ export class JiraRest implements JiraClient {
   private readonly fetchFn: Fetch;
 
   constructor(base: string, auth: () => Promise<string>, fetchFn: Fetch = fetch as unknown as Fetch) {
-    this.base = base.replace(/\/+$/, "");
+    this.base = trimEnd(base, "/");
     this.auth = auth;
     this.fetchFn = fetchFn;
   }
