@@ -97,6 +97,12 @@ const postgres: Backend = {
 for (const b of [sqlite, postgres]) {
   const it = (name: string, body: () => Promise<void>) => test(`${b.name}: ${name}`, { skip: b.skip }, body);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms * b.slow));
+  // wait for live delivery to get somewhere: a fixed wait for it fails under load (a busy machine
+  // can take 100ms+ for a few polls). Gives up after `ms`; the asserts that follow say what's missing.
+  const until = async (done: () => boolean, ms = 2000) => {
+    const deadline = Date.now() + ms * b.slow;
+    while (!done() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 2));
+  };
   // a kit for one test, cleaned up whatever the test does
   const using = async (opts: Parameters<Backend["open"]>[0], body: (k: Kit) => Promise<void>) => {
     const k = await b.open(opts);
@@ -213,6 +219,7 @@ for (const b of [sqlite, postgres]) {
     const subA = await s.subscribe("a", (e) => seenA.push(e));
     assert.deepEqual(seenAll.map((e) => e.type), ["a1", "b1"]); // catch-up is synchronous with subscribe
     await s.append("a", [ev("a2")]);
+    await until(() => seenAll.length >= 3 && seenA.length >= 2);
     await wait(30);
     subAll.close();
     subA.close();
@@ -246,6 +253,7 @@ for (const b of [sqlite, postgres]) {
       },
       { onError: (err) => errors.push(err) },
     );
+    await until(() => seen.length >= 2 && errors.length >= 1);
     await wait(30);
     sub.close();
     assert.deepEqual(seen, [1, 2]); // 2 was redelivered, not lost
@@ -270,7 +278,8 @@ for (const b of [sqlite, postgres]) {
         },
         { onError: (_err, info) => infos.push(info) },
       );
-      await wait(60);
+      await until(() => seen.length >= 3 && infos.length >= 2);
+      await wait(60); // more polls: nothing is delivered or reported again
       sub.close();
     } finally {
       process.off("unhandledRejection", onUnhandled);
@@ -288,6 +297,7 @@ for (const b of [sqlite, postgres]) {
     try {
       const sub = await s.subscribe(ALL, () => {}, { onError: (err) => errors.push(err) });
       await s.close();
+      await until(() => errors.length > 0);
       await wait(30);
       sub.close();
     } finally {
