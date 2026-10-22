@@ -1,0 +1,26 @@
+{
+  "id": "jira-issue",
+  "initial": "linked",
+  "states": [
+    "linked"
+  ],
+  "events": [
+    "PUSHED"
+  ],
+  "pairs": [
+    {
+      "from": "linked",
+      "event": "PUSHED",
+      "outcome": "noop",
+      "guard": "fromSyncWithCategory",
+      "capture": {
+        "category": "payload.category",
+        "status": "payload.status",
+        "tira": "payload.tira"
+      }
+    }
+  ],
+  "guards": {
+    "fromSyncWithCategory": "written by the sync, with the Jira status category it last saw or set (new, indeterminate or done) and, if given, the one its task was in then"
+  }
+}

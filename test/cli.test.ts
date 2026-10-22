@@ -1,5 +1,6 @@
 // tira CLI: commands, exit codes, payload parsing, persistence across runs, and one
 // end-to-end spawn of the real entry script.
+import "./hermetic.ts";
 import { freshPgDb, needsPg, sqliteFile } from "./test-stores.ts";
 import { openStore, type ClosableStore } from "../src/store/open.ts";
 import { WritePath } from "../src/write/write-path.ts";
@@ -489,7 +490,7 @@ test("divergence wiring: the CLI report and the rendered page agree on the B3 pa
   }
 });
 
-test("divergence wiring: tira serve recomputes the section on every page load, UNEVALUABLE without a factory file (on Postgres, as it runs live)", { skip: needsPg }, async () => {
+test("divergence wiring: tira serve recomputes the section on every page load, and leaves it out without a factory file (on Postgres, as it runs live)", { skip: needsPg }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tira-serve-wired-"));
   const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
   const db = freshPgDb();
@@ -525,10 +526,10 @@ test("divergence wiring: tira serve recomputes the section on every page load, U
     }));
     assert.equal(panelCounts(firstLoad).counts.OK, 1);
     assert.deepEqual(reload.counts, B3_COUNTS);
-    const none = panelCounts(await serveOnce([]));
-    assert.equal(none.state, "unevaluable");
-    assert.match(none.sec, /no factory file/);
-    assert.doesNotMatch(none.sec, /data-count=/);
+    // no factory file: a workspace that isn't the factory's has nothing to compare, so no section
+    const none = await serveOnce([]);
+    assert.match(none, /<main/);
+    assert.equal(panelCounts(none).sec, "");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -564,6 +565,36 @@ test("divergence wiring: no page reads a stored report — a poisoned run log ch
       `const RUN_LOG = fileURLToPath(new URL("../../docs/divergence-run-log.jsonl", import.meta.url));`,
       "appendFileSync(io.env.TIRA_DIVERGENCE_LOG ?? RUN_LOG, `${JSON.stringify(row)}\\n`);",
     ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tira serve keeps its page token in the private store: a page opened before a restart still works after it (on Postgres, as it runs live)", { skip: needsPg }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-serve-token-"));
+  const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+  const env = { ...process.env, TIRA_DATABASE_URL: freshPgDb(), TIRA_HOME: join(dir, "home"), TIRA_FACTORY: "" };
+  spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "t", "create", "node", "a", "--actor", "isha"], { encoding: "utf8", env });
+  const tokenOnce = async () => {
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "t", "serve", "--actor", "isha", "--port", "0"], { env });
+    try {
+      const port = await new Promise<number>((resolve, reject) => {
+        let buf = "";
+        child.stdout.on("data", (d: Buffer) => { buf += d.toString(); const m = buf.match(/127\.0\.0\.1:(\d+)/); if (m) resolve(Number(m[1])); });
+        child.once("exit", (c) => reject(new Error(`serve exited ${c} before listening`)));
+      });
+      const page = await (await fetch(`http://127.0.0.1:${port}/confirm?type=node&id=a&event=START`)).text();
+      return /name="token" value="([0-9a-f]+)"/.exec(page)?.[1];
+    } finally {
+      const exited = new Promise((r) => child.once("exit", r));
+      child.kill("SIGTERM");
+      await exited;
+    }
+  };
+  try {
+    const first = await tokenOnce();
+    assert.match(first ?? "", /^[0-9a-f]{48}$/);
+    assert.equal(await tokenOnce(), first);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

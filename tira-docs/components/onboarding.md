@@ -4,15 +4,15 @@
 
 **What / why.** Exposition one time and on demand, never on the worksurface (no pop-up). Under
 `tira serve` the guide opens by itself on the first visit (once per browser); after that, and
-always on the rendered page, a quiet "How to read this page" link next to the hash chip opens
-it as a dialog over the page, and the chip opens it too.
+always on the rendered page, **Help** (a ? at the foot of the sidebar, titled "How to read this
+page") opens it as a dialog over the page, and the fingerprint chip in the History dialog opens it too.
 
-**How to read it.** Three short paragraphs: the board (Kanban and Graph), "by tira", and the hash.
+**How to read it.** Three short paragraphs: the board (Kanban and Graph), "by tira", and the fingerprint.
 
 ## Devtool hook
 
 - `[data-guide]` on the guide, with id `#guide`.
-- `.how` on the link that opens it.
+- `.help` on the link that opens it: Help (a ?) at the foot of the sidebar.
 
 Assertion: exactly three paragraphs, on the board, by tira and the hash.
 

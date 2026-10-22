@@ -6,11 +6,11 @@
 fires by surprise, and every one has two views side by side (stacked on a phone):
 
 1. **tira recommends** (read-only): the work in a nutshell, only what you need to know to
-   decide. Every sentence comes from the log or the rules, nothing is guessed:
-   - **Decision**: the task, where it sits, why and since when it is blocked, its subtasks, its proof, the move, and what tira will close first.
+   decide, in that order. Every sentence comes from the log or the rules, nothing is guessed:
+   - **Decision**, first and larger: the task, where it sits, why and since when it is blocked, its subtasks, its proof, the move, and what tira will close first.
+   - tira's check right under it, and **what to do** when it would refuse.
    - **Recommendation**: from the facts, e.g. "api is done now, so the wait looks over", "next in order is fetch_metrics", "it's the last open subtask of improve_visual", or "Don't run it: tira will refuse".
-   - **Tradeoffs**, **Best practice**, **Kind** (routine, needs proof, needs a reason, final, an undo, a change of scope; refused) and the rule it must pass.
-   - tira's check, and **what to do** when it would refuse.
+   - Folded under **Why**: **Tradeoffs**, **Best practice**, **Kind** (routine, needs proof, needs a reason, final, an undo, a change of scope; refused) and the rule it must pass.
 2. **Your action — edit before sending**: the action as a tira command, filled in. It is
    complete when nothing is needed ("tira send node colors UNBLOCK"); empty quotes mark a
    value to fill in (`evidenceRef=""`, `reason=""`, a subtask's name). Any command can take
@@ -62,7 +62,7 @@ the reasons are listed as text).
 ## Devtool hook
 
 - `[data-packet]` on the packet (in the dialog and on the page), with `[data-ok]` true or false.
-- `[data-brief]` on the left view (tira recommends); `[data-you]` on the form; `[data-command]` on the command.
+- `[data-brief]` on the left view (tira recommends), `[data-nutshell]` on its Decision and `[data-why]` on the folded rest; `[data-you]` on the form; `[data-command]` on the command.
 - `.confirm-dialog` on the live page's dialog; `[data-close-confirm]` on its way out.
 - `[data-hint]` on what to do, when tira would refuse; `[data-error]` on why nothing was written; `[data-fills]` on the chips.
 - `[data-blocked-by]` on a block's "Blocked by" field (the task's id).

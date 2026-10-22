@@ -53,6 +53,7 @@ test("the factory tables load, validate (captures included) and register with 0 
   const r = defaultRegistry();
   assert.deepEqual(r.types().map((x) => `${x.type}:${Object.keys(x.regions).join("+")}`), [
     "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "refusal:lifecycle", "override:lifecycle", "drop:lifecycle", "label:lifecycle",
+    "workspace:lifecycle", "jira-issue:lifecycle", "pr:lifecycle", // workspace links (links.ts)
   ]);
   assert.equal(r.creationName("brief", 1), "CREATED");
   assert.equal(r.creationName("brief", 2), "REVISED");
@@ -446,7 +447,8 @@ test("D2 page: a factory stream opens on Lanes — one lane per region, captured
   assert.match(html, /<b>2<\/b> handoffs<\/li><li title="handoffs still waiting"><b>1<\/b> waiting<\/li>/);
   // a tree stream still opens on the tree, with an empty Lanes view
   const tree = renderHtml(fold([], t.registry), "tasktree-x", "h", []);
-  assert.match(tree, /id="v-log" checked/); // nothing at all: activity
+  assert.match(tree, /id="v-board" checked/); // nothing at all: the (empty) board, its History a click away
+  assert.match(tree, /<a class="history-btn" href="#history" data-open-log>/);
 });
 
 // ---------- found by the adversarial review ----------

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 471 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 665 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -127,6 +127,9 @@ node scripts/tira.ts serve --actor isha                               # the page
 node scripts/tira.ts idea "pagination would be good in table" --why "long tables scroll forever" --actor claude
                                                                       # an agent pushes an idea: tira drafts its file, says where it goes
 node scripts/tira.ts ideas                                            # the stream's ideas: stage, parent, summary
+node scripts/tira.ts link --repo acme/app --jira-site https://acme.atlassian.net --jira DOG --actor isha
+node scripts/tira.ts connect-jira --email you@example.com            # asks for the API token, keeps it privately
+node scripts/tira.ts sync                                             # PRs in, Jira issues out, people's Jira moves back
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
@@ -153,19 +156,29 @@ it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgre
   machine needs TLS: `sslmode=verify-full` (or at least `require`). tira never prints it.
 - **`$TIRA_SCHEMA`** (or `?schema=NAME` on the string) picks a schema in that database, default
   `tira`: a demo or a trial gets its own, and they never touch each other.
+- **People's accounts** live there too, beside the log (Isha, 2026-10-22): who may sign in,
+  each person's GitHub and Jira links, sessions (as hashes), display names and tira's app keys,
+  shared by everyone who runs `tira serve` on that database. Every token and secret is sealed
+  (AES-256-GCM) with **`$TIRA_SECRET_KEY`**, which is never stored there: the database alone signs
+  no one in. Set it to a long random string, the **same on every computer** (keep it with the
+  connection string); without it `tira serve` won't start on Postgres. A computer's old
+  `credentials.json` is brought over by its first `tira serve` (what the database lacks; nothing it
+  holds changes). Jira API-token logins (`tira connect-jira`) and the page token stay on each
+  computer.
 - **Old SQLite logs** come over once: `tira import <file.db>` copies every event as it was (id,
   seq, stream, data, metadata, record time) into an empty schema, checks each stream's
   fingerprint before and after, and adds nothing when run again.
 
 ```
 export TIRA_DATABASE_URL='postgresql://…?sslmode=verify-full'    # your hosted database (docs/hosted-postgres.md)
+export TIRA_SECRET_KEY='<a long random string, the same for everyone>'   # seals people's tokens
 node scripts/tira.ts create node dashboard --actor isha       # first use makes the tables and triggers, in schema "tira"
 TIRA_SCHEMA=demo node scripts/tira.ts import ~/old/live.db    # once: an old log into its own schema, fingerprints checked
 ```
 
 Tests need no network: they use SQLite in memory (or a throwaway file they open themselves). The
-Postgres store's contract tests, the scenario suite on Postgres, the import, and the tests that
-run tira as its own process need a database: `TIRA_PG_URL=<a local or CI database> npm test`.
+Postgres store's contract tests, the scenario suite and the ideas tests on Postgres, the import,
+and the tests that run tira as its own process need a database: `TIRA_PG_URL=<a local or CI database> npm test`.
 Without it they're skipped, and `npm run mutants` lists the Postgres planted bugs as not run;
 CI runs everything against a throwaway Postgres service container (no secret involved). The
 tests work in their own schemas and drop them after. A local Docker Postgres for that:
@@ -173,7 +186,13 @@ tests work in their own schemas and drop them after. A local Docker Postgres for
 
 In production the schema is made once by its owner; tira then connects as a login that owns
 nothing and may only insert into and read the events table (and update its counter): the
-triggers refuse edits, deletes and truncates, and not owning the table refuses a drop.
+triggers refuse edits, deletes and truncates, and not owning the table refuses a drop. The
+accounts tables (`account_apps`, `account_access`, `account_github`, `account_atlassian`,
+`account_names`, `account_sessions`) are the one place that login also updates and deletes:
+the owner makes them once (the first `tira serve` with the owner's string does it; later runs
+create nothing), then grants that login SELECT, INSERT, UPDATE and DELETE on those six, and
+nothing more. Other systems sharing the database (the factory's own schema and roles) get no
+rights on schema `tira`.
 
 ### Demo D0 script (manual test M0)
 
@@ -230,8 +249,10 @@ took no clicks beyond moving on to `table`.
 Above the views, **Needs attention** lists what is blocked, grouped by the reason it was
 blocked with, and what is being worked on, each one click from its dialog. Blocking a task
 needs a reason with text, like re-opening one (2026-10-20). A finished active parent isn't
-counted: there is nothing to decide, and tira closes it when work moves on. A quiet "How to read this page" link (and
-the hash chip, now labelled "fingerprint") opens a three-paragraph guide inline.
+counted: there is nothing to decide, and tira closes it when work moves on. A "?" in the top
+bar (and the hash chip, labelled "fingerprint", at the foot of the page) opens a three-paragraph
+guide inline. The header is the workspace's name and one line of counts ("3/5 done · 2 left");
+a count that is zero stays out (Apple's guidelines: only what's needed at a glance).
 
 The page has three views:
 
@@ -507,8 +528,8 @@ The watchdog (the divergence report) is the next step, not this one.
 
 ## The page, live: `tira serve` (the D1 UI brief, 2026-10-19)
 
-`tira serve --actor NAME [--port N]` serves the page on **127.0.0.1 only** (default port
-4747). Every request folds the log, as `tira render` does, and adds what only a live page can
+`tira serve [--actor NAME] [--port N]` serves the page on **127.0.0.1 only** (default port
+4747). Without `--actor`, people sign in with GitHub first ([the way in](#workspaces-linked-to-git-and-jira)). Every request folds the log, as `tira render` does, and adds what only a live page can
 have:
 
 | Piece | What it does |
@@ -523,15 +544,16 @@ have:
 
 Safety:
 - Any `Host` other than 127.0.0.1 or localhost is refused (DNS rebinding).
-- A write needs this process's random token, and refuses a foreign or `null` `Origin` (cross-site forms).
-- The actor is fixed at start, and `tira` or `dispatcher` (any spelling) is refused at start.
+- A write needs this tira's random token (made once and kept in the private store, so a page opened before a restart still works), and refuses a foreign or `null` `Origin` (cross-site forms).
+- The actor is the person signed in with GitHub. Started with `--actor NAME`, it is NAME until GitHub sign-in is set up; `tira`, `dispatcher` or `sync` (any spelling) is refused at start. No one who can act: every page leads to the sign-in page, and a write is refused.
+- Sign-in: the session cookie is HttpOnly and SameSite=Lax; a Jira sign-in must come back to the person who started it, within ten minutes; a form can send you back only to tira's own steps.
 - Only the page's verbs (start, unblock, complete, block, cancel, reopen, add subtask) on tree tasks, and an idea's approvals (approve or reject the file, approve or reject the placement) on ideas, are accepted, as fields or as a command in the CLI's syntax with only the keys the verb uses (plus `note`); a subtask name is trimmed, 1–80 characters, no control characters.
-- A strict Content-Security-Policy allows only the server's own scripts (app.mjs and the modules it loads: rank, theme, graph, layout).
+- A strict Content-Security-Policy allows only the server's own scripts (app.mjs and the modules it loads: rank, theme, graph, layout; signin.mjs on the sign-in page).
 
 The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
 
 Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
-board, ideas, task dialog, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+board, ideas, workspace bar, the way in, Integrations page, task dialog, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
 name exists in the build.
 
 Calls made here, for the PM:
@@ -621,6 +643,104 @@ Calls made here, for the PM:
   column. Aging and the overdue-idea alarm wait for the approval deadline to be ruled.
 - **A task born from an idea shows as hollow in the sweep** (no `definition` or
   `done_criteria`): the idea's file is a summary and a why, not those two fields.
+
+## Workspaces linked to git and Jira
+
+A workspace is one project: one task tree (a stream), linked to one GitHub repo and one Jira
+project. tira leads and Jira mirrors; GitHub and Jira changes come in when someone syncs.
+
+**On the page: the way in.** Start `tira serve` without `--actor` and open
+`http://localhost:4747`. No commands to type:
+
+1. **Landing.** What tira does, and **Continue with GitHub** (the look of debugAssist's sign-in
+   page, in tira's colours). The first time on a machine it asks for tira's GitHub app first: a
+   GitHub OAuth app (Enable Device Flow ticked; no secret needed), whose Client ID you paste in.
+2. **Sign in with GitHub.** tira shows a short code (with Copy and Open GitHub); approve it on
+   github.com and the page goes on by itself. From then on your changes are recorded as your
+   GitHub login.
+3. **Connect your project.** Pick the repo from your GitHub repos (needed). Jira is optional:
+   **Connect Jira** (Atlassian's sign-in, at `localhost`; the first time, paste tira's Atlassian
+   app's Client ID and Secret: an OAuth 2.0 app with callback
+   `http://localhost:4747/integrations/jira/callback` and Jira scopes
+   `read:jira-work write:jira-work read:jira-user`), then pick the project, or "No Jira project".
+4. **Open the board**: Kanban, with Sync in the workspace bar.
+
+**Who gets in.** The first person to sign in becomes this tira's admin. After that only the
+admin and the people they add (by GitHub username, under People on Integrations) can sign in.
+Anyone else is told who to ask: the admin's name and email, which the admin types in there
+(kept in the private store, not in the code). Removing someone signs them out at once; their
+GitHub and Jira links stay until they unlink them themselves (Profile settings).
+
+Until someone signs in, every page leads to the landing and nothing can be changed. Later
+changes (another repo, Jira, Sync) are in **Project settings** in the sidebar (your accounts and
+who gets in, in **Profile settings**), where each choice
+shows its `tira link` command under **Show the command**. `tira serve --actor NAME` still runs
+without sign-in, as NAME, until GitHub sign-in is set up.
+
+Tokens, app keys and the secret live in the private store, never in the history or on a page:
+on Postgres, the accounts tables, each token sealed with `$TIRA_SECRET_KEY` ("Running on
+Postgres"); with no database, a private file on this machine (`$TIRA_HOME/credentials.json`,
+default `~/.config/tira`, readable only by its owner). Sessions are kept as hashes, so neither can
+sign anyone in, and last 30 days.
+
+**In a terminal** (and for agents), the same links without a browser:
+
+```
+tira link --repo OWNER/NAME --jira-site https://YOUR-SITE.atlassian.net --jira KEY --actor NAME
+tira connect-jira --email YOU          # asks for a Jira API token without showing it, checks it, keeps it privately
+tira sync [--json]                     # pull requests through the GitHub CLI (gh auth login)
+```
+
+- **Linking**: each change is a new version of the workspace's link, in the history, by the
+  person who made it; an empty value clears that link.
+- **A sync** (`src/sync/sync.ts`):
+  1. links each recently updated pull request that names a task ("tira: <task>" in its title,
+     body or a commit; a branch segment equal to the task's id; or the task's Jira key), and
+     follows it to merged or closed; a merged one is offered as the proof when the task is
+     completed;
+  2. brings in the issues people made in Jira itself: each becomes a task, keeping Jira's
+     structure (an epic above its issues, an issue above its subtasks), written as the person
+     who made it in Jira, linked to its issue (now labelled "tira"), and brought to where it is
+     in Jira: in progress started; done completed, with the issue's own link as its proof.
+     Where tira can't follow (it keeps one task in progress at a time; a parent whose issues are
+     all done is closed when work moves on), the report says so and Jira is left as it is;
+  3. makes a Jira issue (labelled "tira") for every task that has none;
+  4. brings back each move a person made in Jira as a command on the task, written as
+     "jira:<their name>": In Progress starts, unblocks or re-opens it; Done completes it, with
+     the merged pull request as its proof if there is one. tira's rules may refuse it (Done
+     with no proof is refused): the refusal is in the history and in the report;
+  5. moves an issue when its task moved in tira since the last sync, or when tira refused a
+     person's move on it (to do: To Do; in progress or blocked: In Progress; done or
+     cancelled: Done; "blocked" and "cancelled" as labels). Both sides are recorded (where the
+     issue is in Jira, where its task is in tira), so neither is moved until one of them
+     changes.
+- **The board**: a workspace bar under the header (the links; live, Sync and Integrations),
+  each task's Jira key on its card, and its Jira issue and pull requests in its dialog
+  (`tira-docs/components/workspace-bar.md`, `tira-docs/components/integrations-page.md`).
+
+Three record types hold it, beside the tasks (`src/tables/links.ts`, `charts/workspace.json`,
+`charts/jira-issue.json`, `charts/pr.json`): the workspace's link, each task's Jira issue (with
+the status category tira last set, so the next sync can tell a person's move from its own), and
+each pull request linked to a task. Only the sync writes the last two, under its reserved name
+`sync`.
+
+Calls made here, for the PM:
+
+- **The task table is untouched**; the three new tables need Devansh's sign-off.
+- **A person's move is told from tira's own by the status category tira last set**, not by
+  who made it: a Jira token acts as its owner, so tira's moves and the owner's look alike.
+- **Ideas aren't mirrored** until they become tasks.
+- **Jira's own issues come in** (Isha's call, 2026-10-22): keeping Jira's structure, done ones
+  with their Jira link as proof. tira's one-task-in-progress rule still holds: on a board with
+  several issues In Progress, the first comes in started and the rest as To Do, with Jira left
+  as it is (the report says which).
+- **Statuses are matched by category** (To Do, In Progress, Done), so any Jira workflow works;
+  a workflow with no transition to the category needed is reported, not forced.
+- **GitHub sign-in names people on the page only.** The CLI's `--actor` and the reserved
+  `sync` stay names, not signed identities.
+- **Jira sign-in needs `localhost`**, not 127.0.0.1: Atlassian sends people back to the one
+  address its app names. The page at 127.0.0.1 says so.
+- **Not yet**: webhooks (changes arrive on Sync), and switching workspaces on the page.
 
 ## Divergence watchdog (B3, PR-A): the factory's file state against tira's log
 

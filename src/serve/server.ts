@@ -10,7 +10,8 @@
 //
 // Safety: bound to 127.0.0.1; any other Host is refused (DNS rebinding); a write needs
 // this process's random token and, when the browser sends one, a same-origin Origin
-// (cross-site forms); the actor is fixed when the server starts; only the tree verbs
+// (cross-site forms); the actor is the person signed in with GitHub, or a name fixed when the
+// server starts (then no one needs to sign in); only the tree verbs
 // below, and an idea's approvals, are accepted; a strict Content-Security-Policy allows only
 // this server's scripts.
 //
@@ -21,11 +22,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
-import { attentionSince, BRAND, CSS, proofsOf, renderHtml, THEME_RADIOS, THEME_SWITCH, type DivergencePanel } from "../render/html.ts";
+import { attentionSince, brand, CSS, proofsOf, renderHtml, THEME_RADIOS, type DivergencePanel } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
 import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
@@ -33,7 +35,13 @@ import { WritePath, isReservedActor, type Command, type Preview, type WriteResul
 import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, verbFits, withDefaults, type PageAction } from "./command.ts";
 import { briefFor, ideaBriefFor, ideaRefusal, type Brief, type BriefFacts } from "./brief.ts";
 import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
-import { makeView } from "../fold/view.ts";
+import { compareCodeUnits, makeView } from "../fold/view.ts";
+import { linksOf, workspaceOf } from "../fold/workspace.ts";
+import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
+import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
+import { newProjectPage, type NewProject } from "./new-project.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 
@@ -51,24 +59,35 @@ const ASSETS: Record<string, string> = {
   "/theme.mjs": readFileSync(new URL("./theme.mjs", import.meta.url), "utf8"),
   "/graph.mjs": readFileSync(new URL("./graph.mjs", import.meta.url), "utf8"),
   "/layout.mjs": readFileSync(new URL("./layout.mjs", import.meta.url), "utf8"),
+  "/signin.mjs": readFileSync(new URL("./signin.mjs", import.meta.url), "utf8"),
+  "/tabs.mjs": readFileSync(new URL("./tabs.mjs", import.meta.url), "utf8"),
+  "/new-project.mjs": readFileSync(new URL("./new-project.mjs", import.meta.url), "utf8"),
+  "/help.mjs": readFileSync(new URL("./help.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
   store: EventStore;
   registry: Registry;
   stream: string;
-  actor: string; // who the page acts as, fixed for the server's life
+  // who the page acts as, fixed for the server's life, until GitHub sign-in is set up; without it,
+  // everyone signs in (the page starts at /welcome)
+  actor?: string;
   token?: string; // tests may pin it; otherwise random per process
   // The page's divergence section, computed per page load from the events that load renders
   // (the CLI passes tira divergence's own differ); never a stored report.
   divergence?: (events: StoredEvent[]) => DivergencePanel;
+  // GitHub and Jira (the Integrations page, src/serve/integrations.ts); tests pass stand-ins.
+  // Absent: the real GitHub and Atlassian, and the private store under $TIRA_HOME.
+  links?: Outside;
 }
 
-export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string }
+export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string; next: boolean }
 
-// The palette's index: every tree task, in the page's drawer order (#t<i>).
+// The palette's index: every tree task, in the page's drawer order (#t<i>); `next` marks the
+// task tira says comes next, which the palette offers first.
 export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
-  const roots = streamView(r, stream).roots;
+  const view = streamView(r, stream);
+  const roots = view.roots;
   const rows = flatten(roots);
   const parentOf = new Map<string, string>();
   const walk = (row: (typeof rows)[number]) => row.children.forEach((c) => { parentOf.set(c.key, row.key); walk(c); });
@@ -77,13 +96,46 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
   return rows.map((row, i) => {
     const up: string[] = [];
     for (let p = parentOf.get(row.key); p !== undefined; p = parentOf.get(p)) up.unshift(idOf.get(p) ?? p);
-    return { key: row.key, type: row.type, id: row.id, state: row.state, path: up.join(" › "), drawer: `t${i}` };
+    return { key: row.key, type: row.type, id: row.id, state: row.state, path: up.join(" › "), drawer: `t${i}`, next: row.key === view.cursor };
+  });
+}
+
+// Workspaces: one task tree each, a stream in the store. The server starts on one (--stream) and
+// serves any other the store holds at ?w=<name>; every link and form it makes carries that on,
+// so a page, its decisions and their writes stay in the workspace they were opened in.
+export interface Workspace { stream: string; q: string } // q: "w=…", or "" for the one it started on
+export const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
+const MAX_NAME = 200;
+// a new project's name: the same rule the New project page's field shows
+const NEW_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+// the workspace a request names, or undefined when the name can't be one
+export function workspaceIn(url: URL, home: string): Workspace | undefined {
+  const w = url.searchParams.get("w");
+  if (w === null || w === "" || w === home) return { stream: home, q: "" };
+  if (w.length > MAX_NAME || [...w].some((c) => (c.codePointAt(0) ?? 0) < 32 || c === "\u007f")) return undefined;
+  return { stream: w, q: `w=${encodeURIComponent(w)}` };
+}
+
+export interface WorkspaceEntry { stream: string; title?: string; href: string; current: boolean; tasks: number; open: number; attention: number }
+
+// The switcher's list: every stream with something in it (but deleted projects), by name as people see it, each with where it opens,
+// its tasks (the leaves, as the page counts them), those still open, and how many need you
+// (blocked, or being worked on: the page's Needs attention count).
+export function workspaceList(r: FoldResult, streams: readonly string[], home: string, current: string): WorkspaceEntry[] {
+  const live = [...new Set(streams)].map((stream) => ({ stream, link: workspaceOf(r, stream) })).filter((x) => !x.link?.deleted);
+  const named = (x: { stream: string; link?: { title?: string } | undefined }) => x.link?.title ?? x.stream; // as people see it
+  return live.sort((a, b) => compareCodeUnits(named(a), named(b))).map(({ stream, link }) => {
+    const rows = flatten(streamView(r, stream).roots);
+    const leaves = rows.filter((x) => x.children.length === 0);
+    const attention = rows.filter((x) => x.state === "blocked" || (x.active && !x.awaitingClose)).length;
+    return { stream, ...(link?.title ? { title: link.title } : {}), href: withQ("/", stream === home ? "" : `w=${encodeURIComponent(stream)}`), current: stream === current, tasks: leaves.length, open: leaves.filter((x) => !CLOSED.has(x.state)).length, attention };
   });
 }
 
 // waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
 // idea, the tasks tira found for it
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[] }
+// proofs: to complete, the merged pull requests linked to the task (src/tables/links.ts)
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; proofs?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -181,6 +233,7 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   return {
     ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
+    ...(event === "COMPLETE" ? { proofs: (linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === "merged").map((p) => p.url) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
   };
@@ -260,19 +313,24 @@ export function waitable(r: FoldResult, stream: string, id: string): string[] {
   return rows.filter((x) => x.id !== id && !above.has(x.id) && !CLOSED.has(x.state)).map((x) => x.id);
 }
 
-interface ConfirmOpts { type: string; id: string; event: string; token: string; moved?: boolean; command?: string; error?: string; notice?: string }
+interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string }
 
 // The decision: tira recommends (read-only) beside your action (the command, editable), then
 // the button. The same body serves the confirm page and, under `tira serve`, the dialog the
 // live page opens over itself (?fragment=1): there the way out closes the dialog, and the
 // suggested reasons and tasks are buttons that fill the command in.
+// The nutshell first: what the move is and tira's verdict on it (with what to do instead), then
+// the recommendation; the tradeoffs, best practice and kind wait under "Why".
 function briefHtml(p: Packet): string {
   const b = p.brief;
-  const lines: [string, string][] = b ? [["Decision", b.decision], ["Recommendation", b.recommendation], ["Tradeoffs", b.tradeoffs], ["Best practice", b.practice], ["Kind", b.kind]] : [];
+  const para = ([k, t]: [string, string]) => `<p><b>${k}:</b> ${esc(t)}</p>`;
+  const why: [string, string][] = b ? ([["Tradeoffs", b.tradeoffs], ["Best practice", b.practice], ["Kind", b.kind]] as [string, string][]).filter(([, t]) => t !== "") : [];
+  const nutshell = b && b.decision !== "" ? `<p class="nutshell" data-nutshell><b>Decision:</b> ${esc(b.decision)}</p>` : "";
   const hint = p.hint ? `<p class="hint" data-hint><b>What to do:</b> ${esc(p.hint)}</p>` : "";
+  const rec = b && b.recommendation !== "" ? para(["Recommendation", b.recommendation]) : "";
+  const more = why.length === 0 ? "" : `<details class="why" data-why><summary>Why: tradeoffs, best practice, kind</summary>${why.map(para).join("")}</details>`;
   return `<section class="brief" aria-label="tira recommends (read-only)" data-brief><h2>tira recommends</h2>`
-    + lines.filter(([, t]) => t !== "").map(([k, t]) => `<p><b>${k}:</b> ${esc(t)}</p>`).join("")
-    + `<p class="verdict ${p.ok ? "ok" : "no"}">${esc(p.verdict)}</p>${hint}</section>`;
+    + `${nutshell}<p class="verdict ${p.ok ? "ok" : "no"}">${esc(p.verdict)}</p>${hint}${rec}${more}</section>`;
 }
 
 // why nothing was written, or what changed since it opened
@@ -312,7 +370,8 @@ function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string 
 function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "";
   const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`)
-    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`);
+    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`)
+    + choicesHtml(p.proofs ?? [], fragment, "Proof from GitHub:", "Merged pull requests", (v) => `data-fill="evidenceRef" data-value="${esc(v)}"`);
   const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
     ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
     : "";
@@ -321,7 +380,7 @@ function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
 
 function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const verb = PAGE_VERBS[opts.event];
-  const leave = (label: string) => (fragment ? `<button class="how" type="button" data-close-confirm>${label}</button>` : `<a class="how" href="/">${label}</a>`);
+  const leave = (label: string) => (fragment ? `<button class="how" type="button" data-close-confirm>${label}</button>` : `<a class="how" href="${esc(withQ("/", opts.q ?? ""))}">${label}</a>`);
   const close = leave(fragment ? "Close" : "Back to the page");
   const head = `<div class="packet" data-packet data-ok="${p.ok && verb !== undefined}"><h1>${esc(p.title)}</h1>${noticesHtml(opts)}`;
   // no such verb or task: nothing to edit from
@@ -333,14 +392,46 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
     + blockedByHtml(p, opts, fragment) + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
     + `<p class="cmd-help">${esc(helpText(p, opts, fragment))}</p>${fillsHtml(p, opts, fragment)}</section>`;
   const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)} — run it</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
-  return `${head}<form method="post" action="/act" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${briefHtml(p)}${right}</div>`
+  return `${head}<form method="post" action="${esc(withQ("/act", opts.q ?? ""))}" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${briefHtml(p)}${right}</div>`
     + `<div class="run">${button}</div></form></div>`;
 }
 
-function confirmPage(p: Packet, opts: ConfirmOpts): string {
+// A decision as a page of its own (the confirm page, and Connect Jira), for a browser without the dialog.
+function standalone(title: string, body: string, q = ""): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(p.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${BRAND}${THEME_SWITCH}</nav><a class="how" href="/">← the page</a>`
-    + packetBody(p, opts, false) + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand(withQ("/", q))}</nav><a class="how" href="${esc(withQ("/", q))}">← the page</a>`
+    + body + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+}
+
+const confirmPage = (p: Packet, opts: ConfirmOpts): string => standalone(p.title, packetBody(p, opts, false), opts.q ?? "");
+
+// a project the store doesn't hold yet: say so, how to start it (connect its repo, which needs
+// GitHub sign-in: Project settings), and the way home
+function noWorkspace(stream: string): string {
+  const q = `w=${encodeURIComponent(stream)}`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · no project</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand("/")}</nav>`
+    + `<div class="packet" data-no-workspace><h1>No project named ${esc(stream)} yet</h1>`
+    + `<p class="hint">A project starts when it's connected to its GitHub repo (and, if you use one, its Jira board), which needs GitHub sign-in. <a class="how" href="${esc(withQ("/integrations", q))}" data-start-project>Project settings for ${esc(stream)}</a></p>`
+    + `<p class="hint"><a class="how" href="/">Back to your board</a></p></div></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+}
+
+// a project someone deleted: its board is closed (its history stays in the log), and the way home
+function deletedProject(stream: string, by: string | undefined): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · deleted project</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand("/")}</nav>`
+    + `<div class="packet" data-deleted-project><h1>${esc(stream)} was deleted</h1>`
+    + `<p class="hint">${by ? `${esc(by)} deleted it. ` : ""}Its board is closed; its history stays in tira's log.</p>`
+    + `<p class="hint"><a class="how" href="/">Back to your board</a></p></div></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+}
+
+// The Integrations pages (integrations.ts, welcome.ts) were written for one project per server:
+// their links, forms and redirects name a path alone. Served for another project, each same-site
+// path they send gets the project's query too, so a connect, a link or a sync stays in it.
+export function carryQ(html: string, q: string): string {
+  if (q === "") return html;
+  return html.replace(/\b(href|action|data-go)="(\/(?!\/)[^"#]*)"/g, (m, attr: string, path: string) =>
+    /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(path.includes("?") ? "&" : "?")}${esc(q)}"`);
 }
 
 const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
@@ -402,8 +493,13 @@ export async function inOrder(steps: (() => Promise<{ ok: boolean; text: string 
   return { ok: true, text: said.join(" ") };
 }
 
+// What a written action changed, so the page can make it glow once: the task it moved (or the
+// subtask it added), and a block's new ticket.
+export const changedBy = (a: PageAction, ticket?: PageAction): string[] =>
+  [a, ...(ticket === undefined ? [] : [ticket])].map((x) => entityKey({ type: x.type, id: x.child ?? x.id }));
+
 const commandOf = (a: PageAction, stream: string, actor: string): Command => {
-  // the actor is the server's, fixed at start: a posted "actor" field is ignored
+  // the actor is who's signed in (or the server's, without sign-in): a posted "actor" field is ignored
   const base = { stream, actor, payload: a.payload };
   return a.child === undefined
     ? { ...base, kind: "event", entity: { type: a.type, id: a.id }, event: a.event }
@@ -433,14 +529,36 @@ function actionFrom(form: URLSearchParams, registry: Registry): PageAction | und
 }
 
 export function tiraServer(opts: ServeOptions): Server & { token: string } {
-  if (isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's and the dispatcher's own writes: serve as a person`);
+  if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's, the dispatcher's and the sync's own writes: serve as a person`);
   const token = opts.token ?? randomBytes(24).toString("hex");
   const dispatcher = new Dispatcher(opts.store, opts.registry);
+  // Who this request acts as: the GitHub login signed in, once GitHub sign-in is set up (no one,
+  // until they sign in); else the name tira serve was started with.
+  const linkEnv = opts.links?.env ?? process.env;
+  // People's accounts: in Postgres when tira's data is (credentials.ts), so with no $TIRA_SECRET_KEY
+  // to seal them tira serve doesn't start. Each request reads them again first, so one person's
+  // change shows on everyone's next page; this computer's old file is brought over once.
+  postgresAccounts(linkEnv);
+  let brought: Promise<void> | undefined;
+  const accountsNow = async () => {
+    brought ??= importAccountsFile(linkEnv).then((added) => {
+      const said = added && [added.apps ? "tira's apps" : "", added.access ? "who may sign in" : "", added.github ? `${added.github} GitHub link(s)` : "", added.atlassian ? `${added.atlassian} Jira link(s)` : "", added.names ? `${added.names} display name(s)` : "", added.sessions ? `${added.sessions} session(s)` : ""].filter(Boolean);
+      if (said && said.length > 0) process.stderr.write(`tira: brought this computer's accounts into Postgres: ${said.join(", ")}. The old file keeps a copy; tira reads only Postgres now.\n`);
+    }).catch((err: unknown) => {
+      brought = undefined; // try again on the next request
+      throw err;
+    });
+    await brought;
+    await refreshAccounts(linkEnv);
+  };
+  const who = (req: IncomingMessage) => whoIs(req, opts.actor, linkEnv, (id) => sessionLogin(id, linkEnv));
+  const current = new AsyncLocalStorage<ReturnType<typeof who> & { ws?: Workspace }>();
+  const actorNow = () => current.getStore()?.actor;
   const previews = new WritePath(opts.store, opts.registry);
-  const flashes = new Map<string, { ok: boolean; text: string }>();
+  const flashes = new Map<string, { ok: boolean; text: string; changed?: string[] }>();
   let flashSeq = 0;
-  const now = async () => {
-    const events = await opts.store.readStream(opts.stream);
+  const now = async (stream: string) => {
+    const events = await opts.store.readStream(stream);
     const r = fold(events, opts.registry);
     return { events, r, hash: fingerprint(r) };
   };
@@ -451,43 +569,69 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const text = "text/plain; charset=utf-8";
   const html = "text/html; charset=utf-8";
 
-  // GET /: the page, live, with the last action's result once
-  const page = async (_req: IncomingMessage, res: ServerResponse, url: URL) => {
-    const { events, r, hash } = await now();
+  // GET /: the page, live, with the last action's result once. No one who can act yet: the
+  // landing (sign in). Signed in with GitHub, but the project has no repo: connect one first. A
+  // project the store doesn't hold (and no one to connect it): a 404; one someone deleted: closed.
+  const page = async (req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
+    const { events, r, hash } = await now(ws.stream);
+    const me = who(req);
+    if (!me.actor) return send(res, 303, text, "", { Location: `/welcome${url.search}` }); // a result goes along
+    const link = workspaceOf(r, ws.stream);
+    if (link?.deleted) return send(res, 410, html, deletedProject(link.title ?? ws.stream, link.by));
+    if (me.login && !link?.repo) return send(res, 303, text, "", { Location: `/connect${url.search}` });
+    if (events.length === 0 && ws.q !== "") return send(res, 404, html, noWorkspace(ws.stream));
     const rk = url.searchParams.get("r") ?? "";
     const flash = flashes.get(rk);
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
-    send(res, 200, html, renderHtml(r, opts.stream, hash, events, { live: flash ? { flash } : {}, ...(divergence !== undefined ? { divergence } : {}) }));
+    const name = me.actor ? displayName(me.actor, linkEnv) : undefined; // as they chose to be shown
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token };
+    send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
+  };
+
+  // GET /api/live: where the project's log is now (its last seq), asked every few seconds by the
+  // page so it follows the log by itself (app.mjs). The one event at the end only: cheap to ask.
+  const liveSeq = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    const [last] = await opts.store.readStream(ws.stream, { direction: "backwards", limit: 1 });
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify({ seq: last?.seq ?? 0 }));
   };
 
   // GET /api/tasks: the palette's index
-  const tasks = async (_req: IncomingMessage, res: ServerResponse) => {
-    const { r } = await now();
-    send(res, 200, "application/json; charset=utf-8", JSON.stringify(taskIndex(r, opts.stream)));
+  const tasks = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    const { r } = await now(ws.stream);
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify(taskIndex(r, ws.stream)));
+  };
+
+  // GET /api/workspaces: the switcher's list, read when it opens (every stream, folded once)
+  const workspaces = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    const all = await opts.store.readAll();
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify(workspaceList(fold(all, opts.registry), all.map((e) => e.stream), opts.stream, ws.stream)));
   };
 
   // A decision, shown (or shown again: a value missing, a different action, the log moved).
   // Nothing is written on the way.
-  const decide = async (res: ServerResponse, at: { type: string; id: string; event: string }, o: Partial<ConfirmOpts>, fragment: boolean, status?: number) => {
-    const { events, r } = await now();
-    const p = await packetFor({ wp: previews, r, events, registry: opts.registry, stream: opts.stream, actor: opts.actor, ...at });
-    const co: ConfirmOpts = { ...at, token, ...o };
+  const decide = async (res: ServerResponse, ws: Workspace, at: { type: string; id: string; event: string }, o: Partial<ConfirmOpts>, fragment: boolean, status?: number) => {
+    const { events, r } = await now(ws.stream);
+    const actor = actorNow();
+    const p = actor === undefined
+      ? { ok: false, title: `${PAGE_VERBS[at.event]?.label ?? at.event} ${at.id}?`, verdict: "Sign in with GitHub first (Integrations), so tira knows who makes this change.", seen: r.lastSeq, suggestions: [] }
+      : await packetFor({ wp: previews, r, events, registry: opts.registry, stream: ws.stream, actor, ...at });
+    const co: ConfirmOpts = { ...at, token, q: ws.q, ...o };
     send(res, status ?? (p.ok ? 200 : 409), html, fragment ? packetBody(p, co, true) : confirmPage(p, co));
   };
 
   // GET /confirm: the decision; ?fragment=1 is just the packet, for the dialog the live page
   // opens over itself
-  const confirm = async (_req: IncomingMessage, res: ServerResponse, url: URL) => {
+  const confirm = async (_req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
     const at = { type: url.searchParams.get("type") ?? "node", id: url.searchParams.get("id") ?? "", event: url.searchParams.get("event") ?? "" };
-    await decide(res, at, { moved: url.searchParams.get("moved") === "1" }, url.searchParams.get("fragment") === "1");
+    await decide(res, ws, at, { moved: url.searchParams.get("moved") === "1" }, url.searchParams.get("fragment") === "1");
   };
 
   // POST /act, in stages: the form (from this page only), what it asks for, what stops it
   // before anything is written, then the write and back to the page with its result. The
   // dialog's own posts (fragment=1) get the decision back to show in place, or where to go next.
   interface Target { type: string; id: string; event: string }
-  interface Asked { fragment: boolean; typed: string | null; seen: string | null; ask: PageAction; ticket: PageAction | undefined; target: Target }
+  interface Asked { ws: Workspace; fragment: boolean; typed: string | null; seen: string | null; ask: PageAction; ticket: PageAction | undefined; target: Target }
   const targetOf = (a: PageAction): Target => ({ type: a.type, id: a.id, event: a.event });
 
   // the same origin, within the size cap, with this process's token
@@ -501,36 +645,36 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       send(res, 413, text, "too large\n");
       return undefined;
     }
-    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "missing or wrong token\n"); return undefined; }
+    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "This page is out of date, or isn't tira's own: nothing was saved. Go back, reload the page, and try again.\n"); return undefined; }
     return form;
   };
 
   // what it asks for: the command as you left it, read strictly; without one, the posted fields
-  const askedOf = async (res: ServerResponse, form: URLSearchParams): Promise<Asked | undefined> => {
+  const askedOf = async (res: ServerResponse, form: URLSearchParams, ws: Workspace): Promise<Asked | undefined> => {
     const fragment = form.get("fragment") === "1";
     const seen = form.get("seen");
     const typed = form.get("command");
     if (typed === null) {
       const ask = actionFrom(form, opts.registry);
       if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
-      return { fragment, typed, seen, ask, ticket: undefined, target: targetOf(ask) };
+      return { ws, fragment, typed, seen, ask, ticket: undefined, target: targetOf(ask) };
     }
     const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
     const parsed = parseCommand(typed, (t) => opts.registry.get(t)?.tree !== undefined);
-    if (!parsed.ok) { await decide(res, opened, { command: typed, error: `tira can't run that: ${parsed.why}.` }, fragment, 422); return undefined; }
+    if (!parsed.ok) { await decide(res, ws, opened, { command: typed, error: `tira can't run that: ${parsed.why}.` }, fragment, 422); return undefined; }
     const target = targetOf(parsed.action);
     // edited into another action (another task or verb): what tira says about that one first
     if (target.type !== opened.type || target.id !== opened.id || target.event !== opened.event) {
-      await decide(res, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment);
+      await decide(res, ws, target, { command: typed, notice: "That's a different action from the one you opened, so here is what tira says about it first. Nothing was written." }, fragment);
       return undefined;
     }
-    return { fragment, typed, seen, ask: withDefaults(parsed.action), ticket: parsed.ticket, target };
+    return { ws, fragment, typed, seen, ask: withDefaults(parsed.action), ticket: parsed.ticket, target };
   };
 
   // what stops it before anything is written (true: it answered): a value missing, a blocker
   // that can't be, a moved log, or, for a typed command, tira's refusal of the ticket or the move
   const heldBack = async (res: ServerResponse, a: Asked, cmd: Command, first: Command | undefined): Promise<boolean> => {
-    const back = async (o: Partial<ConfirmOpts>, status?: number) => { await decide(res, a.target, { command: a.typed ?? "", ...o }, a.fragment, status); return true; };
+    const back = async (o: Partial<ConfirmOpts>, status?: number) => { await decide(res, a.ws, a.target, { command: a.typed ?? "", ...o }, a.fragment, status); return true; };
     const lacking = missing(a.ask);
     if (lacking !== undefined && a.typed === null) { send(res, 400, text, `${lacking}\n`); return true; }
     if (lacking !== undefined) return back({ error: lacking }, 422);
@@ -541,9 +685,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (misplaced) return back({ error: `tira can't run that: ${misplaced}.` }, 422);
     // decided on one log, written on another? show the decision again instead
     // (a post without `seen` didn't come from a decision: it gets one first)
-    if (a.seen !== String((await now()).r.lastSeq)) {
+    if (a.seen !== String((await now(a.ws.stream)).r.lastSeq)) {
       if (a.typed !== null) return back({ moved: a.seen !== null }, 409);
-      const again = `/confirm?type=${encodeURIComponent(a.ask.type)}&id=${encodeURIComponent(a.ask.id)}&event=${encodeURIComponent(a.ask.event)}`;
+      const again = withQ(`/confirm?type=${encodeURIComponent(a.ask.type)}&id=${encodeURIComponent(a.ask.id)}&event=${encodeURIComponent(a.ask.event)}`, a.ws.q);
       send(res, 303, text, "", { Location: a.seen === null ? again : again + "&moved=1" });
       return true;
     }
@@ -557,7 +701,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const waitProblem = async (a: Asked): Promise<string | undefined> => {
     const blocker = blockerOf(a.ask);
     if (a.typed === null || blocker === undefined || a.ticket !== undefined) return undefined;
-    return blockerProblem((await now()).r, opts.stream, a.ask, blocker);
+    return blockerProblem((await now(a.ws.stream)).r, a.ws.stream, a.ask, blocker);
   };
 
   // approving an idea's placement: the task it becomes must fit under the parent named (the idea's
@@ -565,7 +709,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const placeCheck = async (a: Asked): Promise<string | undefined> => {
     const parent = a.ask.payload.parent_id;
     if (a.ask.type !== IDEA || a.ask.event !== "APPROVE_NODE" || typeof parent !== "string" || parent.trim() === "") return undefined;
-    return placeProblem(viewOf((await now()).r, opts.stream), opts.registry, a.ask.id, parent.trim());
+    return placeProblem(viewOf((await now(a.ws.stream)).r, a.ws.stream), opts.registry, a.ask.id, parent.trim());
   };
 
   // a typed command tira would refuse goes back into the dialog, not into the log; a new
@@ -576,26 +720,26 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       const pv = await previews.preview(c);
       const what = c === first ? "the new ticket " + (a.ticket?.child ?? "") : "this";
       if (pv.ok) continue;
-      const idea = a.ask.type === IDEA ? await ideaNow(a.ask.id) : undefined;
+      const idea = a.ask.type === IDEA ? await ideaNow(a.ws.stream, a.ask.id) : undefined;
       if (idea) return `tira would still refuse ${what}: ${ideaRefusal(idea.stage, a.ask.event, idea.id, idea.summary !== undefined).why} (${pv.code}: ${pv.detail}).`;
       return `tira would still refuse ${what}: ${pv.code}: ${pv.detail}.`;
     }
     return undefined;
   };
-  const ideaNow = async (id: string): Promise<IdeaRow | undefined> => {
-    const { events, r } = await now();
-    return ideaRows(r, events, opts.stream).find((i) => i.id === id);
+  const ideaNow = async (stream: string, id: string): Promise<IdeaRow | undefined> => {
+    const { events, r } = await now(stream);
+    return ideaRows(r, events, stream).find((i) => i.id === id);
   };
 
   // after an idea's approval: what tira did next, in a sentence
-  const ideaAfter = async (id: string): Promise<string> => {
-    const i = await ideaNow(id);
+  const ideaAfter = async (stream: string, id: string): Promise<string> => {
+    const i = await ideaNow(stream, id);
     const p = i?.proposal;
     if (i?.stage === "node_pending" && p?.parent !== undefined) return `tira proposes it under ${p.parent} (${p.basis}): approve the placement next.`;
     if (i?.stage === "node_pending") return `tira couldn't settle where it goes (${p?.basis.replace(/^needs you: /, "") ?? "no proposal"}): pick its parent when you approve the placement.`;
     if (i?.stage === "materialized") {
-      const { r } = await now();
-      const born = viewOf(r, opts.stream).get({ type: "node", id });
+      const { r } = await now(stream);
+      const born = viewOf(r, stream).get({ type: "node", id });
       return born ? `It's a task now: ${id}, under ${i.placedUnder ?? "its parent"}.` : "The task isn't born yet: see the handoffs waiting in Lanes.";
     }
     if (i?.stage === "dropped") return "It's dropped; your reason stays in its history.";
@@ -606,35 +750,162 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const write = async (a: PageAction, c: Command) => {
     try {
       const flash = flashFor(a.event, label(a), (await dispatcher.submit(c)).result);
-      return a.type === IDEA && flash.ok ? { ok: true, text: `${flash.text} ${await ideaAfter(a.id)}`.trim() } : flash;
+      return a.type === IDEA && flash.ok ? { ok: true, text: `${flash.text} ${await ideaAfter(c.stream, a.id)}`.trim() } : flash;
     } catch (err) {
       return { ok: false, text: `${PAGE_VERBS[a.event]?.label ?? a.event} ${label(a)}: not sent (${(err as Error).message}).` };
     }
   };
 
-  const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+  const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
-    const a = await askedOf(res, form);
+    const a = await askedOf(res, form, ws);
     if (a === undefined) return;
     const ask = a.ask;
     const ticket = a.ticket;
-    const cmd = commandOf(ask, opts.stream, opts.actor);
-    const first = ticket === undefined ? undefined : commandOf(ticket, opts.stream, opts.actor);
+    const actor = actorNow();
+    if (actor === undefined) { send(res, 401, text, "sign in with GitHub first (Integrations)\n"); return; }
+    const cmd = commandOf(ask, ws.stream, actor);
+    const first = ticket === undefined ? undefined : commandOf(ticket, ws.stream, actor);
     if (await heldBack(res, a, cmd, first)) return;
     const flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
       () => write(ask, cmd),
     ]);
     const key = String(++flashSeq);
-    flashes.set(key, flash);
+    flashes.set(key, flash.ok ? { ...flash, changed: changedBy(ask, ticket) } : flash);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
-    if (a.fragment) return send(res, 200, html, `<div data-go="/?r=${key}"></div>`);
-    send(res, 303, text, "", { Location: `/?r=${key}` });
+    const back = withQ(`/?r=${key}`, ws.q); // the result, in the workspace it was written to
+    if (a.fragment) return send(res, 200, html, `<div data-go="${esc(back)}"></div>`);
+    send(res, 303, text, "", { Location: back });
   };
 
-  type Route = (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => Promise<void>;
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /confirm": confirm, "POST /act": act };
+  // GET /projects/new: + New project's page (new-project.ts), opened from the board you're on, which
+  // Cancel and the tira mark go back to. It offers what your accounts hold: your GitHub repos, and
+  // your Jira's projects (or a way to connect it). No one who can act yet: the landing first.
+  const acc = accounts(opts.links);
+  const projectForm = async (login: string | undefined, host: string, ws: Workspace, f: Partial<NewProject> = {}): Promise<NewProject> => {
+    const got = await acc.repos(login);
+    const jira: NewProject["jira"] = login ? await acc.jira(login, host, withQ("/projects/new", ws.q)) : appKeys(acc.env).atlassian ? { state: "signin" } : { state: "unset" };
+    return { token, back: withQ("/", ws.q), action: withQ("/projects", ws.q), repos: got.repos, jira, ...f };
+  };
+  const newProjectGet = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string, ws: Workspace) => {
+    const me = who(req);
+    if (!me.actor) return send(res, 303, text, "", { Location: `/welcome${url.search}` });
+    send(res, 200, html, newProjectPage(await projectForm(me.login, host, ws)));
+  };
+
+  // POST /projects: the New project page's form. A project is born with its link (tira's rules want
+  // a repo or a Jira project on it): its name, its GitHub repo and, if picked, its Jira project from
+  // your connected site, written as the person acting; then its board. One that can't be made comes
+  // back to the page, with what was typed and why.
+  const newProject = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const me = who(req);
+    const actor = actorNow();
+    const name = (form.get("name") ?? "").trim();
+    const repo = (form.get("repo") ?? "").trim();
+    const key = (form.get("jira_project") ?? "").trim();
+    const again = async (status: number, field: "name" | "repo" | "jira" | "who", why: string) => send(res, status, html, newProjectPage(await projectForm(me.login, host, ws, { name, repo, jiraProject: key, problem: { field, text: why } })));
+    if (actor === undefined) return again(401, "who", "Sign in with GitHub first (Settings), so tira knows who makes the project.");
+    const at = NEW_NAME.test(name) ? workspaceIn(new URL(`http://h/?w=${encodeURIComponent(name)}`), opts.stream) : undefined;
+    if (!at) return again(400, "name", "A project's name is letters, digits, dots, dashes or underscores, starting with a letter or digit.");
+    if (!REPO.test(repo)) return again(400, "repo", `${repo || "That"} isn't a GitHub repo as owner/name.`);
+    const site = key !== "" && me.login ? atlassianAuth(me.login, acc.env)?.site : undefined;
+    if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return again(400, "jira", "Pick a Jira project from your connected site, or none for now.");
+    const before = await opts.store.readStream(at.stream);
+    if (before.length > 0) return again(409, "name", workspaceOf(fold(before, opts.registry), at.stream)?.deleted
+      ? `${name} was a project here, since deleted: pick another name.`
+      : `There is a project named ${name} already: pick it in Projects, or name this one differently.`);
+    const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor, payload: { repo, ...(site ? { jira_site: site, jira_project: key } : {}) } })).result;
+    if (w.status !== "appended") return again(400, "name", `${name} wasn't created (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
+    const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
+    const k = String(++flashSeq);
+    flashes.set(k, { ok: true, text: made });
+    if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+    send(res, 303, text, "", { Location: withQ(`/?r=${k}`, at.q) });
+  };
+
+  // POST /projects/delete: Project settings' Delete, with the project's name typed to be sure; never
+  // the project tira serve was started with. A new version of its link, marked deleted: it leaves
+  // the project list and its board closes, for everyone; its history stays in the log.
+  const deleteProject = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const go = (f: { ok: boolean; text: string }, to: (key: string) => string) => {
+      const k = String(++flashSeq);
+      flashes.set(k, f);
+      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+      send(res, 303, text, "", { Location: to(k) });
+    };
+    const stay = (why: string) => go({ ok: false, text: why }, (k) => withQ(`/integrations?r=${k}`, ws.q));
+    const actor = actorNow();
+    if (actor === undefined) return stay("Sign in with GitHub first, so tira knows who deletes it. Nothing was deleted.");
+    if (ws.stream === opts.stream) return stay("This is the project tira serve was started with: it can't be deleted here. Nothing was deleted.");
+    const { r } = await now(ws.stream);
+    const link = workspaceOf(r, ws.stream);
+    const shown = link?.title ?? ws.stream; // its name as people see it
+    if ((form.get("confirm") ?? "").trim() !== shown) return stay(`Type ${shown} exactly to delete it. Nothing was deleted.`);
+    const payload = { ...(link?.repo ? { repo: link.repo } : {}), ...(link?.jira_site ? { jira_site: link.jira_site } : {}), ...(link?.jira_project ? { jira_project: link.jira_project } : {}), deleted: true };
+    const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: (link?.version ?? 0) + 1 }, actor, payload })).result;
+    if (w.status !== "appended") return stay(`${ws.stream} wasn't deleted (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
+    go({ ok: true, text: `Deleted ${shown}: it's off the project list. Its history stays in tira's log.` }, (k) => `/?r=${k}`);
+  };
+
+  // POST /projects/rename: Project settings' General. A new version of the project's link, with its
+  // links as they are and the name people see (its stream, address and history keep the name it
+  // was made with). Two live projects can't share a name.
+  const renameProject = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const done = (f: { ok: boolean; text: string }) => {
+      const k = String(++flashSeq);
+      flashes.set(k, f);
+      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+      send(res, 303, text, "", { Location: withQ(`/integrations?r=${k}`, ws.q) });
+    };
+    const actor = actorNow();
+    if (actor === undefined) return done({ ok: false, text: "Sign in with GitHub first, so tira knows who renames it." });
+    const title = (form.get("title") ?? "").trim().replace(/\s+/g, " ");
+    if (!TITLE.test(title)) return done({ ok: false, text: "A project's name is 1 to 80 characters, with no control characters." });
+    const all = await opts.store.readAll();
+    const r = fold(all, opts.registry);
+    const link = workspaceOf(r, ws.stream);
+    if (title === (link?.title ?? ws.stream)) return done({ ok: true, text: `It's already called ${title}.` });
+    const others = [...new Set(all.map((e) => e.stream))].filter((s) => s !== ws.stream && !workspaceOf(r, s)?.deleted);
+    if (others.some((s) => (workspaceOf(r, s)?.title ?? s).toLowerCase() === title.toLowerCase())) return done({ ok: false, text: `Another project is already called ${title}: pick another name.` });
+    const payload = { ...(link?.repo ? { repo: link.repo } : {}), ...(link?.jira_site ? { jira_site: link.jira_site } : {}), ...(link?.jira_project ? { jira_project: link.jira_project } : {}), title };
+    const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: (link?.version ?? 0) + 1 }, actor, payload })).result;
+    if (w.status !== "appended") return done({ ok: false, text: `Not renamed (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
+    done({ ok: true, text: `Renamed to ${title}. Its address and history keep ${ws.stream}.` });
+  };
+
+  type Route = (req: IncomingMessage, res: ServerResponse, url: URL, host: string, ws: Workspace) => Promise<void>;
+  // the Integrations pages, in the project the request names (their stream and log are its; their
+  // redirects and links keep it: carryQ)
+  const wsNow = (): Workspace => current.getStore()?.ws ?? { stream: opts.stream, q: "" };
+  const integrations = integrationRoutes({
+    store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, home: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links,
+    now: async () => ({ r: (await now(wsNow().stream)).r }), formOf,
+    send: (res, status, type, body, extra = {}) => {
+      const q = wsNow().q;
+      const at = extra.Location;
+      send(res, status, type, type.startsWith("text/html") ? carryQ(body, q) : body, at?.startsWith("/") && !/[?&]w=/.test(at) ? { ...extra, Location: withQ(at, q) } : extra);
+    },
+    flash: (f) => {
+      const key = String(++flashSeq);
+      flashes.set(key, f);
+      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+      return key;
+    },
+    takeFlash: (key) => {
+      const f = flashes.get(key);
+      flashes.delete(key);
+      return f;
+    },
+  }, who);
+  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, ...integrations };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
@@ -643,7 +914,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) return send(res, 404, text, "not found\n");
-    return route(req, res, url, host);
+    if (route !== liveSeq) await accountsNow(); // the live check reads no one's account
+    const ws = workspaceIn(url, opts.stream);
+    if (!ws) return send(res, 400, text, "that can't be a project's name\n");
+    return current.run({ ...who(req), ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`));

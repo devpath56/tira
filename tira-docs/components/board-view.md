@@ -9,19 +9,21 @@ what a parent is waiting on) is visible too. Kanban by default; under `tira serv
 choice is remembered per browser, so it survives the reload after every action.
 
 **How to read it.** Kanban: columns To do, In progress, Blocked (only when something is),
-Done and Dropped; every ticket is a card, naming its parent, and ◆ marks the next task. A
-parent no one has acted on (to do, with subtasks: a grouping, like an epic) stays on the
-Graph; started, blocked or closed, it is a card too, with "1/3 subtasks" closed. So a task
-blocked on a new ticket keeps its card in Blocked, beside its ticket's. Graph:
-a parent sits above its children; each node is coloured by state, and a line turns green
-once that child is closed. A parent says "1/3 closed · 2 left". A dotted line joins a task
-to the one it was found while working on. A bolt means tira closed it; a dashed ring means
-tira closes it when you move on. A block on a ticket links the two: a red dashed line from the
-blocked task to its ticket (its own subtask; a blocker elsewhere is a red arc), green dashed
-once the ticket is done, and a "blocks colors" chip on the ticket's Kanban card. Click any card
-or node for its dialog. An idea not yet a task is dashed and tagged "idea": the Ideas column
-comes first in Kanban, and on the Graph it is a ghost card under the task tira proposed for it
-(`ideas.md`).
+Done and Dropped, always in one row (wider than the page, the row scrolls sideways; on a phone
+you swipe one column at a time); every ticket is a card, naming its parent, and ◆ marks the
+next task. A card's title wraps after an underscore, never inside a word. Done and Dropped only
+grow, so they show their newest 8 cards (the last to close first) and keep the rest behind
+"Show N more" (it opens with no script); opened, "Show fewer" sits after the older cards, at the
+foot of the column. To do, In progress and Blocked show every card. Each card shows who moved it
+last: a person's initial, or an agent's spark on a gradient (an AI coding agent, a factory
+session, tira itself, the sync: told by the names agents run under). A card in progress has a
+slowly turning edge: someone, often an agent, is on it now.
+
+**Live (tira serve).** The board follows the log by itself: every few seconds it asks where the
+log is, and when anyone, a person or an agent, wrote since, it reloads in place (where you were
+scrolled) and the cards that moved glow once. While you're typing or a dialog is open it waits,
+then shows them. The header's numbers count up once on a fresh load; with less motion asked for,
+none of this moves.
 
 **Big trees (100+ tasks).** The layout packs a short branch beside a deep one's lower rows.
 In a tree of more than 40 shown tasks, the lowest branches hang as indented columns under
@@ -38,6 +40,11 @@ down instead of across: 212 tasks fit in about 4,800 × 1,000 px instead of 20,0
 | Full screen | The corner button; Esc leaves (after closing any open dialog). The result of an action shows on the canvas |
 | Fold | The button under a parent hides its whole branch and shows "+N" (red when a blocked task is inside, ringed when the next one is); the parent stays where it was on screen |
 | Tidy up | Collapse done folds every finished branch (the outermost); Expand all opens everything; Found links hides the dotted lines |
+| Zoomed out | Below 50% each task becomes a tile in its state's colour (blocked red, in progress blue, done green, the next one ringed) and each branch gets a label at a readable size, shown only where it has room (from 22%, every level) |
+| Minimap | The whole tree in the corner, with the part on screen outlined; click or drag on it to move there |
+| Find | ⌘K, or "Show on graph" in a task's dialog: the folds above it open, the view glides to it, and it is ringed and focused |
+| Motion | Fit, Next, the zoom buttons and Find glide there (eased like GSAP's power3.out); folding or opening a branch moves the boxes to their new places. Reduced motion: no glides, no moving boxes |
+| After an action | The task it changed (and a block's new ticket) glows once on its card and its box; if it is out of sight or folded away, the view glides to it |
 
 Folds are remembered per browser and stream, the view and full screen per tab, so all of
 it survives the reload after every action. A rendered file has no script: the graph shows
@@ -50,6 +57,10 @@ every task and scrolls.
 - `[data-key]` on each task's graph node, exactly once, with `[data-state]`, `[data-cursor]`, `[data-active]` and `[data-drained]`.
 - `[data-from]` and `[data-to]` on each line (parent and child), `[data-found]` on each found-while line, `[data-blocks]` on each blocks arc and on a Kanban card's "blocks" chip; `[data-parent]` on each node with a parent.
 - `[data-graph]` on the box the live page turns into a canvas; `.canvas-tools` (`[data-canvas-tools]`) holds its tools; `.fold` with `[data-fold]` (the parent's key) under each parent; `.canvas-flash` repeats an action's result in full screen.
+- `.more` (`[data-more]`: how many it holds) on the older Done or Dropped cards; `.more-btn` on its Show more / Show fewer, after them.
+- `[data-card-key]` (the task's key) and `[data-state]` on each Kanban card, which the live page compares across a reload; `.mover` on the card's who-moved-it (`.mover.agent` for an agent).
+- `.minimap` (`[data-minimap]`) on the canvas's map; `.branch-label` on each branch's zoomed-out label (below 50% the canvas carries the class far).
+- `.changed` on the card and node (and the needs-attention row) the last action wrote to, live only.
 - `[data-node-count]` and `[data-fold-tree-count]` on the page: they must be equal.
 
 Assertion: every fold node appears once with the fold's flags (manual test M1); a parent

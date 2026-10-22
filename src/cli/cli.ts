@@ -24,12 +24,30 @@ import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } f
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
+import { JIRA_PROJECT, JIRA_SITE, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
+import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
+import { JiraCloud, type JiraClient } from "../sync/jira.ts";
+import { GhCli, type GitHubClient } from "../sync/github.ts";
+import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from "../sync/credentials.ts";
+import { join } from "node:path";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
+
+// s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
+const trimEnd = (s: string, ch: string): string => {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === ch) end--;
+  return s.slice(0, end);
+};
 
 export interface Io {
   out(line: string): void;
   err(line: string): void;
   env: Record<string, string | undefined>;
+  // asks for a secret without showing it as it's typed (a Jira API token); absent: no terminal
+  secret?(prompt: string): Promise<string>;
+  // stand-ins for tests; absent: the real Jira Cloud and the GitHub CLI
+  jira?(site: string, login: JiraLogin): JiraClient;
+  github?: GitHubClient;
   // tests only: their own throwaway store for a --db value (live, tira opens Postgres only)
   openStore?: (db: string) => ClosableStore;
 }
@@ -47,6 +65,17 @@ Usage:
                                                   name nothing, a person picks the parent. A person approves the
                                                   file, then the placement (tira serve), and the task is born
   tira ideas                                      the ideas in the stream: stage, file, proposed parent
+  tira link [--repo OWNER/NAME] [--jira-site URL] [--jira KEY]
+                                                  link this workspace (the stream: one project, one tree) to a
+                                                  GitHub repo and a Jira project; each change is a new version,
+                                                  and anything left out keeps its current value
+  tira connect-jira --email EMAIL [--site URL]    sign tira in to the workspace's Jira site: it asks for an API
+                                                  token without showing it, checks it, and keeps it in a private
+                                                  file ($TIRA_HOME, default ~/.config/tira), never in the log
+  tira sync [--json]                              sync with the linked repo and Jira project: pull requests that
+                                                  name a task are linked to it; every task gets a Jira issue
+                                                  whose status follows the task; a person's move in Jira comes
+                                                  back as a request from them, which tira's rules may refuse
   tira log                                        the raw event log, in seq order (rejections included)
   tira state [--at N] [--now ISO] [--vantage V]   derived state, plus rejections and anomalies
   tira replay <N>                                 state as of event N (same as: tira state --at N)
@@ -64,12 +93,14 @@ Usage:
                                                   depths, closed parents with open work; plus tasks with no
                                                   definition or done criteria, and finished branches that
                                                   grew new work. Exits 3 when something is broken
-  tira serve --actor NAME [--port N] [--factory FILE]
+  tira serve [--actor NAME] [--port N] [--factory FILE]
                                                   the page, live, on 127.0.0.1 only (default port 4747): needs
                                                   attention, ⌘K search, and start / unblock / complete / block /
                                                   cancel / reopen / add subtask, and an idea's approvals (file,
                                                   then placement), each through a decision dialog,
-                                                  written as NAME; the divergence section is recomputed on every
+                                                  written as NAME; without --actor, people sign in with GitHub
+                                                  first (a landing page, then connect a repo and, optionally,
+                                                  a Jira project); the divergence section is recomputed on every
                                                   page load. Ctrl-C stops it
   tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
                                                   event as it was, into an empty schema; a re-run adds nothing.
@@ -132,6 +163,11 @@ const OPTIONS = {
   why: { type: "string" },
   under: { type: "string" },
   id: { type: "string" },
+  repo: { type: "string" },
+  "jira-site": { type: "string" },
+  jira: { type: "string" },
+  site: { type: "string" },
+  email: { type: "string" },
   out: { type: "string" },
   port: { type: "string" },
   factory: { type: "string" },
@@ -282,6 +318,64 @@ async function ideas(store: ClosableStore, registry: Registry, stream: string, v
   const where = (i: IdeaRow) => i.placedUnder ?? i.proposal?.parent ?? (i.proposal ? `? (${i.proposal.candidates.join(", ") || "no candidates"})` : i.under ?? "");
   for (const l of table(rows.map((i) => ({ id: i.id, stage: stageWord(i), under: where(i), summary: i.summary ?? "", by: i.declaredBy ?? "" })), ["id", "stage", "under", "summary", "by"])) io.out(l);
   return 0;
+}
+
+// Workspace links (src/tables/links.ts): the stream is the workspace. A new link is a new
+// version of its record, keeping whatever isn't given.
+async function link(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const actor = values.actor ?? io.env.TIRA_ACTOR;
+  if (actor === undefined) throw new UsageError("tira link needs --actor NAME (or TIRA_ACTOR): who is linking it");
+  const siteFlag = values["jira-site"]?.trim();
+  const given = { repo: values.repo?.trim(), jira_site: siteFlag === undefined ? undefined : trimEnd(siteFlag, "/"), jira_project: values.jira?.trim() };
+  if (Object.values(given).every((v) => v === undefined)) throw new UsageError("usage: tira link [--repo OWNER/NAME] [--jira-site https://YOUR-SITE.atlassian.net] [--jira KEY] (an empty value clears it)");
+  // an empty value clears that link; anything else must be well-formed
+  if (given.repo && !REPO.test(given.repo)) throw new UsageError(`--repo is a GitHub repo as owner/name, got "${given.repo}"`);
+  if (given.jira_site && !JIRA_SITE.test(given.jira_site)) throw new UsageError(`--jira-site is the site's https address, e.g. https://your-site.atlassian.net, got "${given.jira_site}"`);
+  if (given.jira_project && !JIRA_PROJECT.test(given.jira_project)) throw new UsageError(`--jira is a Jira project key in capitals, e.g. DOG, got "${given.jira_project}"`);
+  const now = workspaceOf(fold(await store.readStream(stream), registry), stream);
+  const merged: Record<string, string | undefined> = { repo: now?.repo, jira_site: now?.jira_site, jira_project: now?.jira_project };
+  for (const [k, v] of Object.entries(given)) if (v !== undefined) merged[k] = v === "" ? undefined : v;
+  const payload = Object.fromEntries(Object.entries(merged).filter((e): e is [string, string] => e[1] !== undefined));
+  if (payload.jira_project !== undefined && payload.jira_site === undefined) throw new UsageError("a Jira project needs its site: add --jira-site https://YOUR-SITE.atlassian.net");
+  if (Object.keys(payload).length === 0) throw new UsageError("that would leave the workspace linked to nothing");
+  const version = (now?.version ?? 0) + 1;
+  const { result: r } = await new Dispatcher(store, registry).submit({ stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version }, actor, payload });
+  if (values.json) io.out(JSON.stringify({ ...r, version, link: payload }));
+  else if (r.status === "appended") io.out(`workspace ${stream} linked (version ${version}): ${linkWords(payload)}`);
+  else io.out(describe(r));
+  return exitOf(r);
+}
+
+const linkWords = (l: Record<string, unknown>) =>
+  [l.repo ? `GitHub ${String(l.repo)}` : "", l.jira_project ? `Jira ${String(l.jira_project)} on ${String(l.jira_site)}` : l.jira_site ? `Jira site ${String(l.jira_site)}` : ""].filter(Boolean).join(" · ");
+
+// The Jira login: asked for here, checked against the site, kept outside the log.
+async function connectJira(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const siteGiven = (values.site ?? workspaceOf(fold(await store.readStream(stream), registry), stream)?.jira_site);
+  const site = siteGiven === undefined ? undefined : trimEnd(siteGiven, "/");
+  if (site === undefined) throw new UsageError("which Jira site? link it first (tira link --jira-site …) or pass --site https://YOUR-SITE.atlassian.net");
+  if (!JIRA_SITE.test(site)) throw new UsageError(`--site is the site's https address, got "${site}"`);
+  const email = values.email?.trim();
+  if (!email) throw new UsageError("tira connect-jira needs --email: the Atlassian account the token belongs to");
+  if (!io.secret) throw new UsageError("tira connect-jira asks for the token in a terminal; use Connect Jira on the page instead");
+  const token = (await io.secret(`Jira API token for ${email} (it won't show as you type): `)).trim();
+  if (token === "") throw new UsageError("no token given: nothing saved");
+  const login = { email, token };
+  const me = await (io.jira?.(site, login) ?? new JiraCloud(site, email, token)).myself();
+  saveJiraLogin(site, login, io.env);
+  io.out(`connected to Jira ${site} as ${me.name}; the token is kept in ${join(tiraHome(io.env), "credentials.json")}, readable only by you`);
+  return 0;
+}
+
+async function syncCmd(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const ws = workspaceOf(fold(await store.readStream(stream), registry), stream);
+  const login = ws?.jira_site ? jiraLogin(ws.jira_site, io.env) : undefined;
+  const jira = ws?.jira_site && login ? io.jira?.(ws.jira_site, login) ?? new JiraCloud(ws.jira_site, login.email, login.token) : undefined;
+  const rep = await sync({ store, registry, stream, ...(jira ? { jira } : {}), ...(ws?.repo ? { github: io.github ?? new GhCli() } : {}) });
+  if (ws?.jira_project && !jira) rep.problems.push(`tira isn't signed in to Jira ${ws.jira_site}: run tira connect-jira --email YOU, or Connect Jira on the page`);
+  if (values.json) io.out(JSON.stringify(rep));
+  else for (const l of reportLines(rep)) io.out(l);
+  return rep.problems.length > 0 ? 1 : 0;
 }
 
 // The fx: key for a transition (src/write/fxkey.ts), computed the way the factory must. It
@@ -733,17 +827,26 @@ async function importCmd(args: string[], values: Values, registry: Registry, io:
 
 // The page, live (src/serve/server.ts). Runs until Ctrl-C; the store closes on the way out.
 async function serve(open: () => ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  // without a name, everyone signs in with GitHub: the page starts at its landing
   const actor = values.actor ?? io.env.TIRA_ACTOR;
-  if (actor === undefined) throw new UsageError("tira serve needs --actor NAME: who the page's actions are written as");
   const port = values.port === undefined ? 4747 : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
   const store = open();
   const file = factoryFile(values, io);
-  const server = tiraServer({ store, registry, stream, actor, divergence: (events) => divergencePanel(file, events, stream) });
+  // the page token is kept in the private store: pages opened before a restart still work. The
+  // divergence section only when there is a factory file to compare (a plain workspace has none;
+  // tira render still says UNEVALUABLE, for the factory's own checkpoints)
+  const server = tiraServer({
+    store, registry, stream, token: pageToken(io.env), ...(actor !== undefined ? { actor } : {}),
+    ...(file !== undefined ? { divergence: (events: StoredEvent[]) => divergencePanel(file, events, stream) } : {}),
+  });
   try {
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
     const at = server.address();
-    io.out(`tira: serving ${stream} at http://127.0.0.1:${typeof at === "object" && at ? at.port : port} as ${actor} (Ctrl-C to stop)`);
+    const shown = typeof at === "object" && at ? at.port : port;
+    io.out(actor !== undefined
+      ? `tira: serving ${stream} at http://127.0.0.1:${shown} as ${actor} (Ctrl-C to stop)`
+      : `tira: serving ${stream} at http://localhost:${shown}: people sign in with GitHub (Ctrl-C to stop)`);
     await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });
     await new Promise<void>((resolve) => server.close(() => resolve()));
     return 0;
@@ -774,7 +877,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "idea", "ideas", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence", "import"].includes(cmd)) {
+  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence", "import"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -801,6 +904,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return await idea(args, values, store, registry, stream, io);
       case "ideas":
         return await ideas(store, registry, stream, values, io);
+      case "link":
+        return await link(store, registry, stream, values, io);
+      case "connect-jira":
+        return await connectJira(store, registry, stream, values, io);
+      case "sync":
+        return await syncCmd(store, registry, stream, values, io);
       case "log":
         return await log(store, stream, values, io);
       case "state":

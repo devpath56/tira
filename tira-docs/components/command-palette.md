@@ -6,14 +6,20 @@
 act on it: `start`, `unblock`, `complete`, `block`. One surface for Find and Direct. Only under
 `tira serve`; the rendered page has no script.
 
-**How to read it.** ⌘K (Ctrl-K) or the "Search ⌘K" button. Matches rank exact name, then name
-prefix, then initials ("ls" → loading_state), then a word inside the name, then any letters in
-order; ties keep tree order. With a verb, only tasks whose state allows it are listed ("unblock "
-lists every blocked task). Enter opens the task's dialog, or the decision dialog for a verb.
+**How to read it.** ⌘K (Ctrl-K) or "Search tasks in <project>" in the board's header, beside
+its numbers (the sidebar's search is for projects: `project-switch.md`). Opened empty, it offers what needs
+you first: the next task (◆ next), then work in progress, then blocked work, then the rest to
+do; closed work last. Typed, matches rank exact name, then name prefix, then initials ("ls" →
+loading_state), then a word inside the name, then any letters in order; ties keep tree order.
+With a verb, only tasks whose state allows it are listed ("unblock " lists every blocked task).
+Enter opens the task's dialog, or the decision dialog for a verb; while the board shows the
+Graph, Enter moves the canvas to the task instead (its folds open, it is ringed and focused,
+and Enter on it opens its dialog). A screen reader hears the highlighted match as the arrows
+move (a combobox with `aria-activedescendant`).
 
 ## Devtool hook
 
-- `[data-open-palette]` on the button that opens it (live page only).
+- `[data-open-palette]` on the header's search that opens it (live page only).
 - `#palette` on the palette; `[data-ms]` on it records the last ranking time.
 
 Assertion: `src/serve/rank.mjs` is the one ranking, shared by the browser and the tests.

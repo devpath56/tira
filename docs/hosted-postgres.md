@@ -35,6 +35,14 @@ node scripts/tira.ts log
 The first command makes tira's tables in schema `tira`. tira never prints the string; if
 something's wrong it says what to set, not what is set.
 
+**For `tira serve`, one more setting:** `TIRA_SECRET_KEY`, a long random string (for example the
+output of `openssl rand -hex 32`). tira seals everyone's GitHub and Jira tokens with it before
+they go into the database, and never stores it there. Everyone who runs `tira serve` on this
+database uses the **same** key: keep it with the connection string, in the same places (your
+shell or the `.env`), never in a chat, a PR or a commit. Without it `tira serve` won't start on
+Postgres. The first `tira serve` on each computer copies that computer's old sign-ins into the
+database (once; it says what it copied).
+
 ## 3. Bring the old demo over (once)
 
 ```

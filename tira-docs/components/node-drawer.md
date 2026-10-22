@@ -9,10 +9,11 @@ page stays where it was underneath. Words live here, not on the canvas. A parent
 subtasks, each with its state and a click to its own dialog. A done task shows its **proof of
 work** (the evidence on its completion). Under `tira serve` the dialog offers what the task's
 state allows: start, complete, block, unblock, cancel, reopen, add subtask; each opens its
-decision dialog.
+decision dialog. It also offers **Show on graph**: the dialog closes, the board turns to the
+Graph, and the canvas moves to the task (an idea's dialog does the same for its ghost).
 
-**How to read it.** The path above the name, the state badge, marks (next, active, drained,
-closed by tira, found during X), the blocks link both ways ("Blocked by design_tokens" on the
+**How to read it.** The path above the name, the state badge, marks (next, active, all
+subtasks closed, closed by tira, found during X), the blocks link both ways ("Blocked by design_tokens" on the
 blocked task, "Blocks colors" on its ticket, each one click away, with its state), then "N of
 M children closed" and the history, oldest first.
 tira's entries say why and which move they cite. An entry written before the rules version
@@ -25,7 +26,7 @@ under `tira serve` (which also moves focus into the dialog, and back to the task
 - `.drawer` sections with ids `#t0`, `#t1`, … in tree order, `role="dialog"`; the palette's index uses the same ids.
 - `.modal-box` on the centred box, `.scrim` on the dimmed page behind it (a link that closes the dialog).
 - `.kids-list` on a parent's subtasks; `[data-proof]` on a done task's proof of work; `[data-links]` on the blocks link.
-- `[data-dialog-acts]` on the actions (live page only).
+- `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only).
 - `.legacy` on the tag of each entry with no rules era (Activity counts them too).
 
 Assertion: every node is one click from its event trail.
