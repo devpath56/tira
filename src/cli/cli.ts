@@ -21,10 +21,9 @@ import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
-import { compareCodeUnits } from "../fold/view.ts";
+import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
-import { makeView } from "../fold/view.ts";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
 
 export interface Io {
