@@ -819,7 +819,7 @@ test("live: the page asks /api/live where its log is (the last event only), with
     await s.send("font", "CANCEL");
     const after = (JSON.parse((await s.http("GET", "/api/live")).body) as { seq: number }).seq;
     assert.ok(after > before, `${after} > ${before}`);
-    assert.match(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /fetch\(withW\("\/api\/live"\), \{ cache: "no-store" \}\)[^]*?if \(seq > seen && seq > triedFor\)/);
+    assert.match(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /fetch\(withW\("\/api\/live"\), \{ cache: "no-store" \}\)[^]*?const at = Number\(seq\);\s*if \(!Number\.isSafeInteger\(at\) \|\| at < 0\) return;\s*latest = at;[^]*?if \(at > seen && at > triedFor\)/);
   } finally {
     await s.done();
   }

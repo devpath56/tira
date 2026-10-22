@@ -452,8 +452,11 @@ if (liveMain) {
     if (document.visibilityState !== "visible") return;
     try {
       const { seq } = await (await fetch(withW("/api/live"), { cache: "no-store" })).json();
-      latest = seq;
-      if (seq > seen && seq > triedFor) {
+      // only a log position counts: anything else in the answer is ignored, never kept
+      const at = Number(seq);
+      if (!Number.isSafeInteger(at) || at < 0) return;
+      latest = at;
+      if (at > seen && at > triedFor) {
         if (busy()) waiting = true;
         else reload();
       }
