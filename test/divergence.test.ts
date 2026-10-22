@@ -1,6 +1,7 @@
 // B3 divergence watchdog: the differ's state table cell by cell, its invariants (input order
 // and timestamps never read, ids never minted, code-unit order), round 1 of the blind
 // fixture, and the `tira divergence` command's exit codes, refusals and run log.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

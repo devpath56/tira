@@ -53,6 +53,7 @@ test("the factory tables load, validate (captures included) and register with 0 
   const r = defaultRegistry();
   assert.deepEqual(r.types().map((x) => `${x.type}:${Object.keys(x.regions).join("+")}`), [
     "node:lifecycle", "idea:lifecycle", "brief:gate+claim+outcome", "session:lifecycle", "refusal:lifecycle", "override:lifecycle", "drop:lifecycle", "label:lifecycle",
+    "workspace:lifecycle", "jira-issue:lifecycle", "pr:lifecycle", // workspace links (links.ts)
   ]);
   assert.equal(r.creationName("brief", 1), "CREATED");
   assert.equal(r.creationName("brief", 2), "REVISED");

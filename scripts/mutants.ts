@@ -191,7 +191,7 @@ const MUTANTS: Mutant[] = [
   { name: "b1: a revise needs no predecessor", file: "src/fold/evaluate.ts", find: "      if (!view.get({ type: def.type, id: intent.entity.id, version: v - 1 })) {", replace: "      if (false) {" },
   { name: "b1: births unguarded", file: "src/fold/evaluate.ts", find: "    if (def.createGuard !== undefined) {", replace: "    if (false) {" },
   { name: "b1: revisions stored as brief.created", file: "src/tables/registry.ts", find: "    if (def?.revisedAs !== undefined && version !== undefined && version > 1) return def.revisedAs;\n", replace: "" },
-  { name: "b1: dispatcher name not reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);", replace: "const RESERVED = new Set([MACHINE_ACTOR]);" },
+  { name: "b1: dispatcher name not reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER, SYNC]);", replace: "const RESERVED = new Set([MACHINE_ACTOR, SYNC]);" },
   { name: "b1: claimant check lets anyone post evidence", file: "src/tables/factory.ts", find: "fromClaimantOrDispatcher: ({ actor, own }) => actor === DISPATCHER || (s(actor) && actor === own?.claimant),", replace: "fromClaimantOrDispatcher: ({ actor }) => s(actor)," },
   { name: "b1: a timeout can end a session", file: "src/tables/factory.ts", find: "    (payload.declared_by === \"user\" && actor === USER),", replace: "    (payload.declared_by === \"user\" && actor === USER) || payload.declared_by === \"timeout\"," },
   { name: "b1: the filer can verify its own drop", file: "src/tables/factory.ts", find: "actor === ORCHESTRATOR && actor !== entity.createdBy && verifies(payload.done_test_result),", replace: "(actor === ORCHESTRATOR || actor === entity.createdBy) && verifies(payload.done_test_result)," },
@@ -377,7 +377,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403,", replace: "    if (false) { send(res, 403," },
   { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) { send(res, 403, text,", replace: "    if (false) { send(res, 403, text," },
   { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined) || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
-  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, opts.stream, opts.actor);", replace: "const cmd = commandOf(ask, opts.stream, form.get(\"actor\") ?? opts.actor);" },
+  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, opts.stream, actor);", replace: "const cmd = commandOf(ask, opts.stream, form.get(\"actor\") ?? actor);" },
   { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
   { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
   { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "payload: verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {} })", replace: "payload: {} })" },
@@ -402,7 +402,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: the packet judges without tira's closes", file: "src/write/write-path.ts", find: "    return this.decide(intent, await this.store.readStream(cmd.stream), false, \"preview\").verdict;", replace: "    return this.decide(intent, await this.store.readStream(cmd.stream), true, \"preview\").verdict;" },
   { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "    if (a.seen !== String((await now()).r.lastSeq)) {", replace: "    if (false) {" },
   { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: ", [\"seen\", String(p.seen)]]", replace: "]" },
-  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
+  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
   { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "    flashes.delete(rk); // a result shows once", replace: "" },
   { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
   { name: "page: refused blocks start a stretch", file: "src/render/html.ts", find: "    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;", replace: "    if (e.stream !== stream || e.type === REJECTED) continue;" },
@@ -512,7 +512,8 @@ const MUTANTS: Mutant[] = [
   { name: "postgres: duplicate eventId not deduped", file: "src/store/postgres-store.ts", find: "e.eventId !== undefined ? byId.get(eventId) : undefined", replace: "e.eventId !== undefined ? undefined : undefined", needs: "postgres" },
   { name: "postgres: expectedRevision ignored", file: "src/store/postgres-store.ts", find: "if (fresh.length > 0 && opts.expectedRevision !== undefined && opts.expectedRevision !== rev) {", replace: "if (false) {", needs: "postgres" },
   { name: "postgres: a duplicate in another stream accepted", file: "src/store/postgres-store.ts", find: "if (existing && existing.stream !== stream) throw new DuplicateEventIdError", replace: "if (false) throw new DuplicateEventIdError", needs: "postgres" },
-  { name: "open: a postgres URL opens a SQLite file", file: "src/store/open.ts", find: "return isPostgresUrl(db) ? new PostgresEventStore", replace: "return false ? new PostgresEventStore" },
+  { name: "open: a postgres URL opens a SQLite file", file: "src/store/open.ts", find: "  if (!isPostgresUrl(db)) return new SqliteEventStore({ path: db });", replace: "  if (true) return new SqliteEventStore({ path: db });" },
+  { name: "open: ?schema= is ignored", file: "src/store/open.ts", find: "...(schema ? { schema } : {})", replace: "" },
   { name: "open: a URL's password is printed", file: "src/store/open.ts", find: ".replace(/^(\\w+:\\/\\/[^:/@]+):[^@/]*@/, \"$1:***@\")", replace: "" },
   // Ideas to tickets (D5, the vapor catch): tira's two writes, where it puts an idea, the agent's
   // command, the approvals' guards and plain refusals, and the idea on the board
@@ -538,6 +539,61 @@ const MUTANTS: Mutant[] = [
   { name: "ideas/render: a ghost isn't marked as an idea", file: "src/render/html.ts", find: "    + `<span class=\"tag\">idea</span><span class=\"gt\">", replace: "    + `<span class=\"gt\">" },
   { name: "ideas/render: no Ideas column", file: "src/render/html.ts", find: "  return `<div class=\"cols\">${ideasColumn(ghosts, trail)}${cols}</div>`;", replace: "  return `<div class=\"cols\">${cols}</div>`;" },
   { name: "ideas/render: an idea's approvals in the rendered file", file: "src/render/html.ts", find: "const verbs = live ? IDEA_ACTIONS[i.stage] ?? [] : [];", replace: "const verbs = IDEA_ACTIONS[i.stage] ?? [];" },
+  // Sign-in and the Integrations page (2026-10-21)
+  { name: "signin: a Jira sign-in from elsewhere is accepted", file: "src/serve/integrations.ts", find: "if (!p || p.until < Date.now() || p.login !== me.login || !keys) return back(", replace: "if (!keys) return back(" },
+  { name: "signin: signed in before GitHub approves", file: "src/serve/integrations.ts", find: "      if (\"wait\" in got) {", replace: "      if (false) {" },
+  { name: "signin: the session cookie is readable by scripts", file: "src/serve/integrations.ts", find: "=${session}; HttpOnly; SameSite=Lax;", replace: "=${session}; SameSite=Lax;" },
+  { name: "signin: the store keeps session ids themselves", file: "src/sync/credentials.ts", find: "const hashed = (id: string) => createHash(\"sha256\").update(id).digest(\"hex\");", replace: "const hashed = (id: string) => id;" },
+  { name: "integrations: the Atlassian secret is shown again", file: "src/serve/integrations.ts", find: "<input type=\"password\" name=\"atlassian_secret\" value=\"\"", replace: "<input type=\"password\" name=\"atlassian_secret\" value=\"${esc(keys.atlassian?.secret ?? \"\")}\"" },
+  { name: "integrations: tira's apps changed without signing in", file: "src/serve/integrations.ts", find: "    if (now.github && !who(req).login) return back(", replace: "    if (false) return back(" },
+  { name: "integrations: linking needs no sign-in", file: "src/serve/integrations.ts", find: "    if (!me.actor) return back(res, \"/integrations\", { ok: false, text: \"Sign in with GitHub first.\" });\n    const { r } = await c.now();\n    const ws = workspaceOf(r, c.stream);\n    const link:", replace: "    const { r } = await c.now();\n    const ws = workspaceOf(r, c.stream);\n    const link:" },
+  { name: "integrations: a page write needs no sign-in once it's on", file: "src/serve/server.ts", find: "    if (actor === undefined) { send(res, 401, text, \"sign in with GitHub first (Integrations)\\n\"); return; }\n", replace: "" },
+  // The way in (2026-10-21): the landing for no one signed in, connect before the board, and
+  // forms that can only send people back to tira's own steps
+  { name: "welcome: the board shows to no one signed in", file: "src/serve/server.ts", find: "    if (!me.actor) return send(res, 303, text, \"\", { Location: `/welcome${url.search}` }); // a result goes along\n", replace: "" },
+  { name: "welcome: signed in with no repo, the board shows anyway", file: "src/serve/server.ts", find: "    if (me.login && !workspaceOf(r, opts.stream)?.repo) return send(res, 303, text, \"\", { Location: `/connect${url.search}` });\n", replace: "" },
+  { name: "welcome: Integrations open to no one signed in", file: "src/serve/integrations.ts", find: "    if (!me.actor) return c.send(res, 303, \"text/plain; charset=utf-8\", \"\", { Location: `/welcome${url.search}` }); // a result goes along\n", replace: "" },
+  { name: "welcome: connect writes without sign-in", file: "src/serve/integrations.ts", find: "    if (!me.login) return back(res, \"/welcome\", { ok: false, text: \"Sign in with GitHub first.\" });\n", replace: "" },
+  { name: "welcome: a form can send you anywhere", file: "src/serve/integrations.ts", find: "(v && BACKS.has(v) ? v : fallback)", replace: "(v ? v : fallback)" },
+  { name: "welcome: a form without the Jira picker unlinks Jira", file: "src/serve/integrations.ts", find: "    if (form.has(\"jira_project\")) {", replace: "    {" },
+  // Access (2026-10-21): the first person in is the admin; then only the people they add
+  { name: "access: anyone with GitHub gets in", file: "src/serve/integrations.ts", find: "      if (!mayEnter(a, me.login)) {", replace: "      if (false) {" },
+  { name: "access: a removed person stays signed in", file: "src/serve/integrations.ts", find: "  if (login && mayEnter(access(env), login)) return", replace: "  if (login) return" },
+  { name: "access: anyone signed in can change who gets in", file: "src/serve/integrations.ts", find: "    if (!login || !isAdmin(a, login)) return back(", replace: "    if (!login) return back(" },
+  { name: "access: the first person in isn't the admin", file: "src/serve/integrations.ts", find: "      if (first) saveAccess((x) => ({ ...x, admin: me.login }), env);\n", replace: "" },
+  { name: "access: a removed person's sign-ins are kept", file: "src/serve/integrations.ts", find: "      forget(who2, env);\n", replace: "" },
+  { name: "access: the admin can be removed", file: "src/serve/integrations.ts", find: "    if (what === \"remove\" && !isAdmin(a, who2)) {", replace: "    if (what === \"remove\") {" },
+  { name: "serve: the page token changes on every restart", file: "src/cli/cli.ts", find: "token: pageToken(io.env), ", replace: "" },
+  { name: "header: zero counts show", file: "src/render/html.ts", find: "(n > 0 ? [li(n)] : [])", replace: "[li(n)]" },
+  // Jira's own issues brought in (2026-10-22), and both sides on record so neither is moved
+  // until it changes
+  { name: "import: Jira's own issues aren't brought in", file: "src/sync/sync.ts", find: "  await bringIn(every);\n", replace: "" },
+  { name: "import: tira's issues from elsewhere are brought in", file: "src/sync/sync.ts", find: "!keyOf.has(i.key) && !i.labels.includes(TIRA_LABEL)", replace: "!keyOf.has(i.key)" },
+  { name: "import: children before their parents", file: "src/sync/sync.ts", find: ".sort((a, b) => a.level - b.level || num(a.i.key) - num(b.i.key));", replace: ".sort((a, b) => b.level - a.level || num(a.i.key) - num(b.i.key));" },
+  { name: "import: done without the Jira link as proof", file: "src/sync/sync.ts", find: "evidenceRef: `${site}/browse/${i.key}`", replace: "evidenceRef: \"done in Jira\"" },
+  { name: "import: not labelled in Jira", file: "src/sync/sync.ts", find: "        await jira.setLabels(i.key, [TIRA_LABEL], []);\n", replace: "" },
+  { name: "import: Jira is moved where tira can't follow it", file: "src/sync/sync.ts", find: "if ((want.category !== tiraWas || putBack.has(task)) && issue.category !== want.category) {", replace: "if (issue.category !== want.category) {" },
+  { name: "sync: a move tira refused stays in Jira", file: "src/sync/sync.ts", find: "      if (why) putBack.add(task);\n", replace: "" },
+  // Workspace links (2026-10-21): who may write them, what the sync notices and puts back, the
+  // Jira login's privacy, and the links on the page
+  { name: "links: the sync may link a workspace", file: "src/tables/links.ts", find: "s(actor) && actor !== SYNC", replace: "s(actor)" },
+  { name: "links: a person may write a Jira link", file: "src/tables/links.ts", find: "jiraIssueLinked: ({ actor, payload }) => actor === SYNC && ", replace: "jiraIssueLinked: ({ actor, payload }) => " },
+  { name: "links: the sync's name isn't reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER, SYNC]);", replace: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);" },
+  { name: "links: a Jira project without its site", file: "src/tables/links.ts", find: "&& (payload.jira_project === undefined || payload.jira_site !== undefined)", replace: "" },
+  { name: "sync: issues made twice", file: "src/sync/sync.ts", find: "    if (links.get(t.id)?.jira) continue;\n", replace: "" },
+  { name: "sync: what tira set in Jira isn't recorded", file: "src/sync/sync.ts", find: "      if (l.jira.category !== jiraNow || l.jira.status !== status || l.jira.tira !== want.category) {", replace: "      if (false) {" },
+  { name: "sync: a person's move in Jira isn't noticed", file: "src/sync/sync.ts", find: "|| issue.category === l.jira.category) continue;", replace: "|| true) continue;" },
+  { name: "sync: a refused move isn't put back", file: "src/sync/sync.ts", find: "      if ((want.category !== tiraWas || putBack.has(task)) && issue.category !== want.category) {\n        status = await jira.moveTo", replace: "      if (false) {\n        status = await jira.moveTo" },
+  { name: "sync: a Jira Done gets no proof from the merged PR", file: "src/sync/sync.ts", find: "const proof = l.prs.find((p) => p.state === \"merged\")?.url;", replace: "const proof = undefined;" },
+  { name: "sync: blocked isn't labelled", file: "src/sync/sync.ts", find: "labels: { blocked: state === \"blocked\", cancelled", replace: "labels: { blocked: false, cancelled" },
+  { name: "sync: a merged PR stays open", file: "src/sync/sync.ts", find: "const event = p.mergedAt ? (state === \"merged\" ? undefined : \"MERGED\")", replace: "const event = p.mergedAt ? undefined" },
+  { name: "sync: a mention counts as a name", file: "src/fold/workspace.ts", find: "for (const m of text.matchAll(/\\btira:\\s*([A-Za-z0-9][\\w.-]*)/gi)) {", replace: "for (const m of text.matchAll(/\\b([A-Za-z0-9][\\w.-]*)/gi)) {" },
+  { name: "sync: a Jira key doesn't name its task", file: "src/fold/workspace.ts", find: "    if (task !== undefined && JIRA_KEY.test(m[0])) found.add(task);", replace: "    if (false) found.add(task as string);" },
+  { name: "credentials: the file is readable by others", file: "src/sync/credentials.ts", find: "writeFileSync(file(env), `${JSON.stringify(now, null, 2)}\\n`, { mode: 0o600 });\n  chmodSync(file(env), 0o600);", replace: "writeFileSync(file(env), `${JSON.stringify(now, null, 2)}\\n`, { mode: 0o644 });" },
+  { name: "page: Sync and Connect in the rendered file", file: "src/render/html.ts", find: "  const acts = !live ? \"\"\n", replace: "  const acts = false ? \"\"\n" },
+  { name: "page: links shown as Lanes chips", file: "src/render/html.ts", find: " && !LINK_TYPES.has(e.type)); // links show on their tasks", replace: "); // links show on their tasks" },
+  { name: "page: no merged PR offered as proof", file: "src/serve/server.ts", find: "(linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === \"merged\").map((p) => p.url)", replace: "[]" },
+  { name: "cli: tira link forgets what it isn't told", file: "src/cli/cli.ts", find: "const merged: Record<string, string | undefined> = { repo: now?.repo, jira_site: now?.jira_site, jira_project: now?.jira_project };", replace: "const merged: Record<string, string | undefined> = {};" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -558,7 +614,7 @@ function scratchCopy(): string {
   return dir;
 }
 
-const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas"];
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync"];
 // a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
 const SUITE_TIMEOUT = 60_000;
 const CATCHERS = join(ROOT, ".mutant-catchers.json");

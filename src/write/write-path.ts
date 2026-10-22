@@ -45,6 +45,7 @@ import { canonicalJson, fold, makeView } from "../fold/fold.ts";
 import { children, nextCloseFor } from "../fold/tree.ts";
 import { MACHINE_ACTOR, entityKey, type EntityRef, type EntityState } from "../fold/types.ts";
 import { DISPATCHER, FX_KEY } from "../tables/factory.ts";
+import { SYNC } from "../tables/links.ts";
 import { fxKey, transitionOf } from "./fxkey.ts";
 import { skeleton } from "../text.ts";
 import { isLabelBirth, isOracle, labelProblem, type LogLookup } from "../fold/labels.ts";
@@ -100,10 +101,11 @@ function queueFor(store: EventStore): Map<string, Promise<unknown>> {
 const backoff = (attempt: number) =>
   new Promise((r) => setTimeout(r, randomInt(0, Math.min(100, 5 * 2 ** attempt) + 1)));
 
-// The machine roles' names are reserved: tira's, and the factory dispatcher's (B1: the
-// single writer of handoff receivers). Anything that reads as one of them on the page is
-// theirs (text.ts skeleton).
-const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);
+// The machine roles' names are reserved: tira's, the factory dispatcher's (B1: the single
+// writer of handoff receivers), and the sync's (the only writer of Jira and PR links).
+// Anything that reads as one of them on the page is theirs (text.ts skeleton).
+const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER, SYNC]);
+const RESERVED_FOR: Record<string, string> = { [MACHINE_ACTOR]: "tira's", [DISPATCHER]: "the dispatcher's", [SYNC]: "the sync's" };
 const isReserved = (actor: string | undefined) => actor !== undefined && RESERVED.has(skeleton(actor));
 // For callers that act under a fixed name (tira serve): refuse a reserved one up front.
 export const isReservedActor = isReserved;
@@ -203,6 +205,12 @@ export class WritePath {
     return this.enqueue({ ...cmd, actor: DISPATCHER }, true, undefined, stillDue);
   }
 
+  // In-process only: the sync recording what GitHub and Jira say (links.ts), as itself,
+  // through the same evaluate() as everyone.
+  submitAsSync(cmd: Command): Promise<WriteResult> {
+    return this.enqueue({ ...cmd, actor: SYNC }, true);
+  }
+
   // In-process only: log a command as rejected without evaluating it (a request the
   // dispatcher won't relay). The rejection keeps the caller's actor.
   refuse(cmd: Command, code: RejectCode, detail: string): Promise<WriteResult> {
@@ -299,7 +307,7 @@ export class WritePath {
     if (!internal && isReserved(intent.actor)) {
       // Proof 3: the machine's labels come from the caller, never from what a command says.
       const name = skeleton(intent.actor as string);
-      const detail = `actor "${name}" is reserved for ${name === MACHINE_ACTOR ? "tira's" : "the dispatcher's"} own writes`;
+      const detail = `actor "${name}" is reserved for ${RESERVED_FOR[name] ?? "a machine role's"} own writes`;
       return {
         batch: [toRejectedEvent({ ...intent, actor: undefined }, "reserved-actor", detail, moveId)],
         result: (seqs: number[]): WriteResult => ({ status: "rejected", seq: seqs[0] as number, code: "reserved-actor", detail }),

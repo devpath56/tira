@@ -10,7 +10,8 @@
 //
 // Safety: bound to 127.0.0.1; any other Host is refused (DNS rebinding); a write needs
 // this process's random token and, when the browser sends one, a same-origin Origin
-// (cross-site forms); the actor is fixed when the server starts; only the tree verbs
+// (cross-site forms); the actor is the person signed in with GitHub, or a name fixed when the
+// server starts (then no one needs to sign in); only the tree verbs
 // below, and an idea's approvals, are accepted; a strict Content-Security-Policy allows only
 // this server's scripts.
 //
@@ -21,6 +22,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
@@ -34,6 +36,10 @@ import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, 
 import { briefFor, ideaBriefFor, ideaRefusal, type Brief, type BriefFacts } from "./brief.ts";
 import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { makeView } from "../fold/view.ts";
+import { linksOf, workspaceOf } from "../fold/workspace.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { sessionLogin } from "../sync/credentials.ts";
+import { integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 
@@ -51,17 +57,24 @@ const ASSETS: Record<string, string> = {
   "/theme.mjs": readFileSync(new URL("./theme.mjs", import.meta.url), "utf8"),
   "/graph.mjs": readFileSync(new URL("./graph.mjs", import.meta.url), "utf8"),
   "/layout.mjs": readFileSync(new URL("./layout.mjs", import.meta.url), "utf8"),
+  "/signin.mjs": readFileSync(new URL("./signin.mjs", import.meta.url), "utf8"),
+  "/tabs.mjs": readFileSync(new URL("./tabs.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
   store: EventStore;
   registry: Registry;
   stream: string;
-  actor: string; // who the page acts as, fixed for the server's life
+  // who the page acts as, fixed for the server's life, until GitHub sign-in is set up; without it,
+  // everyone signs in (the page starts at /welcome)
+  actor?: string;
   token?: string; // tests may pin it; otherwise random per process
   // The page's divergence section, computed per page load from the events that load renders
   // (the CLI passes tira divergence's own differ); never a stored report.
   divergence?: (events: StoredEvent[]) => DivergencePanel;
+  // GitHub and Jira (the Integrations page, src/serve/integrations.ts); tests pass stand-ins.
+  // Absent: the real GitHub and Atlassian, and the private store under $TIRA_HOME.
+  links?: Outside;
 }
 
 export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string }
@@ -83,7 +96,8 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
 
 // waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
 // idea, the tasks tira found for it
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[] }
+// proofs: to complete, the merged pull requests linked to the task (src/tables/links.ts)
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; proofs?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -181,6 +195,7 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   return {
     ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
+    ...(event === "COMPLETE" ? { proofs: (linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === "merged").map((p) => p.url) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
   };
@@ -304,7 +319,8 @@ function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string 
 function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "";
   const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`)
-    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`);
+    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`)
+    + choicesHtml(p.proofs ?? [], fragment, "Proof from GitHub:", "Merged pull requests", (v) => `data-fill="evidenceRef" data-value="${esc(v)}"`);
   const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
     ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
     : "";
@@ -329,11 +345,14 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
     + `<div class="run">${button}</div></form></div>`;
 }
 
-function confirmPage(p: Packet, opts: ConfirmOpts): string {
+// A decision as a page of its own (the confirm page, and Connect Jira), for a browser without the dialog.
+function standalone(title: string, body: string): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(p.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${BRAND}${THEME_SWITCH}</nav><a class="how" href="/">← the page</a>`
-    + packetBody(p, opts, false) + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${BRAND}${THEME_SWITCH}</nav><a class="how" href="/">← the page</a>`
+    + body + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
 }
+
+const confirmPage = (p: Packet, opts: ConfirmOpts): string => standalone(p.title, packetBody(p, opts, false));
 
 const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
   const label = PAGE_VERBS[event]?.label ?? event;
@@ -395,7 +414,7 @@ export async function inOrder(steps: (() => Promise<{ ok: boolean; text: string 
 }
 
 const commandOf = (a: PageAction, stream: string, actor: string): Command => {
-  // the actor is the server's, fixed at start: a posted "actor" field is ignored
+  // the actor is who's signed in (or the server's, without sign-in): a posted "actor" field is ignored
   const base = { stream, actor, payload: a.payload };
   return a.child === undefined
     ? { ...base, kind: "event", entity: { type: a.type, id: a.id }, event: a.event }
@@ -425,9 +444,15 @@ function actionFrom(form: URLSearchParams, registry: Registry): PageAction | und
 }
 
 export function tiraServer(opts: ServeOptions): Server & { token: string } {
-  if (isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's and the dispatcher's own writes: serve as a person`);
+  if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's, the dispatcher's and the sync's own writes: serve as a person`);
   const token = opts.token ?? randomBytes(24).toString("hex");
   const dispatcher = new Dispatcher(opts.store, opts.registry);
+  // Who this request acts as: the GitHub login signed in, once GitHub sign-in is set up (no one,
+  // until they sign in); else the name tira serve was started with.
+  const linkEnv = opts.links?.env ?? process.env;
+  const who = (req: IncomingMessage) => whoIs(req, opts.actor, linkEnv, (id) => sessionLogin(id, linkEnv));
+  const current = new AsyncLocalStorage<ReturnType<typeof who>>();
+  const actorNow = () => current.getStore()?.actor;
   const previews = new WritePath(opts.store, opts.registry);
   const flashes = new Map<string, { ok: boolean; text: string }>();
   let flashSeq = 0;
@@ -443,14 +468,19 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const text = "text/plain; charset=utf-8";
   const html = "text/html; charset=utf-8";
 
-  // GET /: the page, live, with the last action's result once
-  const page = async (_req: IncomingMessage, res: ServerResponse, url: URL) => {
+  // GET /: the page, live, with the last action's result once. No one who can act yet: the
+  // landing (sign in). Signed in with GitHub, but the workspace has no repo: connect one first.
+  const page = async (req: IncomingMessage, res: ServerResponse, url: URL) => {
     const { events, r, hash } = await now();
+    const me = who(req);
+    if (!me.actor) return send(res, 303, text, "", { Location: `/welcome${url.search}` }); // a result goes along
+    if (me.login && !workspaceOf(r, opts.stream)?.repo) return send(res, 303, text, "", { Location: `/connect${url.search}` });
     const rk = url.searchParams.get("r") ?? "";
     const flash = flashes.get(rk);
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
-    send(res, 200, html, renderHtml(r, opts.stream, hash, events, { live: flash ? { flash } : {}, ...(divergence !== undefined ? { divergence } : {}) }));
+    const live = { ...(flash ? { flash } : {}), ...(me.login ? { user: me.login } : {}), token };
+    send(res, 200, html, renderHtml(r, opts.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
   // GET /api/tasks: the palette's index
@@ -463,7 +493,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // Nothing is written on the way.
   const decide = async (res: ServerResponse, at: { type: string; id: string; event: string }, o: Partial<ConfirmOpts>, fragment: boolean, status?: number) => {
     const { events, r } = await now();
-    const p = await packetFor({ wp: previews, r, events, registry: opts.registry, stream: opts.stream, actor: opts.actor, ...at });
+    const actor = actorNow();
+    const p = actor === undefined
+      ? { ok: false, title: `${PAGE_VERBS[at.event]?.label ?? at.event} ${at.id}?`, verdict: "Sign in with GitHub first (Integrations), so tira knows who makes this change.", seen: r.lastSeq, suggestions: [] }
+      : await packetFor({ wp: previews, r, events, registry: opts.registry, stream: opts.stream, actor, ...at });
     const co: ConfirmOpts = { ...at, token, ...o };
     send(res, status ?? (p.ok ? 200 : 409), html, fragment ? packetBody(p, co, true) : confirmPage(p, co));
   };
@@ -493,7 +526,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       send(res, 413, text, "too large\n");
       return undefined;
     }
-    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "missing or wrong token\n"); return undefined; }
+    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "This page is out of date, or isn't tira's own: nothing was saved. Go back, reload the page, and try again.\n"); return undefined; }
     return form;
   };
 
@@ -611,8 +644,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (a === undefined) return;
     const ask = a.ask;
     const ticket = a.ticket;
-    const cmd = commandOf(ask, opts.stream, opts.actor);
-    const first = ticket === undefined ? undefined : commandOf(ticket, opts.stream, opts.actor);
+    const actor = actorNow();
+    if (actor === undefined) { send(res, 401, text, "sign in with GitHub first (Integrations)\n"); return; }
+    const cmd = commandOf(ask, opts.stream, actor);
+    const first = ticket === undefined ? undefined : commandOf(ticket, opts.stream, actor);
     if (await heldBack(res, a, cmd, first)) return;
     const flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
@@ -626,7 +661,22 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   };
 
   type Route = (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => Promise<void>;
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /confirm": confirm, "POST /act": act };
+  const integrations = integrationRoutes({
+    store: opts.store, registry: opts.registry, stream: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links,
+    now: async () => ({ r: (await now()).r }), send, formOf,
+    flash: (f) => {
+      const key = String(++flashSeq);
+      flashes.set(key, f);
+      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+      return key;
+    },
+    takeFlash: (key) => {
+      const f = flashes.get(key);
+      flashes.delete(key);
+      return f;
+    },
+  }, who);
+  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /confirm": confirm, "POST /act": act, ...integrations };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
@@ -635,7 +685,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) return send(res, 404, text, "not found\n");
-    return route(req, res, url, host);
+    return current.run(who(req), () => route(req, res, url, host));
   };
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`));

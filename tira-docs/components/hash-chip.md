@@ -4,7 +4,8 @@
 
 **What / why.** "fingerprint · seq N · abcd…wxyz": the sha256 of the replayed log, so two people
 can check they see the same state. It says what it is, and opens the guide, instead of hiding
-the meaning in a tooltip.
+the meaning in a tooltip. It sits quietly at the foot of the page, out of the top bar: you look
+for it when you need it.
 
 **How to read it.** Run `tira dump --hash` on the same log: the same value means the page shows
 exactly what the log says. The full value is in the guide and on the page.

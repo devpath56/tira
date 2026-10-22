@@ -14,8 +14,43 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 const { run } = await import("../src/cli/cli.ts");
+// A secret typed at the terminal (tira connect-jira's API token): nothing echoes. Piped in, the
+// first line is read.
+const secret = (prompt: string) =>
+  new Promise<string>((resolve) => {
+    const { stdin, stderr } = process;
+    stderr.write(prompt);
+    stdin.setEncoding("utf8");
+    if (!stdin.isTTY) {
+      let all = "";
+      stdin.on("data", (c: string) => (all += c));
+      stdin.on("end", () => resolve(all.split(/\r?\n/)[0] ?? ""));
+      return;
+    }
+    let typed = "";
+    stdin.setRawMode(true);
+    stdin.resume();
+    const done = (value: string) => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.off("data", onData);
+      stderr.write("\n");
+      resolve(value);
+    };
+    const onData = (chunk: string) => {
+      for (const c of chunk) {
+        if (c === "\r" || c === "\n") return done(typed);
+        if (c === "\u0003") return done(""); // Ctrl-C: nothing given
+        if (c === "\u007f") typed = typed.slice(0, -1);
+        else typed += c;
+      }
+    };
+    stdin.on("data", onData);
+  });
+
 process.exitCode = await run(process.argv.slice(2), {
   out: (line) => console.log(line),
   err: (line) => console.error(line),
   env: process.env,
+  secret,
 });

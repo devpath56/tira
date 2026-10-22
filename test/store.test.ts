@@ -313,6 +313,14 @@ test("a postgres:// URL opens the Postgres store; anything else, a SQLite file; 
     assert.ok(s instanceof PostgresEventStore, url);
     await s.close();
   }
+  // ?schema= picks the schema (default "tira"), and isn't passed on to the driver
+  const named = openStore("postgres://tira@127.0.0.1:1/none?schema=trial_one");
+  assert.ok(named instanceof PostgresEventStore);
+  assert.equal(named.schema, "trial_one");
+  await named.close();
+  const plain = openStore("postgres://tira@127.0.0.1:1/none");
+  assert.equal((plain as PostgresEventStore).schema, "tira");
+  await plain.close();
   const s = openStore(":memory:");
   assert.ok(s instanceof SqliteEventStore);
   await s.close();

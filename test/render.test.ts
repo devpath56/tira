@@ -1,6 +1,7 @@
 // D1 — the thin HTML page and the text tree. The page check is the automatable half
 // of manual test M1: every node in the fold appears exactly once, with the fold's
 // state, drain, cursor and active flags, and the page carries the dump hash.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -88,6 +89,11 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   // progress counts closed = done + cancelled, overall and per parent
   assert.match(html, /<div class="big" title="tasks closed, of all tasks">3<small>\/5<\/small><\/div>/); // tasks = the leaves: the Kanban cards
   assert.match(html, /<b>2<\/b> left<\/li>/);
+  // only what's worth a glance: a count that is zero stays out of the header (but "left")
+  const fresh = new SqliteEventStore();
+  await new WritePath(fresh, defaultRegistry()).submit({ stream: S, kind: "create", entity: { type: "node", id: "one" }, actor: "isha" });
+  const quiet = renderHtml(fold(await fresh.readStream(S), defaultRegistry()), S, "h", await fresh.readStream(S));
+  assert.match(quiet, /<ul class="stats"><li title="tasks still open"><b>1<\/b> left<\/li><\/ul>/);
   // the graph: a line turns green once its child is closed; the ◆ pin rides on the cursor
   const green = [...html.matchAll(/<path class="e done[^"]*" data-from="[^"]+" data-to="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(green, ["node:metrics_card", "node:improve_visual", "node:colors", "node:font", "node:tokens"]);
@@ -333,7 +339,9 @@ test("needs attention escapes reasons, labels a blank one, and is left out of a 
 test("trust and reading aids: the hash chip says what it is and opens the guide; lanes carry section labels", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "a".repeat(64), events);
-  assert.match(html, /<a class="how" href="#guide">How to read this page<\/a><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a>/);
+  // the guide behind a "?" in the top bar; the fingerprint quietly at the foot of the page
+  assert.match(html, /<a class="how help" href="#guide" title="How to read this page" aria-label="How to read this page">\?<\/a>/);
+  assert.match(html, /<footer class="page-foot"><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a><\/footer>\n<\/main>/);
   const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
   assert.equal((guide.match(/<p>/g) ?? []).length, 3); // the brief: three short paragraphs
   for (const topic of ["The board.", "By tira.", "The hash."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
@@ -359,9 +367,9 @@ test("the theme switch: System, Light and Dark at the top right; System by defau
   assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"]]);
   assert.ok(html.indexOf('id="th-dark"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
   assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<\/span><\/nav>/);
-  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#1f1f21;/); // System: the computer's setting
-  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#ffffff;/); // Light beats a dark system
-  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#1f1f21;/); // Dark, on screen only: print stays light
+  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#000000;/); // System: the computer's setting
+  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#f5f5f7;/); // Light beats a dark system
+  assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#000000;/); // Dark, on screen only: print stays light
   assert.ok(!html.includes("<script"), "the switch is CSS only: the rendered file has no script");
 });
 

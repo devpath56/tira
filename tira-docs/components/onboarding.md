@@ -12,7 +12,7 @@ it as a dialog over the page, and the chip opens it too.
 ## Devtool hook
 
 - `[data-guide]` on the guide, with id `#guide`.
-- `.how` on the link that opens it.
+- `.how` on the link that opens it: a "?" in the top bar.
 
 Assertion: exactly three paragraphs, on the board, by tira and the hash.
 

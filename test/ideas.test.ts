@@ -3,6 +3,7 @@
 // a person approves the placement and the task is born. Covers where the parent comes from
 // (fold/ideas.ts), tira's two writes (handoffs V1, V2) and their replay check, `tira idea`,
 // the board (Ideas column, ghost cards, the idea dialog) and the approvals under `tira serve`.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -10,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { SqliteEventStore } from "../src/store/sqlite-store.ts";
+import { freshDb, freshStore } from "./stores.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
 import { canonicalJson, fold } from "../src/fold/fold.ts";
@@ -26,7 +27,7 @@ const S = "tasktree-dash";
 
 // The dashboard every scenario starts from, with fetch_metrics done.
 async function world() {
-  const store = new SqliteEventStore();
+  const store = freshStore(); // SQLite, or Postgres under ideas-postgres.test.ts
   const registry = defaultRegistry();
   const d = new Dispatcher(store, registry);
   const born = (id: string, parent_id?: string) => d.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha", payload: parent_id ? { parent_id } : {} });
@@ -173,7 +174,7 @@ test("replay refuses a draft or a proposal the dispatcher wrote when no rule cal
 
 function sandbox() {
   const dir = mkdtempSync(join(tmpdir(), "tira-idea-"));
-  const db = join(dir, "t.db");
+  const db = freshDb(dir);
   const tira = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
