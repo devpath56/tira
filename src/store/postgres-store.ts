@@ -36,6 +36,7 @@ export interface PostgresStoreOptions {
   url: string; // postgres://user:password@host:port/database
   schema?: string; // default "tira"
   pollIntervalMs?: number; // subscribe() poll loop; default 50
+  maxConnections?: number; // this store's pool; default 4 (appends run one at a time anyway)
 }
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -101,7 +102,8 @@ export class PostgresEventStore implements EventStore {
   constructor(opts: PostgresStoreOptions) {
     this.schema = opts.schema ?? "tira";
     if (!SCHEMA_NAME.test(this.schema)) throw new TypeError(`bad schema name: ${this.schema}`);
-    this.pool = new pg.Pool({ connectionString: opts.url });
+    // a small pool: appends queue on the counter lock anyway, and many processes share the server
+    this.pool = new pg.Pool({ connectionString: opts.url, max: opts.maxConnections ?? 4 });
     // an idle connection the server drops must not take the process down; the next query reconnects
     this.pool.on("error", () => {});
     this.pollIntervalMs = opts.pollIntervalMs ?? 50;

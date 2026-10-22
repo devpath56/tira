@@ -1,0 +1,76 @@
+{
+  "id": "pr",
+  "initial": "open",
+  "states": [
+    "open",
+    "merged",
+    "closed"
+  ],
+  "events": [
+    "MERGED",
+    "CLOSED",
+    "REOPENED"
+  ],
+  "pairs": [
+    {
+      "from": "open",
+      "event": "MERGED",
+      "outcome": "transition",
+      "to": "merged",
+      "guard": "fromSync",
+      "capture": {
+        "merged_at": "payload.merged_at"
+      }
+    },
+    {
+      "from": "open",
+      "event": "CLOSED",
+      "outcome": "transition",
+      "to": "closed",
+      "guard": "fromSync"
+    },
+    {
+      "from": "open",
+      "event": "REOPENED",
+      "outcome": "noop",
+      "guard": "fromSync"
+    },
+    {
+      "from": "merged",
+      "event": "MERGED",
+      "outcome": "noop",
+      "guard": "fromSync"
+    },
+    {
+      "from": "merged",
+      "event": "CLOSED",
+      "outcome": "denied"
+    },
+    {
+      "from": "merged",
+      "event": "REOPENED",
+      "outcome": "denied"
+    },
+    {
+      "from": "closed",
+      "event": "MERGED",
+      "outcome": "denied"
+    },
+    {
+      "from": "closed",
+      "event": "CLOSED",
+      "outcome": "noop",
+      "guard": "fromSync"
+    },
+    {
+      "from": "closed",
+      "event": "REOPENED",
+      "outcome": "transition",
+      "to": "open",
+      "guard": "fromSync"
+    }
+  ],
+  "guards": {
+    "fromSync": "written by the sync (actor sync)"
+  }
+}

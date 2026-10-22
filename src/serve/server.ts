@@ -10,7 +10,8 @@
 //
 // Safety: bound to 127.0.0.1; any other Host is refused (DNS rebinding); a write needs
 // this process's random token and, when the browser sends one, a same-origin Origin
-// (cross-site forms); the actor is fixed when the server starts; only the tree verbs
+// (cross-site forms); the actor is the person signed in with GitHub, or a name fixed when the
+// server starts (then no one needs to sign in); only the tree verbs
 // below, and an idea's approvals, are accepted; a strict Content-Security-Policy allows only
 // this server's scripts.
 //
@@ -21,6 +22,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
@@ -34,6 +36,10 @@ import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, 
 import { briefFor, ideaBriefFor, ideaRefusal, type Brief, type BriefFacts } from "./brief.ts";
 import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
+import { linksOf, workspaceOf } from "../fold/workspace.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { sessionLogin } from "../sync/credentials.ts";
+import { integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 
@@ -51,17 +57,24 @@ const ASSETS: Record<string, string> = {
   "/theme.mjs": readFileSync(new URL("./theme.mjs", import.meta.url), "utf8"),
   "/graph.mjs": readFileSync(new URL("./graph.mjs", import.meta.url), "utf8"),
   "/layout.mjs": readFileSync(new URL("./layout.mjs", import.meta.url), "utf8"),
+  "/signin.mjs": readFileSync(new URL("./signin.mjs", import.meta.url), "utf8"),
+  "/tabs.mjs": readFileSync(new URL("./tabs.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
   store: EventStore;
   registry: Registry;
   stream: string;
-  actor: string; // who the page acts as, fixed for the server's life
+  // who the page acts as, fixed for the server's life, until GitHub sign-in is set up; without it,
+  // everyone signs in (the page starts at /welcome)
+  actor?: string;
   token?: string; // tests may pin it; otherwise random per process
   // The page's divergence section, computed per page load from the events that load renders
   // (the CLI passes tira divergence's own differ); never a stored report.
   divergence?: (events: StoredEvent[]) => DivergencePanel;
+  // GitHub and Jira (the Integrations page, src/serve/integrations.ts); tests pass stand-ins.
+  // Absent: the real GitHub and Atlassian, and the private store under $TIRA_HOME.
+  links?: Outside;
 }
 
 export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string; next: boolean }
@@ -113,7 +126,8 @@ export function workspaceList(r: FoldResult, streams: readonly string[], home: s
 
 // waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
 // idea, the tasks tira found for it
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[] }
+// proofs: to complete, the merged pull requests linked to the task (src/tables/links.ts)
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; proofs?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -211,6 +225,7 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   return {
     ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
+    ...(event === "COMPLETE" ? { proofs: (linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === "merged").map((p) => p.url) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
   };
@@ -339,7 +354,8 @@ function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string 
 function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "";
   const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`)
-    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`);
+    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`)
+    + choicesHtml(p.proofs ?? [], fragment, "Proof from GitHub:", "Merged pull requests", (v) => `data-fill="evidenceRef" data-value="${esc(v)}"`);
   const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
     ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
     : "";
@@ -364,17 +380,33 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
     + `<div class="run">${button}</div></form></div>`;
 }
 
-function confirmPage(p: Packet, opts: ConfirmOpts): string {
+// A decision as a page of its own (the confirm page, and Connect Jira), for a browser without the dialog.
+function standalone(title: string, body: string, q = ""): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(p.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand(withQ("/", opts.q ?? ""))}${THEME_SWITCH}</nav><a class="how" href="${esc(withQ("/", opts.q ?? ""))}">← the page</a>`
-    + packetBody(p, opts, false) + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand(withQ("/", q))}${THEME_SWITCH}</nav><a class="how" href="${esc(withQ("/", q))}">← the page</a>`
+    + body + `</main><script type="module" src="/theme.mjs"></script></body></html>\n`;
 }
 
-// a workspace the store doesn't hold: say so, and the way home
+const confirmPage = (p: Packet, opts: ConfirmOpts): string => standalone(p.title, packetBody(p, opts, false), opts.q ?? "");
+
+// a project the store doesn't hold yet: say so, how to start it (connect its repo, which needs
+// GitHub sign-in: Settings and integrations), and the way home
 function noWorkspace(stream: string): string {
+  const q = `w=${encodeURIComponent(stream)}`;
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · no workspace</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand("/")}${THEME_SWITCH}</nav>`
-    + `<div class="packet" data-no-workspace><h1>No workspace named ${esc(stream)}</h1><p class="hint">The store has nothing in it. <a class="how" href="/">Back to your board</a></p></div></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · no project</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand("/")}${THEME_SWITCH}</nav>`
+    + `<div class="packet" data-no-workspace><h1>No project named ${esc(stream)} yet</h1>`
+    + `<p class="hint">A project starts when it's connected to its GitHub repo (and, if you use one, its Jira board), which needs GitHub sign-in. <a class="how" href="${esc(withQ("/integrations", q))}" data-start-project>Settings and integrations for ${esc(stream)}</a></p>`
+    + `<p class="hint"><a class="how" href="/">Back to your board</a></p></div></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
+}
+
+// The Integrations pages (integrations.ts, welcome.ts) were written for one project per server:
+// their links, forms and redirects name a path alone. Served for another project, each same-site
+// path they send gets the project's query too, so a connect, a link or a sync stays in it.
+export function carryQ(html: string, q: string): string {
+  if (q === "") return html;
+  return html.replace(/\b(href|action|data-go)="(\/(?!\/)[^"#]*)"/g, (m, attr: string, path: string) =>
+    /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(path.includes("?") ? "&" : "?")}${esc(q)}"`);
 }
 
 const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
@@ -442,7 +474,7 @@ export const changedBy = (a: PageAction, ticket?: PageAction): string[] =>
   [a, ...(ticket === undefined ? [] : [ticket])].map((x) => entityKey({ type: x.type, id: x.child ?? x.id }));
 
 const commandOf = (a: PageAction, stream: string, actor: string): Command => {
-  // the actor is the server's, fixed at start: a posted "actor" field is ignored
+  // the actor is who's signed in (or the server's, without sign-in): a posted "actor" field is ignored
   const base = { stream, actor, payload: a.payload };
   return a.child === undefined
     ? { ...base, kind: "event", entity: { type: a.type, id: a.id }, event: a.event }
@@ -472,9 +504,15 @@ function actionFrom(form: URLSearchParams, registry: Registry): PageAction | und
 }
 
 export function tiraServer(opts: ServeOptions): Server & { token: string } {
-  if (isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's and the dispatcher's own writes: serve as a person`);
+  if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's, the dispatcher's and the sync's own writes: serve as a person`);
   const token = opts.token ?? randomBytes(24).toString("hex");
   const dispatcher = new Dispatcher(opts.store, opts.registry);
+  // Who this request acts as: the GitHub login signed in, once GitHub sign-in is set up (no one,
+  // until they sign in); else the name tira serve was started with.
+  const linkEnv = opts.links?.env ?? process.env;
+  const who = (req: IncomingMessage) => whoIs(req, opts.actor, linkEnv, (id) => sessionLogin(id, linkEnv));
+  const current = new AsyncLocalStorage<ReturnType<typeof who> & { ws?: Workspace }>();
+  const actorNow = () => current.getStore()?.actor;
   const previews = new WritePath(opts.store, opts.registry);
   const flashes = new Map<string, { ok: boolean; text: string; changed?: string[] }>();
   let flashSeq = 0;
@@ -490,15 +528,20 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const text = "text/plain; charset=utf-8";
   const html = "text/html; charset=utf-8";
 
-  // GET /: the page, live, with the last action's result once; a workspace the store doesn't hold is a 404
-  const page = async (_req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
+  // GET /: the page, live, with the last action's result once. No one who can act yet: the
+  // landing (sign in). Signed in with GitHub, but the project has no repo: connect one first. A
+  // project the store doesn't hold (and no one to connect it): a 404.
+  const page = async (req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
     const { events, r, hash } = await now(ws.stream);
+    const me = who(req);
+    if (!me.actor) return send(res, 303, text, "", { Location: `/welcome${url.search}` }); // a result goes along
+    if (me.login && !workspaceOf(r, ws.stream)?.repo) return send(res, 303, text, "", { Location: `/connect${url.search}` });
     if (events.length === 0 && ws.q !== "") return send(res, 404, html, noWorkspace(ws.stream));
     const rk = url.searchParams.get("r") ?? "";
     const flash = flashes.get(rk);
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), actor: opts.actor };
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), token };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
@@ -518,7 +561,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // Nothing is written on the way.
   const decide = async (res: ServerResponse, ws: Workspace, at: { type: string; id: string; event: string }, o: Partial<ConfirmOpts>, fragment: boolean, status?: number) => {
     const { events, r } = await now(ws.stream);
-    const p = await packetFor({ wp: previews, r, events, registry: opts.registry, stream: ws.stream, actor: opts.actor, ...at });
+    const actor = actorNow();
+    const p = actor === undefined
+      ? { ok: false, title: `${PAGE_VERBS[at.event]?.label ?? at.event} ${at.id}?`, verdict: "Sign in with GitHub first (Integrations), so tira knows who makes this change.", seen: r.lastSeq, suggestions: [] }
+      : await packetFor({ wp: previews, r, events, registry: opts.registry, stream: ws.stream, actor, ...at });
     const co: ConfirmOpts = { ...at, token, q: ws.q, ...o };
     send(res, status ?? (p.ok ? 200 : 409), html, fragment ? packetBody(p, co, true) : confirmPage(p, co));
   };
@@ -548,7 +594,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       send(res, 413, text, "too large\n");
       return undefined;
     }
-    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "missing or wrong token\n"); return undefined; }
+    if (!safeEqual(form.get("token") ?? "", token)) { send(res, 403, text, "This page is out of date, or isn't tira's own: nothing was saved. Go back, reload the page, and try again.\n"); return undefined; }
     return form;
   };
 
@@ -666,8 +712,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (a === undefined) return;
     const ask = a.ask;
     const ticket = a.ticket;
-    const cmd = commandOf(ask, ws.stream, opts.actor);
-    const first = ticket === undefined ? undefined : commandOf(ticket, ws.stream, opts.actor);
+    const actor = actorNow();
+    if (actor === undefined) { send(res, 401, text, "sign in with GitHub first (Integrations)\n"); return; }
+    const cmd = commandOf(ask, ws.stream, actor);
+    const first = ticket === undefined ? undefined : commandOf(ticket, ws.stream, actor);
     if (await heldBack(res, a, cmd, first)) return;
     const flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
@@ -682,7 +730,30 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   };
 
   type Route = (req: IncomingMessage, res: ServerResponse, url: URL, host: string, ws: Workspace) => Promise<void>;
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /confirm": confirm, "POST /act": act };
+  // the Integrations pages, in the project the request names (their stream and log are its; their
+  // redirects and links keep it: carryQ)
+  const wsNow = (): Workspace => current.getStore()?.ws ?? { stream: opts.stream, q: "" };
+  const integrations = integrationRoutes({
+    store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links,
+    now: async () => ({ r: (await now(wsNow().stream)).r }), formOf,
+    send: (res, status, type, body, extra = {}) => {
+      const q = wsNow().q;
+      const at = extra.Location;
+      send(res, status, type, type.startsWith("text/html") ? carryQ(body, q) : body, at?.startsWith("/") && !/[?&]w=/.test(at) ? { ...extra, Location: withQ(at, q) } : extra);
+    },
+    flash: (f) => {
+      const key = String(++flashSeq);
+      flashes.set(key, f);
+      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+      return key;
+    },
+    takeFlash: (key) => {
+      const f = flashes.get(key);
+      flashes.delete(key);
+      return f;
+    },
+  }, who);
+  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /confirm": confirm, "POST /act": act, ...integrations };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
@@ -692,8 +763,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) return send(res, 404, text, "not found\n");
     const ws = workspaceIn(url, opts.stream);
-    if (!ws) return send(res, 400, text, "that can't be a workspace's name\n");
-    return route(req, res, url, host, ws);
+    if (!ws) return send(res, 400, text, "that can't be a project's name\n");
+    return current.run({ ...who(req), ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`));

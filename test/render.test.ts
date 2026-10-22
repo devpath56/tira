@@ -1,6 +1,7 @@
 // D1 — the thin HTML page and the text tree. The page check is the automatable half
 // of manual test M1: every node in the fold appears exactly once, with the fold's
 // state, drain, cursor and active flags, and the page carries the dump hash.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -90,6 +91,11 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   // progress counts closed = done + cancelled, overall and per parent
   assert.match(html, /<div class="big" title="tasks closed, of all tasks">3<small>\/5<\/small><\/div>/); // tasks = the leaves: the Kanban cards
   assert.match(html, /<b>2<\/b> left<\/li>/);
+  // only what's worth a glance: a count that is zero stays out of the header (but "left")
+  const fresh = new SqliteEventStore();
+  await new WritePath(fresh, defaultRegistry()).submit({ stream: S, kind: "create", entity: { type: "node", id: "one" }, actor: "isha" });
+  const quiet = renderHtml(fold(await fresh.readStream(S), defaultRegistry()), S, "h", await fresh.readStream(S));
+  assert.match(quiet, /<ul class="stats"><li title="tasks still open"><b>1<\/b> left<\/li><\/ul>/);
   // the graph: a line turns green once its child is closed; the ◆ pin rides on the cursor
   const green = [...html.matchAll(/<path class="e done[^"]*" data-from="[^"]+" data-to="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(green, ["node:metrics_card", "node:improve_visual", "node:colors", "node:font", "node:tokens"]);

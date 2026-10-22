@@ -204,7 +204,7 @@ confirmBox.addEventListener("submit", async (e) => {
   const body = new URLSearchParams(new FormData(form));
   body.set("fragment", "1");
   try {
-    const doc = new DOMParser().parseFromString(await (await fetch(form.action, { method: "POST", body })).text(), "text/html"); // /act, in this workspace
+    const doc = new DOMParser().parseFromString(await (await fetch(form.getAttribute("action") ?? "/act", { method: "POST", body })).text(), "text/html"); // /act, in this project
     const go = doc.querySelector("[data-go]")?.dataset.go;
     const packet = doc.querySelector("[data-packet]");
     if (go) location.href = go;

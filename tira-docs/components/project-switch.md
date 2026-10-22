@@ -18,7 +18,10 @@ top bar and Projects is a dropdown (Esc or a click outside closes it). At the fo
 the page acts as, and your settings. The project the server started on (`--stream`) opens at
 `/`, any other at `/?w=<name>`; every link and form the server makes carries that on, so a page,
 its decisions and their writes stay in the project they were opened in, and an action's result
-comes back to it. A name the store doesn't hold is a "No workspace named …" page with the way
+comes back to it. **+ New project** takes a name and opens the connect step for it (its GitHub
+repo, then Jira if you use one); signed in with GitHub, the new project's board opens once its
+repo is linked. Without GitHub sign-in, a name the store doesn't hold is a "No project named …
+yet" page that says how to start it (Settings and integrations, for that project) and the way
 home.
 
 ## Devtool hook
@@ -27,7 +30,7 @@ home.
 - `[data-workspaces]` on Projects (live page only); `[data-ws-menu]` holds its list, one `.ws-item` per project (`aria-current="page"` on the one you're in), each with its `.pav` mark.
 - `[data-profile]` on you (live page only).
 - `GET /api/workspaces` (read when the list first shows): each project's name, where it opens, its tasks, the open ones and how many need you.
-- `[data-no-workspace]` on the page for a name the store doesn't hold.
+- `[data-no-workspace]` on the page for a name the store doesn't hold, `[data-start-project]` on its way to start it; `[data-new-project]` on + New project.
 
 Assertion: a write made from a workspace's page lands in that workspace's stream and in no
 other; the list's counts are the page's own (tasks as the Kanban counts them, needs-you as

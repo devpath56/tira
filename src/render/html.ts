@@ -20,6 +20,8 @@ import { show } from "../text.ts";
 import { esc } from "./escape.ts";
 import { foundPath, fx, layout, tint, treePath } from "../serve/layout.mjs";
 import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
+import { linksOf as taskLinksOf, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
+import { LINK_TYPES } from "../tables/links.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
@@ -45,6 +47,7 @@ const DARK = `--bg:#151517;--side-bg:#111113;--panel:#1b1b1e;--panel-2:#212124;-
 export const CSS = `
 :root{color-scheme:light dark;${LIGHT};--r-lg:10px;--r:7px;
 --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--serif:ui-serif,"New York","Iowan Old Style",Palatino,Georgia,serif}
+@media screen and (prefers-contrast:more){:root{--line:#8e8e93}}
 @media screen and (prefers-color-scheme:dark){:root{${DARK}}}
 :root:has(#th-light:checked){color-scheme:light;${LIGHT}}
 @media screen{:root:has(#th-dark:checked){color-scheme:dark;${DARK}}}
@@ -79,6 +82,9 @@ a{color:inherit;text-decoration:none}
 .pav{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:5px;font:650 11px/1 var(--sans);color:#fff;background:var(--t)}
 .t0{--t:#5e6ad2}.t1{--t:#0f7b6c}.t2{--t:#b4426b}.t3{--t:#8a5a00}.t4{--t:#2f6fb0}.t5{--t:#7a4fc9}.t6{--t:#3d7a2e}.t7{--t:#b04a2a}
 .me .av{width:22px;height:22px;font-size:11px}.me>summary{gap:8px}
+.me-menu .ws-item{flex-direction:column;align-items:flex-start;gap:1px;width:100%;font:inherit;font-size:13px;text-align:left;background:none;border:0;cursor:pointer}.me-menu form{margin:0}
+.new-project>summary{list-style:none;cursor:pointer;padding:6px 10px;border-radius:var(--r);font-size:13px;color:var(--mut)}.new-project>summary::-webkit-details-marker{display:none}.new-project>summary:hover{background:var(--hover);color:var(--fg)}
+.new-project form{display:flex;gap:6px;padding:4px 6px 8px}.new-project input{min-width:0;flex:1;font:13px var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:5px 8px}.new-project input:focus{outline:2px solid var(--accent);outline-offset:0}
 .log-top{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:16px 0 4px}.log-top h3{margin:0}
 .kbd:hover{background:var(--hover)}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
@@ -215,6 +221,25 @@ details.att-group .names{min-width:0;flex:1;color:var(--mut);font-size:12.5px;ov
 .edges path.idea{stroke:var(--line-2);stroke-dasharray:5 4}
 .chip.stage{color:var(--accent-text);border-color:var(--accent)}.chip.stage.loose{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
 .s-idea{color:var(--accent-text);background:var(--accent-bg)}.idea-file{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:14px 0 0;font-size:13.5px}.idea-file dt{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding-top:2px}.idea-file dd{margin:0;overflow-wrap:anywhere}
+.workspace-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 16px;padding:10px 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);font-size:13px}
+.workspace-bar .wl-k{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}.workspace-bar .wl{font-weight:600;color:var(--accent)}.workspace-bar .wl:hover{text-decoration:underline}
+.workspace-bar .none{color:var(--mut)}.workspace-bar .acts{display:flex;gap:6px;margin-left:auto}
+.task-links{display:grid;gap:6px;margin-top:12px}.task-links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.task-links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);min-width:78px}.task-links a{font-weight:600;color:var(--accent)}.task-links a:hover{text-decoration:underline}
+.pill.merged{color:var(--done);background:var(--done-bg)}.pill.open{color:var(--prog);background:var(--prog-bg)}.pill.closed{color:var(--mut);background:var(--gone-bg)}
+.chip.jira{font-family:var(--mono);font-size:11px}
+form.inline{display:inline}.who-chip{font-size:12.5px;font-weight:600;color:var(--accent-text);background:var(--accent-bg);border-radius:999px;padding:3px 10px}
+.int-page{max-width:680px}.int-head h1{font-size:28px;font-weight:700;letter-spacing:-.01em;margin:24px 0 2px}.int-head p{margin:0 0 20px;color:var(--mut);font-size:13px}
+.grp{display:block;margin:0 0 24px}.grp-h{display:block;margin:0 0 6px 16px;font-size:12px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;color:var(--mut)}
+details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-details-marker{display:none}details.grp>summary::after{content:" ›"}details.grp[open]>summary::after{content:" ⌄"}
+.grp-list{display:block;margin:0;background:var(--panel);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.grp-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-height:44px;margin:0;padding:7px 16px;font-size:14px}
+.grp-row+.grp-row{background:linear-gradient(var(--line),var(--line)) 16px 0/calc(100% - 16px) 1px no-repeat}
+.grp-k{flex:1;min-width:90px;color:var(--fg)}.grp-k.no{color:var(--block)}.grp-sub,.grp-v{color:var(--mut);font-weight:400}
+.grp-row select,.grp-row input{flex:1 1 200px;font:14px var(--sans);color:var(--fg);background:var(--panel-2);border:0;border-radius:8px;padding:7px 10px;min-width:0}.grp-row input:focus,.grp-row select:focus{outline:2px solid var(--accent);outline-offset:0}
+.grp-foot{margin:6px 16px 0;font-size:12px;color:var(--mut)}.grp-foot details{margin:0 0 6px}.grp-foot summary{cursor:pointer;color:var(--accent-text)}
+.int-cmd{margin:0;font-size:12px;color:var(--mut)}.int-cmd summary{cursor:pointer;color:var(--accent-text)}.int-cmd code{display:block;margin-top:6px;font-family:var(--mono);font-size:12px;color:var(--fg);background:var(--panel);border-radius:8px;padding:8px 10px;overflow-wrap:anywhere}
+.int-steps{margin:6px 0;padding-left:18px}.int-steps li{margin:3px 0}.int-steps code{font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere}
+.signin-code{font:650 22px var(--mono);letter-spacing:.08em;color:var(--fg);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:4px 12px}
 .hide-found .edges path.found{stroke:var(--line-2);stroke-dasharray:none}.hide-found .edges path.done.found{stroke:var(--done)}
 .edges path.blocks{stroke:var(--block);stroke-dasharray:7 4;stroke-width:2}.edges path.blocks.done{stroke:var(--done)}.lg-blocks{display:block;width:16px;border-top:2px dashed var(--block)}
 .links{display:grid;gap:6px;margin-top:12px}.links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block);min-width:78px}.links a{font-weight:600;color:var(--accent)}.links a:hover{text-decoration:underline}
@@ -323,7 +348,7 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .fills{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}.fills span{font-size:12px;color:var(--mut)}
 .fill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 12px var(--sans);color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}.fill:hover{border-color:var(--accent);color:var(--accent)}
 .run{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;margin:0 0 14px}.run .how{margin-left:0}
-.act.primary{padding:8px 16px;font-size:13.5px;color:var(--btn-fg);background:var(--btn);border-color:var(--btn)}.act.primary:hover{filter:brightness(1.1)}
+.act.primary{padding:7px 16px;font-weight:600;color:var(--btn-fg);background:var(--btn)}.act.primary:hover{filter:brightness(1.08);background:var(--btn)}
 button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--accent);cursor:pointer}
 .confirm-dialog{width:min(1000px,calc(100vw - 32px));max-height:min(90vh,860px);padding:0;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg);color:var(--fg);box-shadow:0 8px 24px rgba(9,30,66,.25)}
 .confirm-dialog::backdrop{background:rgba(9,30,66,.54)}
@@ -583,13 +608,13 @@ const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done">
 // The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
 // Kanban by default; live, app.mjs remembers the choice so it survives the reload after
 // every action.
-function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
+function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext): string {
   const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
   const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
   const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
   return radios
     + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
-    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed, ext)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
 }
 
 // ---------- history ----------
@@ -685,7 +710,7 @@ const DIALOG_ACTIONS: Record<string, [string, string][]> = {
   done: [["REOPEN", "Reopen"]],
 };
 
-interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; q: string; links: Links; rowOf: ReadonlyMap<string, TreeRow> }
+interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; q: string; links: Links; rowOf: ReadonlyMap<string, TreeRow>; ext: Ext }
 
 // A linked task: one click to its dialog, with its state.
 const linkTo = (key: string, ctx: Pick<DialogContext, "indexOf" | "rowOf">) => {
@@ -731,12 +756,50 @@ function linksHtml(r: TreeRow, ctx: DialogContext): string {
 const ICON_LOCATE = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg>`;
 const locate = (key: string, live: boolean) => (live ? `<button type="button" class="locate" data-show-on-graph="${esc(key)}">${ICON_LOCATE}Show on graph</button>` : "");
 
+// ---------- workspace links (src/tables/links.ts) ----------
+// The workspace's repo and Jira project, in a bar under the header; each task's Jira issue and
+// pull requests in its dialog, and its Jira key on its card. Live, the bar offers Sync, Link
+// and Connect Jira, each through its own decision.
+interface Ext { links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined }
+
+const jiraUrl = (ext: Ext, key: string) => (ext.ws?.jira_site ? `${ext.ws.jira_site}/browse/${encodeURIComponent(key)}` : undefined);
+
+function jiraChip(ext: Ext, task: string): string {
+  const key = ext.links.get(task)?.jira?.key;
+  return key === undefined ? "" : `<span class="chip jira" data-jira-key="${esc(key)}">${esc(key)}</span>`;
+}
+
+function taskLinksHtml(ext: Ext, task: string): string {
+  const l = ext.links.get(task);
+  if (!l || (!l.jira && l.prs.length === 0)) return "";
+  const j = l.jira;
+  const url = j ? jiraUrl(ext, j.key) : undefined;
+  const jiraLine = !j ? "" : `<p><span class="lk">Jira</span>${url ? `<a href="${esc(url)}" rel="noopener noreferrer">${esc(j.key)}</a>` : esc(j.key)}${j.status ? `<span class="pill">${esc(j.status)}</span>` : ""}</p>`;
+  const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" rel="noopener noreferrer">#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
+  return `<div class="task-links" data-task-links>${jiraLine}${prLines}</div>`;
+}
+
+// (q: the project, as the server's links carry it)
+function workspaceBarHtml(ext: Ext, live: RenderOptions["live"], q: string): string {
+  const ws = ext.ws;
+  const repo = ws?.repo ? `<a class="wl" href="https://github.com/${esc(ws.repo)}" rel="noopener noreferrer" data-link-repo>GitHub ${esc(ws.repo)}</a>` : "";
+  const jira = ws?.jira_project && ws.jira_site ? `<a class="wl" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" rel="noopener noreferrer" data-link-jira>Jira ${esc(ws.jira_project)}</a>` : "";
+  const linked = repo !== "" || jira !== "";
+  const said = linked ? repo + jira : `<span class="none">Not linked to GitHub or Jira yet.</span>`;
+  // not linked yet: one clear way in; linked: sync now, or change things on the Integrations page
+  const sync = live?.token ? `<form method="post" action="${esc(withQ("/sync", q))}" class="inline"><input type="hidden" name="token" value="${esc(live.token)}"><button class="act" type="submit" data-sync>Sync</button></form>` : "";
+  const acts = !live ? ""
+    : !linked ? `<span class="acts"><a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>Connect GitHub and Jira</a></span>`
+    : `<span class="acts">${sync}<a class="act" href="${esc(withQ("/integrations", q))}" data-integrations>Integrations</a></span>`;
+  return `<section class="workspace-bar" data-workspace aria-label="Workspace links"><span class="wl-k">Linked</span>${said}${acts}</section>`;
+}
+
 function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
   const r = n.row;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
   const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${linksHtml(r, ctx)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
+    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${linksHtml(r, ctx)}${taskLinksHtml(ctx.ext, r.id)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
@@ -802,7 +865,7 @@ const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", 
 // q: the workspace, as the server's links carry it ("w=…"), or "" for the one it started on
 const confirmHref = (r: { type: string; id: string }, event: string, q: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}${q ? `&${q}` : ""}`);
 
-const actLink = (r: { type: string; id: string }, ev: string, label: string, q: string) => `<a class="act" href="${confirmHref(r, ev, q)}" data-act="${ev}">${label}</a>`;
+const actLink = (r: { type: string; id: string }, ev: string, label: string, q: string, primary = false) => `<a class="act${primary ? " primary" : ""}" href="${confirmHref(r, ev, q)}" data-act="${ev}">${label}</a>`;
 
 const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
@@ -862,7 +925,7 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 // acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
 // started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
-function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
+function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
   // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
   const movedAt = (n: Placed) => (trail.get(n.row.key) ?? []).filter((x) => !x.refused).at(-1)?.seq ?? 0;
@@ -886,7 +949,7 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
         + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
       return `<a class="${cls}" href="#t${n.i}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${wraps(r.id)}</div>`
-        + `<div class="row">${parent}${kids}${found}${link}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
+        + `<div class="row">${parent}${kids}${found}${link}${jiraChip(ext, r.id)}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     });
     return `<div class="col"><div class="ch"><span class="dot" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${capped(s, cards) || `<p class="empty">Nothing here</p>`}</div>`;
   }).join("");
@@ -942,7 +1005,7 @@ function lanesHtml(r: FoldResult, stream: string, events: readonly StoredEvent[]
   const label = (text: string) => `<h3 class="lanes-label">${text}</h3>`;
   const gridTitle = esc(multi[0]?.type ?? "") + "s, one lane per dial: " + regionNames.map(esc).join(" · ");
   const grid = multi.length === 0 ? "" : `${label(gridTitle)}<div class="lanes" style="--n:${regionNames.length}" aria-label="Regions"><div class="lh"></div>${regionNames.map((n) => `<div class="lh">${esc(n)}</div>`).join("")}${rows}</div>`;
-  const singles = inStream.filter((e) => Object.keys(e.regions).length === 1 && !e.tree);
+  const singles = inStream.filter((e) => Object.keys(e.regions).length === 1 && !e.tree && !LINK_TYPES.has(e.type)); // links show on their tasks
   const chips = singles.length === 0 ? "" : `${label("Sessions, drops and other records")}<div class="chips2">${singles.map((e) => {
     const name = e.context?.lifecycle?.name;
     return `<span class="chip" title="${esc(e.key)}">${esc(e.type)} ${esc(e.id)}${e.version === undefined ? "" : `@${e.version}`} ${pill(Object.values(e.regions)[0] as string)}${e.createdBy && e.type === "drop" ? ` by ${esc(e.createdBy)}` : ""}${typeof name === "string" ? ` · ${esc(name)}` : ""}</span>`;
@@ -999,6 +1062,7 @@ function guideHtml(dumpHash: string): string {
 // workspace's board (in a rendered file, the top of the page).
 export const brand = (href: string) => `<a class="brand" href="${esc(href)}" title="Home: the board" data-home>${ICON.brand}tira</a>`;
 export const BRAND = brand("/");
+export const BRAND_MARK = ICON.brand;
 
 // A project's mark: its first letter on a colour picked from its name (the same everywhere).
 const initial = (name: string) => esc(([...name][0] ?? "?").toUpperCase());
@@ -1006,14 +1070,23 @@ export const projectMark = (name: string) => `<span class="pav t${tint(name)}" a
 
 // Live, every project in the store, in the sidebar (like Linear's teams): the one you're in
 // first, the rest when app.mjs has read /api/workspaces, each one click away.
+// "+ New project" names one and goes to connect it: its GitHub repo and, if you use one, its Jira board.
+const NEW_PROJECT = "[A-Za-z0-9][A-Za-z0-9_.\\-]{0,79}";
 const projectsHtml = (stream: string, home: string) =>
   `<details class="ws projects" data-workspaces open><summary title="Your projects">Projects${ICON.chev}</summary>`
-  + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page">${projectMark(stream)}<span class="ws-t"><b>${esc(stream)}</b></span></a></div></details>`;
+  + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page">${projectMark(stream)}<span class="ws-t"><b>${esc(stream)}</b></span></a></div>`
+  + `<details class="new-project" data-new-project><summary>+ New project</summary><form method="get" action="/connect"><input name="w" required pattern="${NEW_PROJECT}" placeholder="its name, e.g. mobile-app" aria-label="New project: its name" autocomplete="off" spellcheck="false"><button class="act" type="submit">Connect</button></form></details></details>`;
 
-// Live, you: who the page acts as, and your settings.
-const profileHtml = (actor: string) =>
-  `<details class="ws me" data-profile><summary title="You: ${esc(actor)}"><span class="av">${initial(actor)}</span><span class="ws-name">${esc(actor)}</span>${ICON.chev}</summary>`
-  + `<div class="ws-menu me-menu" data-me-menu><p class="ws-head">Acting as ${esc(actor)}</p></div></details>`;
+// Live, you: who is signed in (or who the page acts as), your settings (GitHub, Jira, sync, people:
+// the Integrations page) and, signed in, a way out.
+const profileHtml = (me: string, live: NonNullable<RenderOptions["live"]>, q: string) =>
+  `<details class="ws me" data-profile><summary title="You: ${esc(me)}"${live.user ? " data-user" : ""}><span class="av">${initial(me)}</span><span class="ws-name">${esc(me)}</span>${ICON.chev}</summary>`
+  + `<div class="ws-menu me-menu" data-me-menu><p class="ws-head">${live.user ? `Signed in as ${esc(me)} (GitHub)` : `Acting as ${esc(me)}`}</p>`
+  + `<a class="ws-item" href="${esc(withQ("/integrations", q))}" data-integrations-nav>Settings and integrations<small>GitHub, Jira, sync, people</small></a>`
+  + (live.user && live.token ? `<form method="post" action="/signout"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
+  + `</div></details>`;
+// a path with the project's query on it
+const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
 
 // The theme switch, on every page: System (the default), Light or Dark. Radio
 // inputs before <main> and labels in the top bar, so it works with no script; under
@@ -1074,11 +1147,12 @@ export function divergenceHtml(panel: DivergencePanel): string {
 
 // The sidebar (after Linear; a top bar on a narrow screen): the mark (home), search, the views,
 // live the projects and you, then help and the theme.
-function navHtml(live: boolean, views: [string, string][], home: string, stream: string, actor: string | undefined): string {
+function navHtml(live: RenderOptions["live"], views: [string, string][], home: string, stream: string): string {
   const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
   const search = live ? `<button class="kbd" type="button" data-open-palette><span>Search</span><kbd>⌘K</kbd></button>` : "";
+  const me = live?.user ?? live?.actor; // who is signed in with GitHub, else who the page acts as
   return `<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${live ? projectsHtml(stream, home) : ""}`
-    + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${THEME_SWITCH}${live && actor !== undefined ? profileHtml(actor) : ""}</div></nav>`;
+    + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${THEME_SWITCH}${live && me !== undefined ? profileHtml(me, live, live.query ?? "") : ""}</div></nav>`;
 }
 
 // The History view's fingerprint: the sha256 of the replayed log, for whoever checks the page
@@ -1098,9 +1172,10 @@ export interface RenderOptions {
   // `tira serve`: rows and task dialogs get actions (each through a confirm dialog), the ⌘K
   // palette loads, and the last action's result shows. A rendered file never carries any of it.
   // `changed`: the keys the last action wrote to; their cards and boxes glow once.
-  // `query`: the workspace ("w=…") when it isn't the one the server started on, kept on every link.
-  // `actor`: who the page acts as, shown with your settings.
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string };
+  // `query`: the project ("w=…") when it isn't the one the server started on, kept on every link.
+  // `actor`: who the page acts as; `user`: who is signed in with GitHub (shown in their place);
+  // `token`: the page's own, for its forms.
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; token?: string };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -1127,7 +1202,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const changed = new Set(opts.live?.flash?.changed ?? []);
   // the workspace on every link back to the server; home is its board (in a rendered file, the top)
   const q = opts.live?.query ?? "";
-  const home = live ? `/${q ? `?${q}` : ""}` : "#";
+  const home = live ? withQ("/", q) : "#";
   const v = streamView(r, stream);
   events = events.filter((e) => e.seq <= r.lastSeq); // render --at N: no history from after N
   const rejections = r.rejections.filter((x) => x.stream === stream);
@@ -1150,11 +1225,13 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const closed = lanesOnly ? multiNow.filter((e) => e.regions.outcome === "done-verified").length : tasks.filter((x) => CLOSED.has(x.state)).length;
   const total = lanesOnly ? multiNow.length : tasks.length;
   const handoffCount = new Set(events.filter((e) => e.stream === stream && e.metadata.actor === "dispatcher" && e.metadata.correlationId).map((e) => e.metadata.correlationId)).size;
+  // only what's worth a glance: a count that is zero stays out (but "left")
+  const counted = (n: number, li: (n: number) => string) => (n > 0 ? [li(n)] : []);
   const stats = [
     ...(lanesOnly
       ? [`<li title="handoff pairs the dispatcher completed"><b>${handoffCount}</b> handoffs</li>`, `<li title="handoffs still waiting"><b>${r.handoffs[stream]?.length ?? 0}</b> waiting</li>`]
-      : [`<li title="tasks still open"><b>${total - closed}</b> left</li>`, `<li title="parents tira closed by itself">${ICON.auto}<b>${rows.filter((x) => x.closedByTira).length}</b> closed by tira</li>`, `<li title="parents whose every subtask is done or dropped"><b>${rows.filter((x) => x.drained).length}</b> parents finished</li>`]),
-    `<li title="rejected commands">${ICON.ban}<b>${rejections.length}</b> rejected</li>`,
+      : [`<li title="tasks still open"><b>${total - closed}</b> left</li>`, ...counted(rows.filter((x) => x.closedByTira).length, (n) => `<li title="parents tira closed by itself">${ICON.auto}<b>${n}</b> closed by tira</li>`), ...counted(rows.filter((x) => x.drained).length, (n) => `<li title="parents whose every subtask is done or dropped"><b>${n}</b> parents finished</li>`)]),
+    ...counted(rejections.length, (n) => `<li title="rejected commands">${ICON.ban}<b>${n}</b> rejected</li>`),
     ...(anomalies.length > 0 ? [`<li class="warn" title="replay anomalies">${ICON.alert}<b>${anomalies.length}</b> anomalies</li>`] : []),
   ];
   // Counted from the fold, independently of the rendered rows: M1 compares the two.
@@ -1170,6 +1247,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const links = linksOf(attentionSince(events, stream, skip).blocked, new Set(rowOf.keys()));
   const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
   const board = v.roots.length > 0 || ghosts.length > 0;
+  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream) };
   let first = "log";
   if (board) first = "board";
   else if (lanesFirst) first = "lanes";
@@ -1178,14 +1256,15 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
 <body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
-${navHtml(live, views, home, stream, opts.live?.actor)}
+${navHtml(opts.live, views, home, stream)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${projectMark(stream)}${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
+${board || ext.ws ? workspaceBarHtml(ext, opts.live, q) : ""}
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
-<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed) : `<p class="empty">No tree yet.</p>`}</section>
+<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext) : `<p class="empty">No tree yet.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 <section class="view view-log" aria-label="History">${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}</section>
-${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf })).join("")}
+${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${guideHtml(dumpHash)}
 </main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>

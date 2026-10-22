@@ -1,5 +1,6 @@
 // `tira serve` (the D1 UI brief): the live page, its confirm pages, its writes, and the
 // palette's ranking. Requests go over real HTTP to a server on 127.0.0.1:0.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -594,7 +595,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   // browser scripts never build markup from data
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
-  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/server.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
   assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
   assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
   // total over the class, and nothing else changes
@@ -717,7 +718,7 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
   try {
     // the switcher, live only: the workspace you're in, its list read when it opens
     const home = (await s.http("GET", "/")).body;
-    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><\/details>/);
+    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><details class="new-project" data-new-project><summary>\+ New project<\/summary><form method="get" action="\/connect"><input name="w" required pattern="[^"]+" placeholder="its name, e\.g\. mobile-app"[^>]*><button class="act" type="submit">Connect<\/button><\/form><\/details><\/details>/);
     // you: who the page acts as
     assert.match(home, /<details class="ws me" data-profile><summary title="You: isha"><span class="av">I<\/span><span class="ws-name">isha<\/span>/);
     assert.doesNotMatch(home, /[?&]w=/); // the first workspace's links stay as they were
@@ -750,7 +751,7 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
     // a workspace the store doesn't hold is a 404 with the way home; a name that can't be one, a 400
     const missing = await s.http("GET", "/?w=nope");
     assert.equal(missing.status, 404);
-    assert.match(missing.body, /No workspace named nope[^]*?<a class="how" href="\/">Back to your board<\/a>/);
+    assert.match(missing.body, /No project named nope yet[^]*?<a class="how" href="\/integrations\?w=nope" data-start-project>Settings and integrations for nope<\/a>[^]*?<a class="how" href="\/">Back to your board<\/a>/);
     assert.equal((await s.http("GET", `/?w=${encodeURIComponent("a\u0001b")}`)).status, 400);
   } finally {
     await s.done();
@@ -772,6 +773,6 @@ test("the page's script keeps the workspace: the palette's index and verbs, and 
   const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
   assert.match(app, /const load = \(\) => fetch\(withW\("\/api\/tasks"\)\)/);
   assert.match(app, /if \(verb\) void openConfirm\(withW\(`\/confirm\?/);
-  assert.match(app, /await fetch\(form\.action, \{ method: "POST", body \}\)/);
+  assert.match(app, /await fetch\(form\.getAttribute\("action"\) \?\? "\/act", \{ method: "POST", body \}\)/);
   assert.match(app, /await fetch\(withW\("\/api\/workspaces"\)\)/);
 });

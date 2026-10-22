@@ -1,0 +1,10 @@
+{
+  "id": "workspace",
+  "initial": "linked",
+  "states": [
+    "linked"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

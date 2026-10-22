@@ -1,6 +1,7 @@
 // A5 — the fold: determinism (T2), replay-to-N (T8, flat entities), derived
 // predicates over now + vantage (B0 G6), and anomaly detection for writes that
 // bypassed the write path.
+import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -253,7 +254,8 @@ test("entities are ordered by code unit, never by locale: Zeta (Z = 0x5A) comes 
 test("canonical-array-order: every canonical surface keeps array order: canonicalJson at any depth, the dump, tira dump --hash, the served page's chip and the fx: key", async () => {
   // structure: one canonical form and one state hash; the CLI's own sha256 takes file bytes only
   const src = srcCode();
-  assert.deepEqual(filesMatching(src, /createHash\(/), ["src/cli/cli.ts", "src/fold/fold.ts", "src/write/fxkey.ts"]);
+  // (the private store hashes session ids so its file can't sign anyone in: not a state hash)
+  assert.deepEqual(filesMatching(src, /createHash\(/), ["src/cli/cli.ts", "src/fold/fold.ts", "src/sync/credentials.ts", "src/write/fxkey.ts"]);
   assert.equal((src.get("src/fold/fold.ts")?.match(/createHash\("sha256"\)\.update\(canonicalJson\(r\)\)/g) ?? []).length, 1);
   assert.match(src.get("src/cli/cli.ts") ?? "", /const sha256 = \(bytes: Buffer\)/);
   assert.deepEqual(filesMatching(src, /\bfingerprint\(r\)/), ["src/cli/cli.ts", "src/serve/server.ts"]);

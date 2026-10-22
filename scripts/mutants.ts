@@ -191,7 +191,7 @@ const MUTANTS: Mutant[] = [
   { name: "b1: a revise needs no predecessor", file: "src/fold/evaluate.ts", find: "      if (!view.get({ type: def.type, id: intent.entity.id, version: v - 1 })) {", replace: "      if (false) {" },
   { name: "b1: births unguarded", file: "src/fold/evaluate.ts", find: "    if (def.createGuard !== undefined) {", replace: "    if (false) {" },
   { name: "b1: revisions stored as brief.created", file: "src/tables/registry.ts", find: "    if (def?.revisedAs !== undefined && version !== undefined && version > 1) return def.revisedAs;\n", replace: "" },
-  { name: "b1: dispatcher name not reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);", replace: "const RESERVED = new Set([MACHINE_ACTOR]);" },
+  { name: "b1: dispatcher name not reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER, SYNC]);", replace: "const RESERVED = new Set([MACHINE_ACTOR, SYNC]);" },
   { name: "b1: claimant check lets anyone post evidence", file: "src/tables/factory.ts", find: "fromClaimantOrDispatcher: ({ actor, own }) => actor === DISPATCHER || (s(actor) && actor === own?.claimant),", replace: "fromClaimantOrDispatcher: ({ actor }) => s(actor)," },
   { name: "b1: a timeout can end a session", file: "src/tables/factory.ts", find: "    (payload.declared_by === \"user\" && actor === USER),", replace: "    (payload.declared_by === \"user\" && actor === USER) || payload.declared_by === \"timeout\"," },
   { name: "b1: the filer can verify its own drop", file: "src/tables/factory.ts", find: "actor === ORCHESTRATOR && actor !== entity.createdBy && verifies(payload.done_test_result),", replace: "(actor === ORCHESTRATOR || actor === entity.createdBy) && verifies(payload.done_test_result)," },
@@ -377,7 +377,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: cross-origin writes accepted", file: "src/serve/server.ts", find: "    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403,", replace: "    if (false) { send(res, 403," },
   { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) { send(res, 403, text,", replace: "    if (false) { send(res, 403, text," },
   { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined) || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
-  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, ws.stream, opts.actor);", replace: "const cmd = commandOf(ask, ws.stream, form.get(\"actor\") ?? opts.actor);" },
+  { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, ws.stream, actor);", replace: "const cmd = commandOf(ask, ws.stream, form.get(\"actor\") ?? actor);" },
   { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
   { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
   { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "payload: verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {} })", replace: "payload: {} })" },
@@ -391,7 +391,7 @@ const MUTANTS: Mutant[] = [
   { name: "page: the theme switch starts on Dark", file: "src/render/html.ts", find: "id=\"th-${t}\"${t === \"system\" ? \" checked\" : \"\"}", replace: "id=\"th-${t}\"${t === \"dark\" ? \" checked\" : \"\"}" },
   { name: "page: a picked Light doesn't beat a dark system", file: "src/render/html.ts", find: ":root:has(#th-light:checked){color-scheme:light;${LIGHT}}", replace: ":root:has(#th-light:checked){color-scheme:light}" },
   { name: "page: a picked Dark prints dark", file: "src/render/html.ts", find: "@media screen{:root:has(#th-dark:checked)", replace: "@media all{:root:has(#th-dark:checked)" },
-  { name: "serve: the confirm page forgets the theme", file: "src/serve/server.ts", find: "packetBody(p, opts, false) + `</main><script type=\"module\" src=\"/theme.mjs\"></script></body>", replace: "packetBody(p, opts, false) + `</main></body>" },
+  { name: "serve: the confirm page forgets the theme", file: "src/serve/server.ts", find: "    + body + `</main><script type=\"module\" src=\"/theme.mjs\"></script></body></html>\\n`;\n}\n\nconst confirmPage", replace: "    + body + `</main></body></html>\\n`;\n}\n\nconst confirmPage" },
   { name: "serve: the page forgets the theme", file: "src/serve/app.mjs", find: "import \"./theme.mjs\";\n", replace: "" },
   { name: "page: the guide gets a fourth paragraph", file: "src/render/html.ts", find: "<p><b>The fingerprint.</b>", replace: "<p>More.</p><p><b>The fingerprint.</b>" },
   { name: "palette: initials don't match", file: "src/serve/rank.mjs", find: "  if (ws.map((w) => w[0]).join(\"\").startsWith(q)) return 800 - ws.length;", replace: "" },
@@ -402,7 +402,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: the packet judges without tira's closes", file: "src/write/write-path.ts", find: "    return this.decide(intent, await this.store.readStream(cmd.stream), false, \"preview\").verdict;", replace: "    return this.decide(intent, await this.store.readStream(cmd.stream), true, \"preview\").verdict;" },
   { name: "serve: a moved log is written anyway", file: "src/serve/server.ts", find: "    if (a.seen !== String((await now(a.ws.stream)).r.lastSeq)) {", replace: "    if (false) {" },
   { name: "serve: the confirm form forgets what it saw", file: "src/serve/server.ts", find: ", [\"seen\", String(p.seen)]]", replace: "]" },
-  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
+  { name: "serve: reserved actors can serve", file: "src/serve/server.ts", find: "  if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(", replace: "  if (false) throw new Error(" },
   { name: "serve: a result shows on every reload", file: "src/serve/server.ts", find: "    flashes.delete(rk); // a result shows once", replace: "" },
   { name: "serve: the body cap is lifted", file: "src/serve/server.ts", find: "const MAX_BODY = 16 * 1024;", replace: "const MAX_BODY = 1024 * 1024;" },
   { name: "page: refused blocks start a stretch", file: "src/render/html.ts", find: "    if (e.stream !== stream || e.type === REJECTED || skip.has(e.seq)) continue;", replace: "    if (e.stream !== stream || e.type === REJECTED) continue;" },
@@ -512,7 +512,8 @@ const MUTANTS: Mutant[] = [
   { name: "postgres: duplicate eventId not deduped", file: "src/store/postgres-store.ts", find: "e.eventId !== undefined ? byId.get(eventId) : undefined", replace: "e.eventId !== undefined ? undefined : undefined", needs: "postgres" },
   { name: "postgres: expectedRevision ignored", file: "src/store/postgres-store.ts", find: "if (fresh.length > 0 && opts.expectedRevision !== undefined && opts.expectedRevision !== rev) {", replace: "if (false) {", needs: "postgres" },
   { name: "postgres: a duplicate in another stream accepted", file: "src/store/postgres-store.ts", find: "if (existing && existing.stream !== stream) throw new DuplicateEventIdError", replace: "if (false) throw new DuplicateEventIdError", needs: "postgres" },
-  { name: "open: a postgres URL opens a SQLite file", file: "src/store/open.ts", find: "return isPostgresUrl(db) ? new PostgresEventStore", replace: "return false ? new PostgresEventStore" },
+  { name: "open: a postgres URL opens a SQLite file", file: "src/store/open.ts", find: "  if (!isPostgresUrl(db)) return new SqliteEventStore({ path: db });", replace: "  if (true) return new SqliteEventStore({ path: db });" },
+  { name: "open: ?schema= is ignored", file: "src/store/open.ts", find: "...(schema ? { schema } : {})", replace: "" },
   { name: "open: a URL's password is printed", file: "src/store/open.ts", find: ".replace(/^(\\w+:\\/\\/[^:/@]+):[^@/]*@/, \"$1:***@\")", replace: "" },
   // Ideas to tickets (D5, the vapor catch): tira's two writes, where it puts an idea, the agent's
   // command, the approvals' guards and plain refusals, and the idea on the board
@@ -554,7 +555,7 @@ const MUTANTS: Mutant[] = [
   { name: "ui: Show on graph on the rendered file", file: "src/render/html.ts", find: "const locate = (key: string, live: boolean) => (live ? `<button", replace: "const locate = (key: string, live: boolean) => (true ? `<button" },
   { name: "ui: the changed task's graph box doesn't glow", file: "src/render/html.ts", find: "r.cursor ? \"is-next\" : \"\", r.active ? \"is-active\" : \"\", changed ? \"changed\" : \"\",", replace: "r.cursor ? \"is-next\" : \"\", r.active ? \"is-active\" : \"\", \"\"," },
   { name: "ui: a glow on the rendered file", file: "src/render/html.ts", find: "const changed = new Set(opts.live?.flash?.changed ?? []);", replace: "const changed = new Set([...(opts.live?.flash?.changed ?? []), ...r.entities.map((e) => e.key)]);" },
-  { name: "ui: the stats say drained again", file: "src/render/html.ts", find: "<b>${rows.filter((x) => x.drained).length}</b> parents finished</li>", replace: "<b>${rows.filter((x) => x.drained).length}</b> drained</li>" },
+  { name: "ui: the stats say drained again", file: "src/render/html.ts", find: "<b>${n}</b> parents finished</li>", replace: "<b>${n}</b> drained</li>" },
   { name: "ui: the unevaluable panel loses its reason", file: "src/render/html.ts", find: "<span class=\"sum why\" data-unevaluable-reason>${esc(why)}</span>", replace: "<span class=\"sum why\" data-unevaluable-reason></span>" },
   { name: "ui: decision: the recommendation before the nutshell", file: "src/serve/server.ts", find: "+ `${nutshell}<p class=\"verdict ${p.ok ? \"ok\" : \"no\"}\">${esc(p.verdict)}</p>${hint}${rec}${more}</section>`;", replace: "+ `${rec}${nutshell}<p class=\"verdict ${p.ok ? \"ok\" : \"no\"}\">${esc(p.verdict)}</p>${hint}${more}</section>`;" },
   { name: "ui: decision: Why isn't folded", file: "src/serve/server.ts", find: "`<details class=\"why\" data-why><summary>Why: tradeoffs, best practice, kind</summary>${why.map(para).join(\"\")}</details>`", replace: "`<div class=\"why\" data-why>${why.map(para).join(\"\")}</div>`" },
@@ -581,27 +582,89 @@ const MUTANTS: Mutant[] = [
   // The way home and workspaces (Isha, 2026-10-21): the mark links home; one server serves every
   // workspace in the store at ?w=, and its links, decisions and writes stay in it
   { name: "ui: the mark isn't a link home", file: "src/render/html.ts", find: "export const brand = (href: string) => `<a class=\"brand\" href=\"${esc(href)}\" title=\"Home: the board\" data-home>${ICON.brand}tira</a>`;", replace: "export const brand = (href: string) => `<span class=\"brand\">${ICON.brand}tira</span>`;" },
-  { name: "ui: the mark goes to the first workspace", file: "src/render/html.ts", find: "const home = live ? `/${q ? `?${q}` : \"\"}` : \"#\";", replace: "const home = live ? \"/\" : \"#\";" },
+  { name: "ui: the mark goes to the first workspace", file: "src/render/html.ts", find: "const home = live ? withQ(\"/\", q) : \"#\";", replace: "const home = live ? \"/\" : \"#\";" },
   { name: "ui: projects on the rendered file", file: "src/render/html.ts", find: "${live ? projectsHtml(stream, home) : \"\"}", replace: "${projectsHtml(stream, home)}" },
   { name: "ui: action links drop the workspace", file: "src/render/html.ts", find: "&event=${event}${q ? `&${q}` : \"\"}`);", replace: "&event=${event}`);" },
   { name: "ui: the workspace in the URL is ignored", file: "src/serve/server.ts", find: "if (w === null || w === \"\" || w === home) return { stream: home, q: \"\" };", replace: "if (true) return { stream: home, q: \"\" };" },
   { name: "ui: a workspace name with control characters accepted", file: "src/serve/server.ts", find: "|| [...w].some((c) => (c.codePointAt(0) ?? 0) < 32 || c === \"\\u007f\")", replace: "" },
   { name: "ui: a missing workspace shows an empty board", file: "src/serve/server.ts", find: "    if (events.length === 0 && ws.q !== \"\") return send(res, 404, html, noWorkspace(ws.stream));\n", replace: "" },
   { name: "ui: a decision posts to the first workspace", file: "src/serve/server.ts", find: "<form method=\"post\" action=\"${esc(withQ(\"/act\", opts.q ?? \"\"))}\"", replace: "<form method=\"post\" action=\"/act\"" },
-  { name: "ui: writes land in the first workspace", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, ws.stream, opts.actor);", replace: "const cmd = commandOf(ask, opts.stream, opts.actor);" },
+  { name: "ui: writes land in the first workspace", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, ws.stream, actor);", replace: "const cmd = commandOf(ask, opts.stream, actor);" },
   { name: "ui: a result goes back to the first workspace", file: "src/serve/server.ts", find: "const back = withQ(`/?r=${key}`, ws.q);", replace: "const back = `/?r=${key}`;" },
   { name: "ui: the switcher's list drops a workspace", file: "src/serve/server.ts", find: "return [...new Set(streams)].sort(compareCodeUnits).map((stream) => {", replace: "return [...new Set(streams)].sort(compareCodeUnits).slice(1).map((stream) => {" },
   { name: "ui: the switcher counts only blocked tasks as needing you", file: "src/serve/server.ts", find: "rows.filter((x) => x.state === \"blocked\" || (x.active && !x.awaitingClose)).length;", replace: "rows.filter((x) => x.state === \"blocked\").length;" },
   { name: "ui: the palette reads the first workspace", file: "src/serve/app.mjs", find: "const load = () => fetch(withW(\"/api/tasks\"))", replace: "const load = () => fetch(\"/api/tasks\")" },
-  { name: "ui: the dialog posts to /act alone", file: "src/serve/app.mjs", find: "await fetch(form.action, { method: \"POST\", body })", replace: "await fetch(\"/act\", { method: \"POST\", body })" },
+  { name: "ui: the dialog posts to /act alone", file: "src/serve/app.mjs", find: "await fetch(form.getAttribute(\"action\") ?? \"/act\", { method: \"POST\", body })", replace: "await fetch(\"/act\", { method: \"POST\", body })" },
   // After Linear (Isha, 2026-10-21): a sidebar, projects and you in it, the audit parts in History,
   // no 'stream' and no blue ideas
   { name: "ui: the sidebar is gone on a wide screen", file: "src/render/html.ts", find: "main[data-stream]>.top{position:fixed;z-index:6;", replace: "main[data-stream]>.top{position:static;z-index:6;" },
   { name: "ui: the fingerprint back on the board's bar", file: "src/render/html.ts", find: "${brand(home)}${search}<div class=\"tabs\">", replace: "${brand(home)}${search}${fingerprintHtml(\"\", 0)}<div class=\"tabs\">" },
   { name: "ui: the divergence panel back on the board", file: "src/render/html.ts", find: "<section class=\"view view-log\" aria-label=\"History\">${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : \"\"}", replace: "${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : \"\"}<section class=\"view view-log\" aria-label=\"History\">" },
   { name: "ui: the header says stream again", file: "src/render/html.ts", find: ".hero h1{display:flex;align-items:center;gap:12px}", replace: ".hero h1{display:flex;align-items:center;gap:12px}.hero h1::before{content:\"stream\"}" },
-  { name: "ui: the profile on the rendered file", file: "src/render/html.ts", find: "${live && actor !== undefined ? profileHtml(actor) : \"\"}", replace: "${actor !== undefined ? profileHtml(actor) : profileHtml(\"\")}" },
+  { name: "ui: the profile on the rendered file", file: "src/render/html.ts", find: "${live && me !== undefined ? profileHtml(me, live, live.query ?? \"\") : \"\"}", replace: "${me !== undefined ? profileHtml(me, live ?? {}, \"\") : profileHtml(\"you\", {}, \"\")}" },
   { name: "ui: ideas blue again", file: "src/render/html.ts", find: ".ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--raised);border:1px solid var(--line-2);", replace: ".ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);" },
+  // Sign-in and the Integrations page (2026-10-21)
+  { name: "signin: a Jira sign-in from elsewhere is accepted", file: "src/serve/integrations.ts", find: "if (!p || p.until < Date.now() || p.login !== me.login || !keys) return back(", replace: "if (!keys) return back(" },
+  { name: "signin: signed in before GitHub approves", file: "src/serve/integrations.ts", find: "      if (\"wait\" in got) {", replace: "      if (false) {" },
+  { name: "signin: the session cookie is readable by scripts", file: "src/serve/integrations.ts", find: "=${session}; HttpOnly; SameSite=Lax;", replace: "=${session}; SameSite=Lax;" },
+  { name: "signin: the store keeps session ids themselves", file: "src/sync/credentials.ts", find: "const hashed = (id: string) => createHash(\"sha256\").update(id).digest(\"hex\");", replace: "const hashed = (id: string) => id;" },
+  { name: "integrations: the Atlassian secret is shown again", file: "src/serve/integrations.ts", find: "<input type=\"password\" name=\"atlassian_secret\" value=\"\"", replace: "<input type=\"password\" name=\"atlassian_secret\" value=\"${esc(keys.atlassian?.secret ?? \"\")}\"" },
+  { name: "integrations: tira's apps changed without signing in", file: "src/serve/integrations.ts", find: "    if (now.github && !who(req).login) return back(", replace: "    if (false) return back(" },
+  { name: "integrations: linking needs no sign-in", file: "src/serve/integrations.ts", find: "    if (!me.actor) return back(res, \"/integrations\", { ok: false, text: \"Sign in with GitHub first.\" });\n    const { r } = await c.now();\n    const ws = workspaceOf(r, c.stream);\n    const link:", replace: "    const { r } = await c.now();\n    const ws = workspaceOf(r, c.stream);\n    const link:" },
+  { name: "integrations: a page write needs no sign-in once it's on", file: "src/serve/server.ts", find: "    if (actor === undefined) { send(res, 401, text, \"sign in with GitHub first (Integrations)\\n\"); return; }\n", replace: "" },
+  // The way in (2026-10-21): the landing for no one signed in, connect before the board, and
+  // forms that can only send people back to tira's own steps
+  { name: "welcome: the board shows to no one signed in", file: "src/serve/server.ts", find: "    if (!me.actor) return send(res, 303, text, \"\", { Location: `/welcome${url.search}` }); // a result goes along\n", replace: "" },
+  { name: "welcome: signed in with no repo, the board shows anyway", file: "src/serve/server.ts", find: "    if (me.login && !workspaceOf(r, ws.stream)?.repo) return send(res, 303, text, \"\", { Location: `/connect${url.search}` });\n", replace: "" },
+  { name: "welcome: Integrations open to no one signed in", file: "src/serve/integrations.ts", find: "    if (!me.actor) return c.send(res, 303, \"text/plain; charset=utf-8\", \"\", { Location: `/welcome${url.search}` }); // a result goes along\n", replace: "" },
+  { name: "welcome: connect writes without sign-in", file: "src/serve/integrations.ts", find: "    if (!me.login) return back(res, \"/welcome\", { ok: false, text: \"Sign in with GitHub first.\" });\n", replace: "" },
+  { name: "welcome: a form can send you anywhere", file: "src/serve/integrations.ts", find: "(v && BACKS.has(v) ? v : fallback)", replace: "(v ? v : fallback)" },
+  { name: "welcome: a form without the Jira picker unlinks Jira", file: "src/serve/integrations.ts", find: "    if (form.has(\"jira_project\")) {", replace: "    {" },
+  // Access (2026-10-21): the first person in is the admin; then only the people they add
+  { name: "access: anyone with GitHub gets in", file: "src/serve/integrations.ts", find: "      if (!mayEnter(a, me.login)) {", replace: "      if (false) {" },
+  { name: "access: a removed person stays signed in", file: "src/serve/integrations.ts", find: "  if (login && mayEnter(access(env), login)) return", replace: "  if (login) return" },
+  { name: "access: anyone signed in can change who gets in", file: "src/serve/integrations.ts", find: "    if (!login || !isAdmin(a, login)) return back(", replace: "    if (!login) return back(" },
+  { name: "access: the first person in isn't the admin", file: "src/serve/integrations.ts", find: "      if (first) saveAccess((x) => ({ ...x, admin: me.login }), env);\n", replace: "" },
+  { name: "access: a removed person's sign-ins are kept", file: "src/serve/integrations.ts", find: "      forget(who2, env);\n", replace: "" },
+  { name: "access: the admin can be removed", file: "src/serve/integrations.ts", find: "    if (what === \"remove\" && !isAdmin(a, who2)) {", replace: "    if (what === \"remove\") {" },
+  { name: "serve: the page token changes on every restart", file: "src/cli/cli.ts", find: "token: pageToken(io.env), ", replace: "" },
+  { name: "header: zero counts show", file: "src/render/html.ts", find: "(n > 0 ? [li(n)] : [])", replace: "[li(n)]" },
+  // Jira's own issues brought in (2026-10-22), and both sides on record so neither is moved
+  // until it changes
+  { name: "import: Jira's own issues aren't brought in", file: "src/sync/sync.ts", find: "  await bringIn(every);\n", replace: "" },
+  { name: "import: tira's issues from elsewhere are brought in", file: "src/sync/sync.ts", find: "!keyOf.has(i.key) && !i.labels.includes(TIRA_LABEL)", replace: "!keyOf.has(i.key)" },
+  { name: "import: children before their parents", file: "src/sync/sync.ts", find: ".sort((a, b) => a.level - b.level || num(a.i.key) - num(b.i.key));", replace: ".sort((a, b) => b.level - a.level || num(a.i.key) - num(b.i.key));" },
+  { name: "import: done without the Jira link as proof", file: "src/sync/sync.ts", find: "evidenceRef: `${site}/browse/${i.key}`", replace: "evidenceRef: \"done in Jira\"" },
+  { name: "import: not labelled in Jira", file: "src/sync/sync.ts", find: "        await jira.setLabels(i.key, [TIRA_LABEL], []);\n", replace: "" },
+  { name: "import: Jira is moved where tira can't follow it", file: "src/sync/sync.ts", find: "if ((want.category !== tiraWas || putBack.has(task)) && issue.category !== want.category) {", replace: "if (issue.category !== want.category) {" },
+  { name: "sync: a move tira refused stays in Jira", file: "src/sync/sync.ts", find: "      if (why) putBack.add(task);\n", replace: "" },
+  // Workspace links (2026-10-21): who may write them, what the sync notices and puts back, the
+  // Jira login's privacy, and the links on the page
+  { name: "links: the sync may link a workspace", file: "src/tables/links.ts", find: "s(actor) && actor !== SYNC", replace: "s(actor)" },
+  { name: "links: a person may write a Jira link", file: "src/tables/links.ts", find: "jiraIssueLinked: ({ actor, payload }) => actor === SYNC && ", replace: "jiraIssueLinked: ({ actor, payload }) => " },
+  { name: "links: the sync's name isn't reserved", file: "src/write/write-path.ts", find: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER, SYNC]);", replace: "const RESERVED = new Set([MACHINE_ACTOR, DISPATCHER]);" },
+  { name: "links: a Jira project without its site", file: "src/tables/links.ts", find: "&& (payload.jira_project === undefined || payload.jira_site !== undefined)", replace: "" },
+  { name: "sync: issues made twice", file: "src/sync/sync.ts", find: "    if (links.get(t.id)?.jira) continue;\n", replace: "" },
+  { name: "sync: what tira set in Jira isn't recorded", file: "src/sync/sync.ts", find: "      if (l.jira.category !== jiraNow || l.jira.status !== status || l.jira.tira !== want.category) {", replace: "      if (false) {" },
+  { name: "sync: a person's move in Jira isn't noticed", file: "src/sync/sync.ts", find: "|| issue.category === l.jira.category) continue;", replace: "|| true) continue;" },
+  { name: "sync: a refused move isn't put back", file: "src/sync/sync.ts", find: "      if ((want.category !== tiraWas || putBack.has(task)) && issue.category !== want.category) {\n        status = await jira.moveTo", replace: "      if (false) {\n        status = await jira.moveTo" },
+  { name: "sync: a Jira Done gets no proof from the merged PR", file: "src/sync/sync.ts", find: "const proof = l.prs.find((p) => p.state === \"merged\")?.url;", replace: "const proof = undefined;" },
+  { name: "sync: blocked isn't labelled", file: "src/sync/sync.ts", find: "labels: { blocked: state === \"blocked\", cancelled", replace: "labels: { blocked: false, cancelled" },
+  { name: "sync: a merged PR stays open", file: "src/sync/sync.ts", find: "const event = p.mergedAt ? (state === \"merged\" ? undefined : \"MERGED\")", replace: "const event = p.mergedAt ? undefined" },
+  { name: "sync: a mention counts as a name", file: "src/fold/workspace.ts", find: "for (const m of text.matchAll(/\\btira:\\s*([A-Za-z0-9][\\w.-]*)/gi)) {", replace: "for (const m of text.matchAll(/\\b([A-Za-z0-9][\\w.-]*)/gi)) {" },
+  { name: "sync: a Jira key doesn't name its task", file: "src/fold/workspace.ts", find: "    if (task !== undefined && JIRA_KEY.test(m[0])) found.add(task);", replace: "    if (false) found.add(task as string);" },
+  { name: "credentials: the file is readable by others", file: "src/sync/credentials.ts", find: "writeFileSync(file(env), `${JSON.stringify(now, null, 2)}\\n`, { mode: 0o600 });\n  chmodSync(file(env), 0o600);", replace: "writeFileSync(file(env), `${JSON.stringify(now, null, 2)}\\n`, { mode: 0o644 });" },
+  { name: "page: Sync and Connect in the rendered file", file: "src/render/html.ts", find: "  const acts = !live ? \"\"\n", replace: "  const acts = false ? \"\"\n" },
+  { name: "page: links shown as Lanes chips", file: "src/render/html.ts", find: " && !LINK_TYPES.has(e.type)); // links show on their tasks", replace: "); // links show on their tasks" },
+  { name: "page: no merged PR offered as proof", file: "src/serve/server.ts", find: "(linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === \"merged\").map((p) => p.url)", replace: "[]" },
+  { name: "cli: tira link forgets what it isn't told", file: "src/cli/cli.ts", find: "const merged: Record<string, string | undefined> = { repo: now?.repo, jira_site: now?.jira_site, jira_project: now?.jira_project };", replace: "const merged: Record<string, string | undefined> = {};" },
+  // Projects meet the linking work (2026-10-21): + New project connects a repo for a new project;
+  // the integration pages work in the request's project; the profile leads to settings
+  { name: "ui: the integration pages lose the project", file: "src/serve/server.ts", find: "  if (q === \"\") return html;\n  return html.replace(", replace: "  return html;\n  return html.replace(" },
+  { name: "ui: the integration pages' redirects lose the project", file: "src/serve/server.ts", find: "{ ...extra, Location: withQ(at, q) }", replace: "extra" },
+  { name: "ui: the integration pages work on the first project", file: "src/serve/server.ts", find: "get stream() { return wsNow().stream; }", replace: "get stream() { return opts.stream; }" },
+  { name: "ui: no + New project", file: "src/render/html.ts", find: "+ `<details class=\"new-project\" data-new-project>", replace: "+ `<details hidden class=\"x\">" },
+  { name: "ui: the profile has no way to settings", file: "src/render/html.ts", find: "<a class=\"ws-item\" href=\"${esc(withQ(\"/integrations\", q))}\" data-integrations-nav>", replace: "<a class=\"ws-item\" href=\"/\">" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -622,7 +685,7 @@ function scratchCopy(): string {
   return dir;
 }
 
-const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas"];
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync"];
 // a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
 const SUITE_TIMEOUT = 60_000;
 const CATCHERS = join(ROOT, ".mutant-catchers.json");

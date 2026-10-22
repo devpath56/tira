@@ -12,7 +12,7 @@ page") opens it as a dialog over the page, and History's fingerprint chip opens 
 ## Devtool hook
 
 - `[data-guide]` on the guide, with id `#guide`.
-- `.how` on the link that opens it.
+- `.help` on the link that opens it: Help (a ?) at the foot of the sidebar.
 
 Assertion: exactly three paragraphs, on the board, by tira and the hash.
 
