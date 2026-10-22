@@ -7,14 +7,17 @@
 // A block names what it waits on as a ticket (blocker=…): an open task, or a new one the line
 // above creates under the blocked task. Those two lines are the only pair the page runs.
 
-// The verbs a page may send, with the field each needs (the node table's guards).
+// The verbs a page may send, with the field each needs (the node table's guards, and the idea
+// table's: a reject needs a reason, hasReason).
 // `text`: the field must have text, not only spaces, as the gate checks (2026-10-20).
 // `suggest`: offer what was written before for this event in this stream (and, to block,
 // "waiting on <task>" for each open task), so like reasons group together.
 // ADD_SUBTASK is the page's own: it births a new task under this one (a create, not an event).
 export interface PageField { name: string; text?: boolean; suggest?: boolean }
 // `extra`: optional keys the verb also takes (a block's blocker ticket)
-export const PAGE_VERBS: Record<string, { label: string; field?: PageField; creates?: boolean; extra?: string[] }> = {
+// `on`: the one entity type the verb is for (an idea's two approvals, D5); without it, a task
+export interface PageVerb { label: string; field?: PageField; creates?: boolean; extra?: string[]; on?: string }
+export const PAGE_VERBS: Record<string, PageVerb> = {
   START: { label: "Start" },
   UNBLOCK: { label: "Unblock" },
   COMPLETE: { label: "Complete", field: { name: "evidenceRef" } },
@@ -22,7 +25,14 @@ export const PAGE_VERBS: Record<string, { label: string; field?: PageField; crea
   CANCEL: { label: "Cancel" },
   REOPEN: { label: "Reopen", field: { name: "reason", text: true, suggest: true } },
   ADD_SUBTASK: { label: "Add subtask", field: { name: "name", text: true }, creates: true },
+  APPROVE_FILE: { label: "Approve file", on: "idea" },
+  REJECT_FILE: { label: "Reject file", field: { name: "reason", text: true }, on: "idea" },
+  APPROVE_NODE: { label: "Approve placement", field: { name: "parent_id", text: true }, on: "idea" },
+  REJECT_NODE: { label: "Reject placement", field: { name: "reason", text: true }, on: "idea" },
 };
+
+// Whether a verb is for this type: its own type (`on`), else any tree type (a task).
+export const verbFits = (verb: PageVerb, type: string, isTreeType: (type: string) => boolean): boolean => (verb.on === undefined ? isTreeType(type) : type === verb.on);
 
 // What the page writes: an event on a task, or (Add subtask) a birth under it.
 export interface PageAction { type: string; id: string; event: string; payload: Record<string, unknown>; child?: string }
@@ -45,9 +55,9 @@ export const quote = (s: string) => (PLAIN.test(s) ? s : '"' + escaped(s) + '"')
 const pair = (key: string, value: string) => key + '="' + escaped(value) + '"';
 
 // The command a decision opens with: complete for a verb with no field, with empty quotes
-// where a value is yours to fill in. A subtask found while working on its parent (the parent
-// is under way) says so; remove it for planned work.
-export function commandFor(type: string, id: string, event: string, found = false): string {
+// where a value is yours to fill in (or `value`, what tira proposes: an idea's parent). A subtask
+// found while working on its parent (the parent is under way) says so; remove it for planned work.
+export function commandFor(type: string, id: string, event: string, found = false, value = ""): string {
   const verb = PAGE_VERBS[event];
   if (verb?.creates) {
     const foundWork = found ? " kind=discovered discovered_during=" + quote(id) : "";
@@ -55,7 +65,7 @@ export function commandFor(type: string, id: string, event: string, found = fals
   }
   // a block opens on a new ticket for what it waits on, created under the blocked task
   if (event === "BLOCK") return commandFor(type, id, "ADD_SUBTASK", true) + `\ntira send ${quote(type)} ${quote(id)} BLOCK blocker="" reason=""`;
-  const toFill = verb?.field ? " " + pair(verb.field.name, "") : "";
+  const toFill = verb?.field ? " " + pair(verb.field.name, value) : "";
   return `tira send ${quote(type)} ${quote(id)} ${quote(event)}` + toFill;
 }
 
@@ -121,13 +131,20 @@ function parseLine(text: string, isTreeType: (type: string) => boolean): Parsed 
 // an optional value, kept only when it has text
 const given = (key: string, value: string | undefined) => (value?.trim() ? { [key]: value } : {});
 
+// why a verb doesn't fit the type it was sent to, and what does
+function misfit(verb: PageVerb, type: string, event: string): string {
+  if (verb.on !== undefined) return `${event} is for ${verb.on}s: tira send ${verb.on} <${verb.on}> ${event}`;
+  const own = SENDS.filter((k) => PAGE_VERBS[k]?.on === type);
+  return own.length > 0 ? `${event} is for tasks (node); an ${type} takes ${own.join(", ")}` : `the page acts on tasks (node), not ${type}`;
+}
+
 // tira send <type> <id> <EVENT> [key="value" ...]
 function parseSend(w: string[], isTreeType: (type: string) => boolean): Parsed {
   const [, , type, id, event, ...rest] = w;
   if (type === undefined || id === undefined || event === undefined) return no('write it as: tira send node <task> <EVENT>, then any key="value"');
   const verb = PAGE_VERBS[event];
   if (!verb || verb.creates) return no(`the page sends ${SENDS.join(", ")}, not ${event}`);
-  if (!isTreeType(type)) return no(`the page acts on tasks (node), not ${type}`);
+  if (!verbFits(verb, type, isTreeType)) return no(misfit(verb, type, event));
   if (id.trim() === "") return no("name the task");
   const keys = [...(verb.field ? [verb.field.name] : []), ...(verb.extra ?? []), "note"];
   const kv = pairsOf(rest, keys, event);
@@ -163,9 +180,9 @@ export function missing(a: PageAction): string | undefined {
   if (a.event === "BLOCK" && blockerOf(a) !== undefined) return undefined;
   const v = a.payload[field.name];
   if (typeof v === "string" && v.trim() !== "") return undefined;
-  return field.name === "evidenceRef"
-    ? 'Add the proof of work: evidenceRef="…" (a file, link or note anyone can re-check).'
-    : 'Add the reason: reason="…" (words, not only spaces).';
+  if (field.name === "evidenceRef") return 'Add the proof of work: evidenceRef="…" (a file, link or note anyone can re-check).';
+  if (field.name === "parent_id") return 'Say where it goes: parent_id="…" (the task it becomes a subtask of).';
+  return 'Add the reason: reason="…" (words, not only spaces).';
 }
 
 // What the page fills in for you before writing: a block on a ticket with no reason written

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 449 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 471 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -124,6 +124,9 @@ node scripts/tira.ts send node colors COMPLETE evidenceRef=palette.png
 node scripts/tira.ts tree                                             # tree + ◆ cursor, ● active, drained, closed by tira
 node scripts/tira.ts render --out tira.html                           # D1 page; re-run and reload to refresh
 node scripts/tira.ts serve --actor isha                               # the page, live, on 127.0.0.1:4747: search and actions
+node scripts/tira.ts idea "pagination would be good in table" --why "long tables scroll forever" --actor claude
+                                                                      # an agent pushes an idea: tira drafts its file, says where it goes
+node scripts/tira.ts ideas                                            # the stream's ideas: stage, parent, summary
 node scripts/tira.ts log                                              # raw log, rejections included
 node scripts/tira.ts state                                            # entities, rejections, anomalies
 node scripts/tira.ts replay 3                                         # state as of event 3
@@ -331,6 +334,8 @@ the first event of the pair and `causationId` = the event that made it due.
 | H4 | the orchestrator rejects the drop | `brief.blocked {block_reason: defective}` |
 | H5 | a session ends | `brief.released` for open briefs it held |
 | H6 | a dependency-blocked brief's dependencies are all verified | `brief.unblocked` |
+| V1 | an idea is declared with a summary (`tira idea`) | `idea.draft-file {summary, why}`: its file, drafted from what it said |
+| V2 | an idea's file is approved, and the file has a summary | `idea.propose-node {parent_id?, candidates, basis}`: where tira would put it, or no parent and the candidates when a person must pick |
 | F1 | an idea is approved into a node (materialized) | `node.born {idea_id}` (same id) |
 | relay | the orchestrator sends `BLOCKED` on a gated brief | `brief.blocked {block_reason, requested_by}`, or a logged `handoff-refused` |
 
@@ -512,6 +517,7 @@ have:
 | **Actions in a task's dialog** | By its state: start, complete, block, unblock, cancel, reopen, and **add subtask** (a new task under it, marked as found while working on it with `kind=discovered`) |
 | **⌘K search** | Find any task in a few letters (name, prefix, initials, a word inside it; a space matches `_`) and open its dialog. Type a verb first to act: `start`, `unblock`, `complete`, `block`; `unblock ` lists every blocked task. After ≤ 3 letters a task is among the visible matches (the first 8): first on the demo, not always first on a 100-task tree of look-alike names |
 | **Decision dialog** | Every human input opens a decision over the page, never a new page, in two views. **tira recommends** (read-only): Decision (the work in a nutshell: the task, why and since when it is blocked, its subtasks, its proof, the move, what tira closes first), Recommendation (from the facts: "api is done now, so the wait looks over", "next in order is fetch_metrics", "Don't run it: tira will refuse"), Tradeoffs, Best practice, Kind and the rule, then tira's check and **what to do** instead of a refusal. **Your action — edit before sending**: the action as a tira command, filled in (`tira send node colors UNBLOCK`; empty quotes where a value is yours: `evidenceRef=""`, `reason=""`), editable, plus an optional `note="…"` the history keeps; the same text runs in a terminal. To block, name what it waits on: the command becomes two lines, a new ticket created under the task (found while working on it) and the block naming it as `blocker=` (or one line for an open task picked as the blocker); the two are linked everywhere ("Blocked by" / "Blocks" in their dialogs, "waiting on" and then "ready to unblock" in needs attention, a red line on the Graph, a "blocks" chip in Kanban). Reasons used before (to re-open) are chips. The command is read strictly: a value left empty, another task or verb than the one opened, a stray key or flag, something tira would refuse, or a moved log comes back into the dialog with your text kept, and nothing is written (`tira-docs/components/confirm-page.md`) |
+| **Ideas** | An idea an agent pushed waits in the board's **Ideas** column and, on the Graph, as a dashed **ghost card** under the task tira proposed for it (on the top row until then). Its dialog offers its stage's two approvals through the same decision dialog: approve or reject the **file**, then approve (parent editable, tira's proposal filled in) or reject the **placement**. Below: [Ideas to tickets](#ideas-to-tickets-d5-the-vapor-catch-tira-idea) |
 | **Result** | After an action the page says what happened (a refusal of a post that skipped the dialog is in the log too). It shows once |
 | **The guide** | Opens by itself on the first visit (once per browser), then only from the link or the chip |
 
@@ -519,13 +525,13 @@ Safety:
 - Any `Host` other than 127.0.0.1 or localhost is refused (DNS rebinding).
 - A write needs this process's random token, and refuses a foreign or `null` `Origin` (cross-site forms).
 - The actor is fixed at start, and `tira` or `dispatcher` (any spelling) is refused at start.
-- Only the page's verbs (start, unblock, complete, block, cancel, reopen, add subtask), on tree tasks, are accepted, as fields or as a command in the CLI's syntax with only the keys the verb uses (plus `note`); a subtask name is trimmed, 1–80 characters, no control characters.
+- Only the page's verbs (start, unblock, complete, block, cancel, reopen, add subtask) on tree tasks, and an idea's approvals (approve or reject the file, approve or reject the placement) on ideas, are accepted, as fields or as a command in the CLI's syntax with only the keys the verb uses (plus `note`); a subtask name is trimmed, 1–80 characters, no control characters.
 - A strict Content-Security-Policy allows only the server's own scripts (app.mjs and the modules it loads: rank, theme, graph, layout).
 
 The checkpoint page from `tira render` stays as it was, with no script and the same bytes for the same log.
 
 Component docs live in `tira-docs/components/` (attention section, palette, confirm page,
-board, task dialog, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
+board, ideas, task dialog, hash chip, lanes, onboarding). `test/docs.test.ts` checks every DOM hook they
 name exists in the build.
 
 Calls made here, for the PM:
@@ -544,6 +550,77 @@ Calls made here, for the PM:
 - **Referrer-Policy is `same-origin`**, not `no-referrer`: under `no-referrer` browsers send
   `Origin: null` on form posts, and the page's own writes were refused (found by submitting
   a real form).
+
+## Ideas to tickets (D5, the vapor catch): `tira idea`
+
+Good ideas surface in chat and die there. Here an agent pushes one in a sentence, and it
+becomes a task after two approvals, with tira doing the steps in between ("S5 · The Vapor
+Catch" in `demo/demo-deck-v6.html`; the rules table is `charts/idea-lifecycle.json`,
+unchanged).
+
+```
+tira idea "<summary>" --why "<why>" [--under TASK] [--id ID] --actor NAME [--json]
+```
+
+1. **Push.** The agent runs `tira idea`. tira declares the idea (its id comes from the
+   summary, minus filler and its parent's name: "pagination would be good in table" is
+   `pagination`; it must be free as an idea and as a task, since the task keeps it) and, as
+   the dispatcher, **drafts its file** from the two lines (V1). The command prints where tira
+   would put it and what happens next, so the agent can tell the person.
+2. **Approve the file** (a person, on the page). Anyone may approve, the declarer too.
+3. **tira proposes the placement** (V2), on the tree as it is at that moment. The parent
+   comes from two sources together: the task named with `--under`, and the tasks the summary
+   names (by id, `metrics_card` reads as "metrics card", plurals count, a task drops out when
+   one under it is named too; the why counts only when the summary names nothing). A
+   candidate must be able to take the new task (it exists, isn't done or cancelled, the caps
+   allow it). When the two agree, or only one gives a usable task, that task is proposed.
+   **When they disagree, or neither gives one, the proposal names no parent** and lists the
+   candidates: the person picks when approving.
+4. **Approve the placement** (a person). The command opens with tira's parent filled in,
+   editable (`parent_id="table"`), or empty with the candidates as buttons. The parent is
+   checked before anything is written: it must exist and take the task, and the idea's id
+   must not already be a task.
+5. **The task is born** under that parent, with the idea's id, to do (F1, as before).
+
+A reject (of the file or the placement) needs a reason (the table's `hasReason`) and drops
+the idea. **Stage skips are refused live in the dialog**, in plain words, with nothing
+written: approving the placement while the file is pending says "the file isn't approved
+yet, and the placement comes after the file", and what to do instead. The rules still
+decide (`tira send` of the same command is rejected and logged, exit 2).
+
+`tira ideas [--json]` lists the stream's ideas with their stage, parent and summary, so an
+agent can check on what it pushed.
+
+### Demo D5 script (manual test M5): idea → task, end to end
+
+```
+export TIRA_DB=d5.db TIRA_STREAM=tasktree-dash
+t() { node scripts/tira.ts "$@"; }
+t create node dashboard --actor isha && t create node table --parent dashboard --actor isha && t create node filters --parent dashboard --actor isha
+t idea "pagination would be good in table" --why "long tables scroll forever" --actor claude   # + dispatcher idea.draft-file (V1); parent: table
+t send idea pagination APPROVE_NODE parent_id=table --actor isha   # REJECTED denied: a stage skip, in the log, exit 2
+t send idea pagination APPROVE_FILE --actor isha                   # + dispatcher idea.propose-node (V2): under table
+t send idea pagination APPROVE_NODE parent_id=table --actor isha   # + dispatcher node.born (F1)
+t tree && t ideas
+t serve --actor isha --port 4747   # or do the approvals on the page: Ideas column, ghost card, the dialogs
+```
+
+M5 passes when the skip is in the log as `command.rejected`, the chain
+`idea.created → idea.draft-file → idea.approve-file → idea.propose-node → idea.approve-node →
+node.born` is unbroken with matching correlation ids (Lanes shows the three pairs), and
+`pagination` is a to-do task under `table`. `rm d5.db` to start over.
+
+Calls made here, for the PM:
+
+- **tira writes the draft and the proposal as the dispatcher** (V1, V2), so replay checks
+  each one like any handoff. Both happen only for an idea declared with a summary: an idea
+  created bare (`tira create idea 7`, as the engine scenario S5 does) is still driven by hand.
+- **The proposal is made when the file is approved,** not when the idea is pushed: the tree
+  may have changed in between. Until then the ghost card sits on the Graph's top row.
+- **Ideas waiting for an approval are not in "Needs attention"** yet; they are in the Ideas
+  column. Aging and the overdue-idea alarm wait for the approval deadline to be ruled.
+- **A task born from an idea shows as hollow in the sweep** (no `definition` or
+  `done_criteria`): the idea's file is a summary and a why, not those two fields.
 
 ## Divergence watchdog (B3, PR-A): the factory's file state against tira's log
 

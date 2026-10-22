@@ -147,3 +147,112 @@ export function briefFor(f: BriefFacts): Brief {
     kind: f.preview.rule !== undefined ? `${kind}. The rule: ${f.preview.rule}.` : `${kind}.`,
   };
 }
+
+// ---------- an idea's two approvals (D5, the vapor catch) ----------
+// The same two views for an idea: what it says and where it stands, what tira proposes, and
+// what each answer does. Every sentence comes from the idea's own events or tira's preview.
+
+export interface IdeaFacts {
+  id: string;
+  event: string; // APPROVE_FILE, REJECT_FILE, APPROVE_NODE or REJECT_NODE
+  stage: string; // the idea's lifecycle state
+  summary?: string | undefined;
+  why?: string | undefined;
+  declaredBy?: string | undefined;
+  declaredSeq: number;
+  proposal?: { parent?: string | undefined; candidates: string[]; basis: string } | undefined;
+  refusal?: { why: string; todo: string } | undefined; // tira would refuse it, in plain words
+  noop: boolean; // allowed, but nothing changes
+  rule?: string | undefined;
+  actor: string;
+}
+
+const STAGE_LINE: Record<string, string> = {
+  declared: "It's declared; its file isn't drafted yet.",
+  file_pending: "Its file (the summary and why) waits for approval.",
+  filed: "Its file is approved; tira proposes where it goes next.",
+  materialized: "It's a task now.",
+  dropped: "It was dropped.",
+};
+
+function placementLine(f: IdeaFacts): string {
+  const p = f.proposal;
+  if (f.stage !== "node_pending" || !p) return "";
+  if (p.parent !== undefined) return ` tira proposes it under ${p.parent}: ${p.basis}.`;
+  const choose = p.candidates.length > 0 ? ` Candidates: ${list(p.candidates)}.` : "";
+  return ` tira couldn't settle where it goes (${p.basis.replace(/^needs you: /, "")}): you pick.${choose}`;
+}
+
+const IDEA_MOVE: Record<string, string> = {
+  APPROVE_FILE: " Approving files it; tira then proposes where it goes, and asks you again.",
+  REJECT_FILE: " Rejecting drops it, with your reason.",
+  APPROVE_NODE: " Approving makes it a task under the parent you name, to do.",
+  REJECT_NODE: " Rejecting drops it, with your reason.",
+};
+
+function ideaDecision(f: IdeaFacts): string {
+  const said = f.summary === undefined ? `Idea ${f.id}.` : `Idea ${f.id}: "${f.summary}".`;
+  const why = f.why === undefined ? "" : ` Why: "${f.why}".`;
+  const by = ` Declared${f.declaredBy === undefined ? "" : " by " + f.declaredBy} at seq ${f.declaredSeq}.`;
+  const stage = f.stage === "node_pending" ? placementLine(f) : ` ${STAGE_LINE[f.stage] ?? ""}`;
+  const move = f.refusal || f.noop ? "" : IDEA_MOVE[f.event] ?? "";
+  return `${said}${why}${by}${stage}${move} Recorded as ${f.actor}.`;
+}
+
+function ideaAdvice(f: IdeaFacts): string {
+  if (f.refusal) return `Don't run it: ${f.refusal.why}.`;
+  if (f.noop) return "Nothing to do: it's already so.";
+  const p = f.proposal;
+  if (f.event === "APPROVE_FILE") return "Approve it if it's worth doing and the summary says what to build; reject it, with a reason, if not.";
+  if (f.event === "REJECT_FILE") return "Reject it only if it isn't worth doing; say why, so whoever pushed it knows.";
+  if (f.event === "APPROVE_NODE") {
+    if (p?.parent !== undefined) return `Approve it under ${p.parent} if that's where it fits; change parent_id to put it elsewhere.`;
+    const options = p && p.candidates.length > 0 ? ` (${list(p.candidates)})` : "";
+    return `Pick where it goes${options}, then approve it.`;
+  }
+  return "Reject it only if it shouldn't become a task at all; if it belongs elsewhere, approve it with another parent_id.";
+}
+
+const IDEA_TRADEOFFS: Record<string, (f: IdeaFacts) => string> = {
+  APPROVE_FILE: () => "An approved file is fixed: the idea moves on to placement, where it can still be dropped.",
+  REJECT_FILE: () => "Dropped is final: if it comes back, it's pushed again as a new idea. Your reason stays in its history.",
+  APPROVE_NODE: (f) => `It becomes a task (${f.id}) under its parent, and its parent can't close until it's done or cancelled.`,
+  REJECT_NODE: () => "Dropped is final: if it comes back, it's pushed again as a new idea. Your reason stays in its history.",
+};
+
+const IDEA_PRACTICE: Record<string, string> = {
+  APPROVE_FILE: "Judge the file on what it says, and the placement on where it fits: two separate questions.",
+  REJECT_FILE: "Say why in a sentence: the reason is the only trace a dropped idea leaves.",
+  APPROVE_NODE: "Put it under the task it helps finish.",
+  REJECT_NODE: "Say why in a sentence: the reason is the only trace a dropped idea leaves.",
+};
+
+const IDEA_KIND: Record<string, string> = {
+  APPROVE_FILE: "an idea's first approval (its file)",
+  REJECT_FILE: "final (a dropped idea can't come back)",
+  APPROVE_NODE: "an idea's second approval (where it goes)",
+  REJECT_NODE: "final (a dropped idea can't come back)",
+};
+
+export function ideaBriefFor(f: IdeaFacts): Brief {
+  const kind = f.refusal ? "refused by the rules" : IDEA_KIND[f.event] ?? f.event;
+  return {
+    decision: ideaDecision(f),
+    recommendation: ideaAdvice(f),
+    tradeoffs: IDEA_TRADEOFFS[f.event]?.(f) ?? "",
+    practice: IDEA_PRACTICE[f.event] ?? "",
+    kind: f.rule !== undefined ? `${kind}. The rule: ${f.rule}.` : `${kind}.`,
+  };
+}
+
+// Why tira refuses an idea's approval at this stage, and what to do instead, in plain words: a
+// stage skip (approving the placement while the file is still pending), or a step already taken.
+export function ideaRefusal(stage: string, event: string, id: string, hasText: boolean): { why: string; todo: string } {
+  const placing = event === "APPROVE_NODE" || event === "REJECT_NODE";
+  if (stage === "materialized") return { why: "the idea is a task already", todo: `Open the task ${id} on the board.` };
+  if (stage === "dropped") return { why: "the idea was dropped", todo: "If it's back, push it again as a new idea." };
+  if (stage === "declared" && !placing) return { why: "its file isn't drafted yet", todo: hasText ? "tira drafts it from what the idea says; approve it then." : `Draft it first: tira send idea ${id} DRAFT_FILE summary="…" why="…".` };
+  if (stage === "declared" || stage === "file_pending") return { why: "the file isn't approved yet, and the placement comes after the file", todo: "Approve the file first (or reject it). tira then proposes where it goes, and you approve that." };
+  if (stage === "filed" && placing) return { why: "tira hasn't proposed where it goes yet", todo: "Wait for tira's proposal: it comes right after the file is approved." };
+  return { why: "the file is already approved; this step is the placement", todo: "Approve or reject where it goes instead." };
+}

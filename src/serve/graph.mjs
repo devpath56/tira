@@ -8,6 +8,7 @@
 //   and says how many tasks are inside; the parent stays where it was on screen. "Collapse
 //   done" folds every finished branch, "Expand all" opens everything, and the found-while
 //   lines can be hidden.
+// - Ideas: an open idea's dashed ghost moves and folds with the task it was proposed under.
 // Folds are remembered per browser and stream, the view per tab, so both survive the reload
 // after every action. Places come from layout.mjs, the code the page was rendered with.
 import { G, fx, layout, treePath, foundPath, subtree, finishedBranches, zoomAt, fitView, centreOn } from "./layout.mjs";
@@ -42,7 +43,7 @@ function canvas(wrap) {
   const stream = document.querySelector("main")?.dataset.stream ?? "";
   const FOLDS = `tira-folds:${stream}`;
   const VIEW = `tira-view:${stream}`;
-  const nodes = [...world.querySelectorAll("a.gn")].map((el) => ({ key: el.dataset.key, parent: el.dataset.parent, el }));
+  const nodes = [...world.querySelectorAll("a.gn, a.ghost")].map((el) => ({ key: el.dataset.key ?? el.dataset.idea, parent: el.dataset.parent, el }));
   const byKey = new Map(nodes.map((n) => [n.key, n]));
   const inside = new Map();
   for (const n of nodes) if (n.parent !== undefined && byKey.has(n.parent) && !inside.has(n.parent)) inside.set(n.parent, subtree(nodes, n.parent));
@@ -338,7 +339,8 @@ function canvas(wrap) {
   // focus never scrolls the canvas box (the view moves instead): bring a focused task into view
   wrap.addEventListener("scroll", () => { wrap.scrollLeft = 0; wrap.scrollTop = 0; });
   wrap.addEventListener("focusin", (e) => {
-    const n = e.target instanceof Element ? byKey.get(e.target.closest("a.gn")?.dataset.key ?? "") : undefined;
+    const box = e.target instanceof Element ? e.target.closest("a.gn, a.ghost") : null;
+    const n = box ? byKey.get(box.dataset.key ?? box.dataset.idea ?? "") : undefined;
     const p = n && last.at.get(n.key);
     if (!p) return;
     const [vw, vh] = size();
