@@ -2,6 +2,7 @@
 // and timestamps never read, ids never minted, code-unit order), round 1 of the blind
 // fixture, and the `tira divergence` command's exit codes, refusals and run log.
 import "./hermetic.ts";
+import { sqliteFile } from "./test-stores.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -216,7 +217,7 @@ function sandbox() {
   const tira = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await run(["--db", join(dir, "t.db"), ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: { TIRA_DIVERGENCE_LOG: runLog } });
+    const code = await run(["--db", join(dir, "t.db"), ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: { TIRA_DIVERGENCE_LOG: runLog }, openStore: sqliteFile });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
   const write = (name: string, text: string) => {

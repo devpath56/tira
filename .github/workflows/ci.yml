@@ -10,15 +10,18 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # A throwaway Postgres for this job: the Postgres store's contract tests, the scenario suite
-    # on Postgres, and its planted bugs run against it (they are skipped without TIRA_PG_URL).
+    # A throwaway Postgres for this job (no secret: a service container on this runner). Live,
+    # Postgres is tira's only store: its contract tests, the scenario suite on Postgres, the import,
+    # the tests that run tira as its own process, and its planted bugs run against it (they are
+    # skipped without TIRA_PG_URL). Everything else uses in-memory SQLite.
     services:
       postgres:
         image: postgres:17
         env:
           POSTGRES_USER: tira
-          POSTGRES_PASSWORD: tira-ci
           POSTGRES_DB: tira
+          # no password: a throwaway database reachable only from this job's own machine
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -27,7 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      TIRA_PG_URL: postgres://tira:tira-ci@localhost:5432/tira
+      TIRA_PG_URL: postgres://tira@localhost:5432/tira
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -92,11 +92,19 @@ const toStored = (r: Row): StoredEvent => ({
   recordedAt: r.recorded_at,
 });
 
+// An import tira won't do: into a schema that holds other events, or from a log with gaps.
+export class ImportRefused extends Error {}
+
+// the same event, as stored: id, place, type, data, metadata and record time
+const sameEvent = (a: StoredEvent, b: StoredEvent): boolean =>
+  a.eventId === b.eventId && a.seq === b.seq && a.stream === b.stream && a.streamRevision === b.streamRevision && a.type === b.type
+  && JSON.stringify(a.data) === JSON.stringify(b.data) && JSON.stringify(a.metadata) === JSON.stringify(b.metadata) && a.recordedAt === b.recordedAt;
+
 export class PostgresEventStore implements EventStore {
   readonly schema: string;
   private readonly pool: pg.Pool;
   private readonly pollIntervalMs: number;
-  private readonly ready: Promise<void>;
+  private setup: Promise<void> | undefined;
   private closed = false;
 
   constructor(opts: PostgresStoreOptions) {
@@ -107,9 +115,12 @@ export class PostgresEventStore implements EventStore {
     // an idle connection the server drops must not take the process down; the next query reconnects
     this.pool.on("error", () => {});
     this.pollIntervalMs = opts.pollIntervalMs ?? 50;
-    // Set up only what is missing: re-creating a trigger locks the table against writes, and
-    // every CLI command opens a store.
-    this.ready = this.transaction(async (c) => {
+  }
+
+  // The schema, set up on first use. Only what is missing: re-creating a trigger locks the table
+  // against writes, and every CLI command opens a store. A failure is reported by each call.
+  private ready(): Promise<void> {
+    this.setup ??= this.transaction(async (c) => {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-schema:${this.schema}`]);
       const made = await c.query<{ n: number }>(
         `SELECT count(*)::int AS n FROM pg_trigger t JOIN pg_class r ON r.oid = t.tgrelid JOIN pg_namespace ns ON ns.oid = r.relnamespace
@@ -118,12 +129,12 @@ export class PostgresEventStore implements EventStore {
       );
       if ((made.rows[0]?.n ?? 0) < 3) await c.query(ddl(this.schema));
     });
-    this.ready.catch(() => {}); // reported by the first call that waits on it
+    return this.setup;
   }
 
   // Run SQL as this store's connection (tests, and the manual tamper checks in the README).
   async exec(sql: string): Promise<void> {
-    await this.ready;
+    await this.ready();
     await this.pool.query(sql);
   }
 
@@ -156,7 +167,7 @@ export class PostgresEventStore implements EventStore {
         throw new TypeError("eventId must be a non-empty string");
       }
     }
-    await this.ready;
+    await this.ready();
     const s = this.schema;
     return this.transaction(async (c) => {
       // the one writer: the counter row stays locked until this append commits or rolls back
@@ -209,7 +220,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   async readStream(stream: string, opts: ReadStreamOptions = {}): Promise<StoredEvent[]> {
-    await this.ready;
+    await this.ready();
     const backwards = opts.direction === "backwards";
     const from = opts.fromRevision ?? (backwards ? 2147483647 : 0);
     const r = await this.pool.query<Row>(
@@ -221,12 +232,42 @@ export class PostgresEventStore implements EventStore {
   }
 
   async readAll(opts: ReadAllOptions = {}): Promise<StoredEvent[]> {
-    await this.ready;
+    await this.ready();
     const r = await this.pool.query<Row>(
       `SELECT * FROM ${this.schema}.events WHERE seq >= $1 ORDER BY seq ASC LIMIT $2`,
       [opts.fromSeq ?? 1, opts.limit ?? null],
     );
     return r.rows.map(toStored);
+  }
+
+  // A one-time copy of another store's whole log (tira import): every event as it was, with its
+  // id, seq, place in its stream, data, metadata and record time, so a fold here (and its
+  // fingerprint) is the same as there. Into an empty schema only, in one transaction: all or
+  // nothing. A re-run, when the first events here are exactly these, adds nothing.
+  async importLog(events: readonly StoredEvent[]): Promise<{ added: number }> {
+    await this.ready();
+    const s = this.schema;
+    return this.transaction(async (c) => {
+      const counter = await c.query<{ last: string }>(`SELECT last FROM ${s}.event_seq WHERE one FOR UPDATE`);
+      if (Number(counter.rows[0]?.last ?? 0) > 0) {
+        const have = (await c.query<Row>(`SELECT * FROM ${s}.events WHERE seq <= $1 ORDER BY seq ASC`, [events.length])).rows.map(toStored);
+        if (have.length === events.length && have.every((h, i) => sameEvent(h, events[i] as StoredEvent))) return { added: 0 };
+        throw new ImportRefused(`schema ${s} already holds other events: import into an empty schema (add ?schema=NAME to the connection string)`);
+      }
+      events.forEach((e, i) => {
+        if (e.seq !== i + 1) throw new ImportRefused(`the log isn't gapless from seq 1 (seq ${e.seq} at position ${i + 1})`);
+      });
+      if (events.length > 0) {
+        await c.query(
+          `INSERT INTO ${s}.events (seq, stream, stream_revision, event_id, type, data, metadata, recorded_at)
+           SELECT * FROM unnest($1::bigint[], $2::text[], $3::int[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])`,
+          [events.map((e) => e.seq), events.map((e) => e.stream), events.map((e) => e.streamRevision), events.map((e) => e.eventId), events.map((e) => e.type),
+            events.map((e) => JSON.stringify(e.data)), events.map((e) => (Object.keys(e.metadata).length > 0 ? JSON.stringify(e.metadata) : null)), events.map((e) => e.recordedAt)],
+        );
+      }
+      await c.query(`UPDATE ${s}.event_seq SET last = $1 WHERE one`, [events.length]);
+      return { added: events.length };
+    });
   }
 
   // Catch-up from fromSeq, then stay subscribed: the same poll loop as the SQLite store (poll.ts).

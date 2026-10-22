@@ -76,6 +76,22 @@ function latestCause(view: StateView, idx: TriggerIndex, b: EntityState, first: 
   return best;
 }
 
+type On = (rule: Rule, target: EntityState, event: string, payload: Record<string, unknown>, first: TriggerRecord, cause?: TriggerRecord) => void;
+
+// V1, V2: between a person's two approvals the idea pipeline moves itself (D5). An idea declared
+// with a summary gets its file drafted from what it said; once the file is approved, tira
+// proposes where it goes (fold/ideas.ts). An idea declared without one is driven by hand.
+function ideaPipeline(view: StateView, idx: TriggerIndex, registry: Registry, on: On): void {
+  for (const i of view.all(IDEA)) {
+    const born = idx.get(indexKey(i.key, `${IDEA}.created`));
+    const said = fileFrom(born?.payload);
+    if (born && said && i.regions.lifecycle === "declared") on("V1", i, "DRAFT_FILE", { ...said }, born);
+    const approved = i.regions.lifecycle === "filed" ? idx.get(indexKey(i.key, `${IDEA}.approve-file`)) : undefined;
+    const file = fileFrom(idx.get(indexKey(i.key, `${IDEA}.draft-file`))?.payload);
+    if (approved && file) on("V2", i, "PROPOSE_NODE", proposalPayload(placement(view, registry, file, born?.payload.under as string | undefined)), approved);
+  }
+}
+
 // Every receiver that is due now, in a fixed order. The registry's rules decide which task can
 // take an idea (V2).
 export function due(view: StateView, idx: TriggerIndex, registry: Registry): Receiver[] {
@@ -125,17 +141,8 @@ export function due(view: StateView, idx: TriggerIndex, registry: Registry): Rec
       }
     }
   }
-  // V1, V2: between a person's two approvals the idea pipeline moves itself (D5). An idea declared
-  // with a summary gets its file drafted from what it said; once the file is approved, tira
-  // proposes where it goes (fold/ideas.ts). An idea declared without one is driven by hand.
-  for (const i of view.all(IDEA)) {
-    const born = idx.get(indexKey(i.key, `${IDEA}.created`));
-    const said = fileFrom(born?.payload);
-    if (born && said && i.regions.lifecycle === "declared") on("V1", i, "DRAFT_FILE", { ...said }, born);
-    const approved = i.regions.lifecycle === "filed" ? idx.get(indexKey(i.key, `${IDEA}.approve-file`)) : undefined;
-    const file = fileFrom(idx.get(indexKey(i.key, `${IDEA}.draft-file`))?.payload);
-    if (approved && file) on("V2", i, "PROPOSE_NODE", proposalPayload(placement(view, registry, file, born?.payload.under as string | undefined)), approved);
-  }
+  // V1, V2: the idea pipeline moves itself between a person's two approvals (ideaPipeline).
+  ideaPipeline(view, idx, registry, on);
   // F1: a materialized idea is born as a node (same id), under the parent it was approved for.
   for (const i of view.all("idea")) {
     const approved = i.regions.lifecycle === "materialized" ? idx.get(indexKey(i.key, "idea.approve-node")) : undefined;

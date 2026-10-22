@@ -23,7 +23,7 @@ decided against the JTBDs with no incumbency bias (assumes nothing already spec'
 
 | Layer | Best served by OSS | Why / Why not |
 |---|---|---|
-| Event log | **SQLite** on one machine; **Postgres** for a shared tira (interface below; decided 2026-10-21, D11) | SQLite: append-only table, single file, zero ops, queryable. Postgres: the same rules for many people and workspaces, plus people, permissions and the Jira/git sync outbox in one database. KurrentDB was the named upgrade until D11: the right *category* (event-native), but it serves storage, not logic, and would need a second database for everything else. |
+| Event log | **Postgres**, hosted, the only live store (interface below; D11 2026-10-21, D12 2026-10-22). **SQLite**: tests and `tira import` only | Postgres: an append-only table with gapless `seq`, the same rules for many people and workspaces, plus people, permissions and the Jira/git sync outbox in one database; managed by any provider, TLS required off this machine. SQLite stays where it helps: in-memory for tests (no network, CI stays fast), and as the source of the one-time import of old logs. KurrentDB was the named upgrade until D11: the right *category* (event-native), but it serves storage, not logic, and would need a second database for everything else. |
 | Fold engine | — (build) | Pure function over the transition tables; no OSS knows our domain. |
 | Transition tables | — (build); JSON Schema validates shape | The 35-pair node table and 36-pair idea table are the spec. Executable form is an implementation choice (JSON + tiny runner preferred over a framework). |
 | Write-time guards | — (build) | Plain conditionals (`COMPLETE` without `evidenceRef` → reject). OPA is factory-consistent but overkill inside the MVP. |
@@ -35,9 +35,10 @@ decided against the JTBDs with no incumbency bias (assumes nothing already spec'
 
 ## 3. Storage interface
 
-The event store is the one swappable layer. Everything above speaks this interface;
-SQLite implements it for one machine and Postgres for a shared tira (D11). Both pass
-the same contract tests (`test/store.test.ts`), and neither touches the fold, guards, or UI.
+The event store is the one swappable layer. Everything above speaks this interface.
+Postgres implements it for every live tira (D11, D12: hosted, the only live store); SQLite
+implements it for tests and as the source of `tira import`. Both pass the same contract
+tests (`test/store.test.ts`), and neither touches the fold, guards, or UI.
 
 ```typescript
 interface EventStore {
@@ -96,7 +97,7 @@ reconstruction. The `$all` source exists for future multi-tree operation.
 4. **`seq` is the only ordering that matters.** Folds, replay-to-N, and subscriptions
    all key off `seq`. Wall-clock `recordedAt` is informational.
 
-### SQLite implementation sketch (MVP)
+### SQLite implementation sketch (MVP; tests and the import's source since D12)
 
 ```sql
 CREATE TABLE events (
@@ -137,7 +138,7 @@ In production tira connects as a login that owns nothing and may only `INSERT` a
 on the events table (and update the counter); the triggers stop edits, and ownership stops a
 `DROP`. `subscribe` is the same poll loop as SQLite's (`src/store/poll.ts`).
 
-### KurrentDB mapping (the named upgrade until D11)
+### KurrentDB mapping (historical: the named upgrade until D11; Postgres is the store since D12)
 
 | Interface | KurrentDB |
 |---|---|
@@ -180,4 +181,5 @@ never state directly.
 | D9 | Phase 1 = vertical slice, factory stream first | The first build is end-to-end (store + fold + gates + factory stream vocabulary), not layered. The factory is customer #1: the substrate thesis meets the hardest real user on day one, and the cutover decision gets measured evidence (dual-run divergence) instead of argument. The dashboard scenarios become the executable test suite. Falsifier: if the brief's 3-dimension state doesn't fit the node lifecycle, Phase 1 discovers the needed generalization. |
 | D10 | Cross-region rules live in the declared handoff policy (H1–H6) | Tables stay small and guard-free; composition declared in config per the regions proposal, mechanically enforced by region-scan. Keeps each region's table independently auditable; joint meaning is computed in exactly one place. Counter-pressure: the policy must stay declarative — a procedural policy becomes a second codebase, and the sign-off checks that. |
 | D11 | Postgres, not KurrentDB, for a shared tira (decided by Isha, 2026-10-21) | tira goes multi-user across 15+ workspaces, synced with Jira and git. Postgres meets every log rule above and also holds people, workspaces, permissions (row-level security) and the sync outbox in one database; KurrentDB would need a second database for those. Revises D5's upgrade path; SQLite stays for one machine. Open for Devansh: one order across all workspaces or one per workspace; who wins when tira and Jira disagree; when to switch. Brief: the "tira storage and workspaces" doc. |
-| D12 | Workspaces link to git and Jira; tira leads (decided by Isha, 2026-10-21) | One project = one workspace = one task tree, linked to one repo and one Jira project. Pull requests that name a task are linked to it, and a merged one is offered as its proof; tasks are mirrored to Jira; a person's move in Jira comes back as a request tira's rules may refuse. Changes come in on demand (`tira sync`), so no public server is needed yet; webhooks wait for hosting and sign-in. Three new record types beside the tasks; the task table is untouched. |
+| D12 | Postgres is the only live store, hosted from day one (decided by Isha, 2026-10-22; Devansh agreed) | Every real write goes to one database: the CLI, `tira serve` and factory emission read `$TIRA_DATABASE_URL`, refuse a SQLite file, and no longer make `./tira.db` in whatever folder they ran from. Any managed Postgres works (a standard connection string, TLS off this machine); the string is never logged or printed. Old SQLite logs come over once with `tira import`, event for event, with each stream's fingerprint checked. SQLite stays in tests (in memory) and as the import's source. Revises D11's "SQLite stays for one machine". |
+| D13 | Workspaces link to git and Jira; tira leads (decided by Isha, 2026-10-21) | One project = one workspace = one task tree, linked to one repo and one Jira project. Pull requests that name a task are linked to it, and a merged one is offered as its proof; tasks are mirrored to Jira; a person's move in Jira comes back as a request tira's rules may refuse. Changes come in on demand (`tira sync`), so no public server is needed yet; webhooks wait for hosting and sign-in. Three new record types beside the tasks; the task table is untouched. |
