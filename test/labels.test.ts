@@ -3,6 +3,7 @@
 // T1 / T2 semantics are run here with the repo's CLI (src/cli/cli.ts `run`):
 //   T1 a label from the approval's own approver is refused at the write path: exit 2, nothing appended
 //   T2 a label citing evidence the log doesn't hold folds as an anomaly, outside every label count
+import { sqliteFile } from "./test-stores.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -23,7 +24,7 @@ function sandbox() {
   const tira = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {} });
+    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {}, openStore: sqliteFile });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
   const ok = async (...argv: string[]) => {

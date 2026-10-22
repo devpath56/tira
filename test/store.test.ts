@@ -306,17 +306,41 @@ for (const b of [sqlite, postgres]) {
   }));
 }
 
-test("a postgres:// URL opens the Postgres store; anything else, a SQLite file; a URL's password is never printed", async () => {
-  const { openStore, dbLabel } = await import("../src/store/open.ts");
-  for (const url of ["postgres://tira@127.0.0.1:1/none", "postgresql://tira@127.0.0.1:1/none"]) {
-    const s = openStore(url);
-    assert.ok(s instanceof PostgresEventStore, url);
-    await s.close();
-  }
-  const s = openStore(":memory:");
-  assert.ok(s instanceof SqliteEventStore);
-  await s.close();
-  assert.equal(dbLabel("postgres://tira:s3cret@db.example:5432/tira"), "postgres://tira:***@db.example:5432/tira");
-  assert.equal(dbLabel("postgres://db.example/tira"), "postgres://db.example/tira");
-  assert.equal(dbLabel("tira.db"), "tira.db");
+test("live, tira opens Postgres only: a file or no setting is refused in plain words, another machine needs TLS, and no message holds the connection string", async () => {
+  const { DatabaseRefused, liveDatabase, openStore } = await import("../src/store/open.ts");
+  const refused = (flag: string | undefined, env: Record<string, string>) => {
+    try {
+      liveDatabase(flag, env);
+      return "";
+    } catch (err) {
+      assert.ok(err instanceof DatabaseRefused);
+      return err.message;
+    }
+  };
+  assert.match(refused(undefined, {}), /^no database: set TIRA_DATABASE_URL to your Postgres connection string/);
+  assert.match(refused("tira.db", {}), /Postgres only, and --db names a file\. Set TIRA_DATABASE_URL[^]*tira import <file>/);
+  assert.match(refused(undefined, { TIRA_DB: "old.db" }), /the database setting names a file/);
+  const hosted = "postgres://u:s3cret@db.example.com/tira";
+  assert.match(refused(hosted, {}), /^a database on another machine needs TLS: end TIRA_DATABASE_URL with \?sslmode=require/);
+  assert.match(refused(undefined, { TIRA_DATABASE_URL: `${hosted}?sslmode=disable` }), /needs TLS/);
+  for (const m of [refused(hosted, {}), refused("tira.db", {})]) assert.doesNotMatch(m, /s3cret|db\.example|u:/);
+  assert.equal(liveDatabase(undefined, { TIRA_DATABASE_URL: `${hosted}?sslmode=require` }), `${hosted}?sslmode=require`);
+  assert.equal(liveDatabase(undefined, { TIRA_DATABASE_URL: `${hosted}?sslmode=verify-full`, TIRA_DB: "postgres://other@localhost/x" }), `${hosted}?sslmode=verify-full`); // the new name wins
+  for (const local of ["postgres://u@localhost:5433/tira", "postgres://u@127.0.0.1/tira", "postgresql://u@[::1]/tira"]) assert.equal(liveDatabase(local, {}), local); // this machine: no TLS needed
+  // the store a string names; ?schema= picks the schema and isn't passed on to the driver
+  const named = openStore("postgres://tira@127.0.0.1:1/none?schema=trial_one");
+  assert.ok(named instanceof PostgresEventStore);
+  assert.equal(named.schema, "trial_one");
+  await named.close();
+  const plain = openStore("postgresql://tira@127.0.0.1:1/none");
+  assert.equal(plain.schema, "tira");
+  await plain.close();
+  const viaEnv = openStore("postgresql://tira@127.0.0.1:1/none", "demo_d1"); // $TIRA_SCHEMA
+  assert.equal(viaEnv.schema, "demo_d1");
+  await viaEnv.close();
+  const urlWins = openStore("postgresql://tira@127.0.0.1:1/none?schema=trial_two", "demo_d1");
+  assert.equal(urlWins.schema, "trial_two");
+  await urlWins.close();
+  assert.throws(() => openStore("tira.db"), DatabaseRefused);
 });
+

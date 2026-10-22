@@ -1,6 +1,7 @@
 // D1 — the thin HTML page and the text tree. The page check is the automatable half
 // of manual test M1: every node in the fold appears exactly once, with the fold's
 // state, drain, cursor and active flags, and the page carries the dump hash.
+import { sqliteFile } from "./test-stores.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -706,7 +707,7 @@ async function b3Store(dir: string): Promise<string> {
 async function cli(argv: string[], env: Record<string, string>) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env });
+  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env, openStore: sqliteFile });
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 
