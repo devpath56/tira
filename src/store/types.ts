@@ -1,5 +1,5 @@
 // Storage interface — packing.md §3. Everything above the store speaks only this.
-// SQLite implements it for the MVP; KurrentDB can replace the implementation.
+// SQLite implements it on one machine, Postgres for a shared tira (packing.md D11).
 //
 // Deviations from the §3 sketch, made explicit (provisional; flagged for the PM):
 // - NewEvent carries an optional eventId. §3 makes eventId the idempotency key

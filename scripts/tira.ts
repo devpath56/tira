@@ -13,6 +13,14 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
   return (emitWarning as (...a: unknown[]) => void)(warning, ...rest);
 }) as typeof process.emitWarning;
 
+// The database's connection string may sit in this repo's own .env (gitignored): read it if it's
+// there. A setting already in the environment wins. Never printed.
+try {
+  process.loadEnvFile(new URL("../.env", import.meta.url));
+} catch {
+  // no .env: the environment alone
+}
+
 const { run } = await import("../src/cli/cli.ts");
 process.exitCode = await run(process.argv.slice(2), {
   out: (line) => console.log(line),

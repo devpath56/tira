@@ -1,8 +1,12 @@
 // tira CLI: commands, exit codes, payload parsing, persistence across runs, and one
 // end-to-end spawn of the real entry script.
+import { freshPgDb, needsPg, sqliteFile } from "./test-stores.ts";
+import { openStore, type ClosableStore } from "../src/store/open.ts";
+import { WritePath } from "../src/write/write-path.ts";
+import { defaultRegistry } from "../src/tables/registry.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -16,7 +20,7 @@ function sandbox() {
   const tira = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {} });
+    const code = await run(["--db", db, ...argv], { out: (l) => out.push(l), err: (l) => err.push(l), env: {}, openStore: sqliteFile });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
   return { dir, db, tira, done: () => rmSync(dir, { recursive: true, force: true }) };
@@ -227,7 +231,7 @@ test("dump: canonical JSON of the fold; --hash is stable across runs and copies,
     const copy = join(s.dir, "copy.db");
     copyFileSync(s.db, copy); // a fresh store holding only the raw log
     const out: string[] = [];
-    await run(["--db", copy, "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {} });
+    await run(["--db", copy, "dump", "--hash"], { out: (l) => out.push(l), err: () => {}, env: {}, openStore: sqliteFile });
     assert.equal(out[0], h1);
     // replay-to-N reproduces the hash the log had at N
     await s.tira("send", "node", "a", "COMPLETE", "evidenceRef=e");
@@ -363,11 +367,11 @@ test("tira sweep: exits 0 with things to look at, 3 when something is broken; --
   }
 });
 
-test("environment defaults: TIRA_DB, TIRA_STREAM, TIRA_ACTOR", async () => {
+test("environment defaults: TIRA_DATABASE_URL, TIRA_STREAM, TIRA_ACTOR", async () => {
   const s = sandbox();
   try {
-    const env = { TIRA_DB: s.db, TIRA_STREAM: "tasktree-env", TIRA_ACTOR: "env-actor" };
-    const io = (out: string[]) => ({ out: (l: string) => out.push(l), err: () => {}, env });
+    const env = { TIRA_DATABASE_URL: s.db, TIRA_STREAM: "tasktree-env", TIRA_ACTOR: "env-actor" };
+    const io = (out: string[]) => ({ out: (l: string) => out.push(l), err: () => {}, env, openStore: sqliteFile });
     assert.equal(await run(["create", "node", "a"], io([])), 0);
     const out: string[] = [];
     await run(["log"], io(out));
@@ -378,12 +382,13 @@ test("environment defaults: TIRA_DB, TIRA_STREAM, TIRA_ACTOR", async () => {
   }
 });
 
-test("end to end: the real entry script, exit codes included", () => {
+test("end to end: the real entry script, exit codes included (on Postgres, as it runs live)", { skip: needsPg }, () => {
   const s = sandbox();
   try {
     const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+    const db = freshPgDb();
     const tira = (...argv: string[]) =>
-      spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--db", s.db, ...argv], { encoding: "utf8" });
+      spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, ...argv], { encoding: "utf8", env: { ...process.env, TIRA_DATABASE_URL: db } });
     assert.equal(tira("create", "node", "a").status, 0);
     const rejected = tira("send", "node", "a", "REOPEN");
     assert.equal(rejected.status, 2);
@@ -397,14 +402,28 @@ test("end to end: the real entry script, exit codes included", () => {
   }
 });
 
-test("end to end: plain `node scripts/tira.ts` (no flags) prints no SQLite warning", () => {
+test("live, tira keeps its data in Postgres only: a SQLite file or no database is refused in plain words, nothing is made in the folder, and no SQLite warning prints", () => {
   const s = sandbox();
   try {
     const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
-    const r = spawnSync(process.execPath, [script, "--db", s.db, "create", "node", "a"], { encoding: "utf8" });
-    assert.equal(r.status, 0);
-    assert.doesNotMatch(r.stderr, /ExperimentalWarning|SQLite/);
-    assert.equal(r.stderr, "");
+    const env = { ...process.env, TIRA_DATABASE_URL: "", TIRA_DB: "" };
+    const r = spawnSync(process.execPath, [script, "--db", s.db, "create", "node", "a"], { encoding: "utf8", env });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /^tira: tira keeps its data in Postgres only, and --db names a file\. Set TIRA_DATABASE_URL to your Postgres connection string; to bring an old SQLite log over, run tira import <file>\.\n$/);
+    assert.equal(existsSync(s.db), false); // no SQLite file made
+    const cwd = mkdtempSync(join(tmpdir(), "tira-cwd-"));
+    const none = spawnSync(process.execPath, [script, "create", "node", "a"], { encoding: "utf8", env, cwd });
+    assert.equal(none.status, 1);
+    assert.match(none.stderr, /^tira: no database: set TIRA_DATABASE_URL to your Postgres connection string/);
+    assert.deepEqual(readdirSync(cwd), []); // no ./tira.db, the second store
+    rmSync(cwd, { recursive: true, force: true });
+    // a hosted database without TLS is refused, and the string isn't printed
+    const plain = spawnSync(process.execPath, [script, "log"], { encoding: "utf8", env: { ...env, TIRA_DATABASE_URL: "postgres://u:s3cret@db.example.com/tira" } });
+    assert.equal(plain.status, 1);
+    assert.match(plain.stderr, /needs TLS/);
+    assert.doesNotMatch(plain.stderr + plain.stdout, /s3cret|db\.example/);
+    // commands that need no database still run: types, help, key
+    assert.equal(spawnSync(process.execPath, [script, "types"], { encoding: "utf8", env }).status, 0);
   } finally {
     s.done();
   }
@@ -422,16 +441,20 @@ const B3_COUNTS = { OK: 39, MISSING: 2, PHANTOM: 2, "WRONG-ENTITY": 2, DUPLICATE
 
 async function b3Db(dir: string): Promise<string> {
   const db = join(dir, "b3.db");
-  const store = new SqliteEventStore({ path: db });
+  await b3Into(new SqliteEventStore({ path: db }));
+  return db;
+}
+
+// the B3 fixture's tira log, into a store (closed after)
+async function b3Into(store: ClosableStore): Promise<void> {
   try {
     for (const l of readFileSync(B3_TIRA, "utf8").trim().split("\n")) {
       const e = JSON.parse(l) as { stream: string; eventId: string; type: string; data: Record<string, unknown>; metadata: Record<string, string> };
       await store.append(e.stream, [{ eventId: e.eventId, type: e.type, data: e.data, metadata: e.metadata }]);
     }
   } finally {
-    store.close();
+    await store.close();
   }
-  return db;
 }
 
 const panelCounts = (html: string) => {
@@ -442,7 +465,7 @@ const panelCounts = (html: string) => {
 async function cliRun(argv: string[], env: Record<string, string>) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env });
+  const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env, openStore: sqliteFile });
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 
@@ -466,12 +489,12 @@ test("divergence wiring: the CLI report and the rendered page agree on the B3 pa
   }
 });
 
-test("divergence wiring: tira serve recomputes the section on every page load, UNEVALUABLE without a factory file", async () => {
+test("divergence wiring: tira serve recomputes the section on every page load, UNEVALUABLE without a factory file (on Postgres, as it runs live)", { skip: needsPg }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tira-serve-wired-"));
   const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+  const db = freshPgDb();
   const serveOnce = async (flags: string[], before?: (port: number) => Promise<void>) => {
-    const db = join(dir, "b3.db");
-    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--db", db, "--stream", "factory-b3", "serve", "--actor", "isha", "--port", "0", ...flags], { env: { ...process.env, TIRA_FACTORY: "", TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") } });
+    const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "factory-b3", "serve", "--actor", "isha", "--port", "0", ...flags], { env: { ...process.env, TIRA_DATABASE_URL: db, TIRA_FACTORY: "", TIRA_DIVERGENCE_LOG: join(dir, "run-log.jsonl") } });
     try {
       const port = await new Promise<number>((resolve, reject) => {
         let buf = "";
@@ -487,7 +510,7 @@ test("divergence wiring: tira serve recomputes the section on every page load, U
     }
   };
   try {
-    await b3Db(dir);
+    await b3Into(openStore(db));
     const live = panelCounts(await serveOnce(["--factory", B3_FACTORY]));
     assert.equal(live.state, "divergent");
     assert.deepEqual(live.counts, B3_COUNTS);
@@ -541,6 +564,51 @@ test("divergence wiring: no page reads a stored report — a poisoned run log ch
       `const RUN_LOG = fileURLToPath(new URL("../../docs/divergence-run-log.jsonl", import.meta.url));`,
       "appendFileSync(io.env.TIRA_DIVERGENCE_LOG ?? RUN_LOG, `${JSON.stringify(row)}\\n`);",
     ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tira import: an old SQLite log is copied into an empty Postgres schema as it was, each stream folds the same, a re-run adds nothing, and a schema with other events is refused", { skip: needsPg }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-import-"));
+  try {
+    // an old log: two streams, an event, a refusal, and actors in the metadata
+    const file = join(dir, "old.db");
+    const old = new SqliteEventStore({ path: file });
+    const wp = new WritePath(old, defaultRegistry());
+    await wp.submit({ stream: "dash", kind: "create", entity: { type: "node", id: "app" }, actor: "isha" });
+    await wp.submit({ stream: "dash", kind: "create", entity: { type: "node", id: "table" }, actor: "isha", payload: { parent_id: "app" } });
+    await wp.submit({ stream: "other", kind: "create", entity: { type: "node", id: "x" }, actor: "devansh" });
+    await wp.submit({ stream: "dash", kind: "event", entity: { type: "node", id: "table" }, event: "START", actor: "isha" });
+    await wp.submit({ stream: "dash", kind: "event", entity: { type: "node", id: "table" }, event: "REOPEN", actor: "isha" }); // refused, and logged
+    const before = await old.readAll();
+    old.close();
+    const db = freshPgDb();
+    const first = await cliRun(["--db", db, "import", file], {});
+    assert.equal(first.code, 0, first.err);
+    assert.match(first.out, /^same {2}dash · 4 event\(s\) · sha256:[0-9a-f]{64}$/m);
+    assert.match(first.out, /^same {2}other · 1 event\(s\) · sha256:[0-9a-f]{64}$/m);
+    assert.ok(first.out.split("\n").includes(`imported 5 event(s) from ${file}`), first.out);
+    // every event as it was: id, seq, stream, place, data, metadata, record time
+    const pg = openStore(db);
+    try {
+      assert.deepEqual(await pg.readAll(), before);
+    } finally {
+      await pg.close();
+    }
+    // a re-run adds nothing
+    const again = await cliRun(["--db", db, "import", file], {});
+    assert.equal(again.code, 0, again.err);
+    assert.match(again.out, /^already imported: nothing added \(5 event\(s\) from .* are here as they were\)$/m);
+    // a schema that holds other events is refused; a missing file is a usage error
+    const busy = freshPgDb();
+    const other = openStore(busy);
+    await other.append("live", [{ type: "node.born", data: { entity: { id: "y" }, payload: {} }, metadata: { actor: "isha" } }]);
+    await other.close();
+    const refused = await cliRun(["--db", busy, "import", file], {});
+    assert.equal(refused.code, 1);
+    assert.match(refused.err, /already holds other events: import into an empty schema/);
+    assert.match((await cliRun(["--db", db, "import", join(dir, "nope.db")], {})).err, /no such file/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

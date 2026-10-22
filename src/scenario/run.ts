@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SqliteEventStore } from "../store/sqlite-store.ts";
-import type { StoredEvent } from "../store/types.ts";
+import type { EventStore, StoredEvent } from "../store/types.ts";
 import { defaultRegistry, type Registry } from "../tables/registry.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { fxKey, transitionOf } from "../write/fxkey.ts";
@@ -168,9 +168,10 @@ export interface ScenarioResult {
   log: StoredEvent[];
 }
 
-export async function runScenario(s: Scenario, all: Map<string, Scenario>, registry: Registry = defaultRegistry()): Promise<ScenarioResult> {
+// `store`: where the script runs (a fresh in-memory SQLite store by default; the Postgres run of
+// the suite passes an empty Postgres one).
+export async function runScenario(s: Scenario, all: Map<string, Scenario>, registry: Registry = defaultRegistry(), store: EventStore = new SqliteEventStore()): Promise<ScenarioResult> {
   const stream = s.stream ?? `scenario-${s.id.toLowerCase()}`;
-  const store = new SqliteEventStore();
   const d = new Dispatcher(store, registry);
   const failures: string[] = [];
   const labels = new Map<string, number>(); // label -> last seq after that step
