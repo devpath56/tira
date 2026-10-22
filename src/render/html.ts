@@ -309,7 +309,7 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 .np-page .set-main>*{max-width:780px}.np-page .flash{margin:0 0 16px}
 .np-form .grp-row{padding:12px 16px}.np-form .grp-k{flex:0 0 230px;display:grid;gap:2px;font-weight:600}.np-form .grp-k small{font-weight:400;font-size:12px;line-height:1.4;color:var(--mut)}
 .np-form input{height:36px;transition:box-shadow .18s var(--ease)}.np-form input:focus{outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 35%,transparent)}.np-form input[aria-invalid=true]{box-shadow:0 0 0 2px var(--block)}
-.np-acts{justify-content:flex-end;gap:8px}.np-field>.how{margin-left:0}.np-form select{flex:1 1 240px;height:36px}
+.np-acts{justify-content:flex-end;gap:8px}.np-jira{display:contents}.np-jira>.grp-row,.np-jira+.grp-row{border-top:1px solid var(--line)}.np-field>.how{margin-left:0}.np-form select{flex:1 1 240px;height:36px}
 .np-side{padding:24px 20px}.np-k{margin:0 0 10px;font:600 11px var(--sans);letter-spacing:.03em;text-transform:uppercase;color:var(--dim)}
 .np-card{margin:0 0 28px;padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
 .np-who{display:flex;align-items:center;gap:12px;margin:0}.np-who .pav{width:40px;height:40px;border-radius:11px;font-size:20px;transition:background .25s var(--ease)}

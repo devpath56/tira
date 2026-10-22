@@ -27,7 +27,8 @@ on the left, the project's name, GitHub repo and Jira project across the middle,
 preview of its mark and name as you type, with what happens next. Your accounts fill it in: your
 GitHub repos as suggestions (owner/name; tira's rules want a project born linked) and, if you've
 connected Jira, its projects to pick from (or none for now); if you haven't, **Connect with Jira**
-does it in a tab of its own, and the page reloads with the picker, keeping what you typed. **Create project** makes it as the person acting and
+does it in a tab of its own; when Atlassian says yes, the page swaps in the picker and leaves what
+you typed as it was (it isn't kept anywhere but the form). **Create project** makes it as the person acting and
 opens on the new project's own board, where its linked bar offers **Add Jira** and **Sync**;
 **Cancel** and the tira mark go back to the board you came from. A taken name, a name that can't
 be one, or a repo that isn't owner/name writes nothing: the page comes back with what you typed,

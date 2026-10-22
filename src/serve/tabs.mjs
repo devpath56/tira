@@ -18,6 +18,7 @@ if (document.querySelector("[data-jira-done]")) {
     });
   }
   channel?.addEventListener("message", (e) => {
-    if (e.data?.jira === "connected") location.reload();
+    // the New project page swaps in its Jira row itself (new-project.mjs), keeping what was typed
+    if (e.data?.jira === "connected" && !document.querySelector("[data-np-jira-row]")) location.reload();
   });
 }

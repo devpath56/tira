@@ -817,6 +817,12 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.match(newPage, /<div class="np-card" data-np-preview>[^]*?<b data-np-show-name>your-project<\/b>/);
     assert.match(newPage, /<script type="module" src="\/new-project\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/new-project.mjs")).status, 200);
+    // connecting Jira swaps in the Jira row alone; what was typed isn't kept anywhere but the form
+    assert.match(newPage, /<div class="np-jira" data-np-jira-row>/);
+    const npScript = readFileSync(new URL("../src/serve/new-project.mjs", import.meta.url), "utf8");
+    assert.doesNotMatch(npScript, /sessionStorage|localStorage/);
+    assert.match(npScript, /querySelector\("\[data-np-jira-row\]"\)[^]*?replaceWith/);
+    assert.match(readFileSync(new URL("../src/serve/tabs.mjs", import.meta.url), "utf8"), /!document\.querySelector\("\[data-np-jira-row\]"\)\) location\.reload\(\)/);
     const made = await s.post("/projects", { name: "tablet", repo: "acme/tablet" });
     assert.match(String(made.headers.location), /^\/\?r=\d+&w=tablet$/);
     assert.equal(await s.flash(made), "Created tablet, linked to GitHub acme/tablet. Add its Jira project, or sync, from here.");

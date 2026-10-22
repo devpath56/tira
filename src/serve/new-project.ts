@@ -2,7 +2,8 @@
 // left (the tira mark goes back to the board you came from), the project's name, GitHub repo and
 // Jira project across the middle, and a preview of it on the right with what happens next. Your
 // accounts fill it in: your repos as suggestions and, once you've connected Jira, its projects to
-// pick from (else a way to connect it, in a tab of its own: this page reloads when it's done).
+// pick from (else a way to connect it, in a tab of its own: when it's done, this page swaps in its
+// Jira row alone, so what you typed stays as it is).
 // Created, it opens on its own board. A name, repo or Jira project that can't be one comes back here
 // with what was typed and why; nothing is written.
 import { brand, CSS, projectMark, THEME_RADIOS } from "../render/html.ts";
@@ -59,7 +60,7 @@ export function newProjectPage(p: NewProject): string {
   const form = `<form method="post" action="${esc(p.action)}" class="grp-list np-form" data-new-project-form><input type="hidden" name="token" value="${esc(p.token)}">`
     + field("name", "Project name", "Letters, digits, dots, dashes or underscores.", `<input name="name" value="${esc(name)}" required maxlength="80" pattern="${NAME_FIELD}" placeholder="mobile-app" autocomplete="off" spellcheck="false" data-np-name>`)
     + field("repo", "GitHub repository", `${mine ? "One of yours, or any" : "As"} owner/name. Its pull requests link to tasks; a merged one is the proof.`, `<input name="repo" value="${esc(repo)}" required pattern="${REPO_FIELD}" placeholder="owner/name" autocomplete="off" spellcheck="false"${mine ? ` list="np-repos"` : ""} data-np-repo>`) + mine
-    + jiraRow(p)
+    + `<div class="np-jira" data-np-jira-row>${jiraRow(p)}</div>`
     + `<div class="grp-row np-acts"><a class="act" href="${esc(p.back)}">Cancel</a><button class="act primary" type="submit">Create project</button></div></form>`;
   const main = `<div class="set-main"><header class="int-head"><h1>Create a new project</h1><p>A project is one task tree with its own board, linked to one GitHub repo and, if you use one, one Jira project.</p></header>`
     + (p.problem ? `<div class="flash no" role="alert" id="np-problem" data-np-problem>${esc(p.problem.text)}</div>` : "")
