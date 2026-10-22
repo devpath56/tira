@@ -51,6 +51,14 @@ async function pages(): Promise<string> {
   await d.submit({ stream: "f", kind: "event", entity: { type: "brief", id: "x", version: 1 }, event: "DISPATCHED", actor: "orchestrator" });
   const fe = await store.readStream("f");
   const lanes = renderHtml(fold(fe, registry), "f", "h", fe);
+  // a busy stream: more than 3 need you (blocked groups fold to a line) and 9 done (Done keeps its newest 8)
+  const busy = (id: string, event?: string, payload: Record<string, unknown> = {}) => event === undefined
+    ? d.submit({ stream: "busy", kind: "create", entity: { type: "node", id }, actor: "isha" })
+    : d.submit({ stream: "busy", kind: "event", entity: { type: "node", id }, event, actor: "isha", payload });
+  for (let i = 0; i < 9; i++) { await busy(`d${i}`); await busy(`d${i}`, "START"); await busy(`d${i}`, "COMPLETE", { evidenceRef: "e" }); }
+  for (let i = 0; i < 4; i++) { await busy(`b${i}`); await busy(`b${i}`, "BLOCK", { reason: "waiting" }); }
+  const be = await store.readStream("busy");
+  const busyPage = renderHtml(fold(be, registry), "busy", "h", be);
   // the live page, a confirm page, and a result
   const server = tiraServer({ store, registry, stream: "t", actor: "isha", token: "k" });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -78,8 +86,9 @@ async function pages(): Promise<string> {
     const seen = String((await store.readStream("t")).at(-1)?.seq);
     const acted = await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&evidenceRef=e&seen=${seen}`);
     const flash = (await get("GET", acted.location ?? "/")).body;
+    const noWorkspace = (await get("GET", "/?w=nope")).body; // a workspace the store doesn't hold
     const script = ["app.mjs", "graph.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
-    return [staticPage, legacyPage, lanes, live, confirm, fragment, blockLive, pick, stopped, flash, script].join("\n");
+    return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, stopped, flash, noWorkspace, script].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
@@ -99,7 +108,7 @@ const present = (hook: string, text: string): boolean => {
 
 test("every component doc says its job and names hooks; every hook exists in the build", async () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
-  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "theme-switch.md"]);
+  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "theme-switch.md", "workspace-switch.md"]);
   const built = await pages();
   for (const f of files) {
     const doc = readFileSync(new URL(f, DIR), "utf8");

@@ -10,11 +10,11 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
-import { CSP, hintFor, inOrder, taskIndex, tiraServer } from "../src/serve/server.ts";
+import { CSP, changedBy, hintFor, inOrder, taskIndex, tiraServer, withQ, workspaceIn, workspaceList } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
 import { filesMatching, srcCode } from "./src-text.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
-import { rank, score } from "../src/serve/rank.mjs";
+import { priority, rank, score } from "../src/serve/rank.mjs";
 
 const S = "tasktree-dash";
 
@@ -98,7 +98,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.equal(theme.status, 200);
     assert.match(theme.body, /localStorage\.setItem\(KEY, r\.dataset\.themeChoice\)/);
     // the graph's canvas (pan, zoom, folds), on the same layout code the page was rendered with
-    assert.match(app.body, /import "\.\/graph\.mjs";/);
+    assert.match(app.body, /import \{ graph \} from "\.\/graph\.mjs";/);
     const graph = await s.http("GET", "/graph.mjs");
     assert.equal(graph.status, 200);
     assert.match(graph.body, /from "\.\/layout\.mjs";/);
@@ -127,7 +127,9 @@ test("the palette's index lists every task in drawer order, with its path", asyn
   try {
     const tasks = JSON.parse((await s.http("GET", "/api/tasks")).body) as { id: string; state: string; path: string; drawer: string }[];
     assert.deepEqual(tasks.map((t) => t.id), ["dashboard", "metrics_card", "fetch_metrics", "improve_visual", "colors", "loading_state", "font", "table", "filters"]);
-    assert.deepEqual(tasks.find((t) => t.id === "colors"), { key: "node:colors", type: "node", id: "colors", state: "blocked", path: "dashboard › metrics_card › improve_visual", drawer: "t4" });
+    assert.deepEqual(tasks.find((t) => t.id === "colors"), { key: "node:colors", type: "node", id: "colors", state: "blocked", path: "dashboard › metrics_card › improve_visual", drawer: "t4", next: false });
+    // the task tira says comes next is marked, once: the palette offers it first
+    assert.deepEqual(tasks.filter((t) => (t as { next?: boolean }).next).map((t) => t.id), ["fetch_metrics"]);
     const page = (await s.http("GET", "/")).body;
     for (const t of tasks) assert.ok(page.includes(`<section class="drawer" id="${t.drawer}" aria-label="${t.id}" role="dialog" aria-modal="true">`), t.id);
   } finally {
@@ -143,7 +145,10 @@ test("every decision has two views: the work in a nutshell with tira's recommend
     assert.equal(unblock.status, 409); // loading_state is in progress: one active task at a time
     assert.match(unblock.body, /data-ok="false"/);
     assert.match(unblock.body, /tira would refuse this: gate: one active task: node:loading_state is already active\./);
-    assert.match(unblock.body, /<section class="brief" aria-label="tira recommends \(read-only\)" data-brief><h2>tira recommends<\/h2><p><b>Decision:<\/b> colors is blocked under improve_visual since seq 10: &#34;waiting on the design-token decision&#34;\. Recorded as isha\.<\/p><p><b>Recommendation:<\/b> Don&#39;t run it: tira will refuse \(gate: /);
+    // the nutshell first: the move, then tira's verdict and what to do instead, then the recommendation
+    assert.match(unblock.body, /<section class="brief" aria-label="tira recommends \(read-only\)" data-brief><h2>tira recommends<\/h2><p class="nutshell" data-nutshell><b>Decision:<\/b> colors is blocked under improve_visual since seq 10: &#34;waiting on the design-token decision&#34;\. Recorded as isha\.<\/p><p class="verdict no">tira would refuse this: [^<]+<\/p><p class="hint" data-hint>[^]*?<\/p><p><b>Recommendation:<\/b> Don&#39;t run it: tira will refuse \(gate: /);
+    // the tradeoffs, best practice and kind wait under "Why"
+    assert.match(unblock.body, /<details class="why" data-why><summary>Why: tradeoffs, best practice, kind<\/summary><p><b>Tradeoffs:<\/b> [^<]+<\/p><p><b>Best practice:<\/b> [^<]+<\/p><p><b>Kind:<\/b> refused by the rules\.<\/p><\/details><\/section>/);
     assert.match(unblock.body, /<p><b>Kind:<\/b> refused by the rules\.<\/p>/);
     // refused: the command shows, read-only, with nothing to run
     assert.match(unblock.body, /data-command>tira send node colors UNBLOCK<\/textarea><p class="cmd-help">tira would refuse this as it stands: edit it \(another task or verb\) and check again, or close\./);
@@ -156,7 +161,7 @@ test("every decision has two views: the work in a nutshell with tira's recommend
     assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?data-theme-switch[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/);
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(complete.status, 200);
-    assert.match(complete.body, /<p><b>Decision:<\/b> loading_state is in progress under improve_visual since seq 11\. Completing it moves it in progress → done\. Recorded as isha\.<\/p>/);
+    assert.match(complete.body, /<p class="nutshell" data-nutshell><b>Decision:<\/b> loading_state is in progress under improve_visual since seq 11\. Completing it moves it in progress → done\. Recorded as isha\.<\/p>/);
     assert.match(complete.body, /<p><b>Recommendation:<\/b> Complete it with proof anyone can re-check\.<\/p>/); // colors and font are still open
     assert.match(complete.body, /<p><b>Kind:<\/b> a finish \(needs proof\)\. The rule: event\.evidenceRef is a non-empty string\.<\/p>/);
     for (const k of ["Tradeoffs", "Best practice"]) assert.match(complete.body, new RegExp(`<p><b>${k}:</b> [^<]+</p>`), k);
@@ -503,12 +508,12 @@ test("blocking on a new ticket creates it under the blocked task and links the t
     assert.match(dialog("loading_state"), /<div class="links" data-links><p><span class="lk">Blocked by<\/span><a href="#t\d+">qa_signoff<\/a><span class="state s-unstarted">/);
     assert.match(dialog("qa_signoff"), /<div class="links" data-links><p><span class="lk">Blocks<\/span><a href="#t\d+">loading_state<\/a><span class="state s-blocked">/);
     assert.match(page, /data-attention-key="node:loading_state"[^>]*>[^]*?<span class="by" data-blocked-by>waiting on <a href="#t\d+">qa_signoff<\/a>/);
-    assert.match(page, /<div class="t">qa_signoff<\/div><div class="row">[^]*?<span class="chip blocks" data-blocks>[^]*?blocks loading_state<\/span>/);
+    assert.match(page, /<div class="t">qa_<wbr>signoff<\/div><div class="row">[^]*?<span class="chip blocks" data-blocks>[^]*?blocks loading_state<\/span>/);
     assert.match(page, /<path class="e blocks" data-from="node:loading_state" data-to="node:qa_signoff"/); // its own subtask: the tree line is the link
     // both stay tickets on Kanban: the blocked task (now a parent) in Blocked, its new ticket in To do
     const kanban = /<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(page)?.[0] ?? "";
-    assert.match(kanban, /Blocked<span class="k">2<\/span><\/div>[^]*?<div class="t">colors<\/div>[^]*?<div class="t">loading_state<\/div><div class="row"><span class="chip">improve_visual<\/span><span class="chip" data-subtasks>0\/1 subtasks<\/span>[^]*?blocked by qa_signoff/);
-    assert.match(kanban, /To do<span class="k">\d+<\/span><\/div>[^]*?<div class="t">qa_signoff<\/div>/);
+    assert.match(kanban, /Blocked<span class="k">2<\/span><\/div>[^]*?<div class="t">colors<\/div>[^]*?<div class="t">loading_<wbr>state<\/div><div class="row"><span class="chip">improve_visual<\/span><span class="chip" data-subtasks>0\/1 subtasks<\/span>[^]*?blocked by qa_signoff/);
+    assert.match(kanban, /To do<span class="k">\d+<\/span><\/div>[^]*?<div class="t">qa_<wbr>signoff<\/div>/);
     assert.match(page, /aria-label="qa_signoff, to do, blocks loading_state/);
     // once the ticket is done, the wait looks over: said in needs attention and in the decision
     await s.send("qa_signoff", "START");
@@ -627,4 +632,144 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   } finally {
     await s.done();
   }
+});
+
+test("after an action, what it changed glows once: the task it moved, or a block's new ticket too; a refusal and a later load glow nothing", async () => {
+  const s = await serving();
+  try {
+    const glowing = (page: string) => [...page.matchAll(/<a class="(?:gn|ghost)[^"]*\bchanged\b[^"]*"[^>]*data-(?:key|idea)="([^"]+)"/g)].map((m) => m[1]);
+    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
+    const page = (await s.http("GET", String(ok.headers.location))).body;
+    assert.deepEqual(glowing(page), ["node:loading_state"]);
+    assert.match(page, /<a class="card changed" href="#t\d+"><div class="t">loading_<wbr>state<\/div>/);
+    assert.deepEqual(glowing((await s.http("GET", "/")).body), []); // once: the next load is quiet
+    // a refusal changed nothing
+    await s.send("filters", "START");
+    const no = await s.form({ token: "t0k3n", type: "node", id: "table", event: "START" });
+    assert.deepEqual(glowing((await s.http("GET", String(no.headers.location))).body), []);
+    // a block on a new ticket: both
+    const block = await s.form({ token: "t0k3n", type: "node", id: "filters", event: "BLOCK", fragment: "1", command: 'tira create node api_keys --parent filters kind=discovered discovered_during=filters\ntira send node filters BLOCK blocker="api_keys" reason="waiting on api_keys"' });
+    const go = /data-go="([^"]+)"/.exec(block.body)?.[1] ?? "";
+    assert.deepEqual(glowing((await s.http("GET", go)).body).sort(), ["node:api_keys", "node:filters"]);
+  } finally {
+    await s.done();
+  }
+  // what an action names: the task, or the subtask it adds; a block's ticket too
+  assert.deepEqual(changedBy({ type: "node", id: "a", event: "START", payload: {} }), ["node:a"]);
+  assert.deepEqual(changedBy({ type: "node", id: "a", event: "ADD_SUBTASK", payload: {}, child: "b" }), ["node:b"]);
+  assert.deepEqual(changedBy({ type: "node", id: "a", event: "BLOCK", payload: {} }, { type: "node", id: "a", event: "ADD_SUBTASK", payload: {}, child: "t" }), ["node:a", "node:t"]);
+});
+
+test("the palette opened empty offers what needs you first: next, then in progress, then blocked, then the rest to do; closed work last", () => {
+  const t = (id: string, state: string, next = false) => ({ key: `node:${id}`, type: "node", id, state, path: "", drawer: id, next });
+  const tasks = [t("old", "done"), t("later", "unstarted"), t("stuck", "blocked"), t("dropped", "cancelled"), t("doing", "in_progress"), t("up", "unstarted", true)];
+  assert.deepEqual(rank("", tasks).results.map((x: { id: string }) => x.id), ["up", "doing", "stuck", "later", "old", "dropped"]);
+  assert.deepEqual(tasks.map(priority), [0, 1, 2, 0, 3, 4]);
+  // a verb with nothing after it keeps the same order among what it allows
+  assert.deepEqual(rank("block ", tasks).results.map((x: { id: string }) => x.id), ["up", "doing", "later"]);
+  // typing ranks by the match alone
+  assert.equal(rank("old", tasks).results[0]?.id, "old");
+});
+
+test("the page's script: the palette moves to a task on the Graph, dialogs offer Show on graph, the highlighted match is announced, and motion stops for reduced motion", async () => {
+  const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
+  const graph = readFileSync(new URL("../src/serve/graph.mjs", import.meta.url), "utf8");
+  // the palette: on the Graph, picking a task moves there; elsewhere it opens the task's dialog
+  assert.match(app, /else if \(!\(graphShown\(\) && graph\.reveal\(task\.key\)\)\) location\.hash = `#\$\{task\.drawer\}`;/);
+  assert.match(app, /role="combobox" aria-expanded="true" aria-controls="pal-list"/);
+  assert.match(app, /if \(shown\[sel\]\) input\.setAttribute\("aria-activedescendant", `pal-\$\{sel\}`\);\n  else input\.removeAttribute\("aria-activedescendant"\);/);
+  // Show on graph: the dialog closes, the board turns to the Graph (remembered), the canvas moves there
+  assert.match(app, /closest\("\[data-show-on-graph\]"\)[^]*?location\.hash = "_";[^]*?pick\.checked = true; pick\.dispatchEvent\(new Event\("change"\)\);[^]*?graph\.reveal\(key\)/);
+  // folded attention groups you opened stay open across the reload (per tab)
+  assert.match(app, /sessionStorage\.setItem\(OPEN_KEY, JSON\.stringify\(open\)\)/);
+  // the canvas: reveal opens the folds above, glides there and rings it; nothing glides or tweens for reduced motion
+  assert.match(graph, /export const graph = \{\n  reveal: \(key\) => api\?\.reveal\(key\) \?\? false,/);
+  assert.match(graph, /function reveal\(key\) \{[^]*?unfoldTo\(n\);[^]*?glideTo\(centreOn\(p, /);
+  assert.match(graph, /function glideTo\(v, ms = 420, then\) \{\n    cancelAnimationFrame\(glide\);\n    if \(still\(\) \|\| /);
+  assert.match(graph, /if \(!animate \|\| still\(\)\) return paint\(last\.at\);/);
+  assert.match(graph, /wrap\.classList\.toggle\("far", isFar\(view\.s\)\);/);
+  assert.match(graph, /mini\.className = "minimap";/);
+});
+
+test("the mark goes home: the workspace's board live (and from a decision), the top of a rendered file", async () => {
+  const s = await serving();
+  try {
+    assert.match((await s.http("GET", "/")).body, /<nav class="top"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match((await s.http("GET", "/confirm?type=node&id=table&event=START")).body, /<nav class="top"><a class="brand" href="\/" title="Home: the board" data-home>[^]*?<a class="how" href="\/">← the page<\/a>/);
+    const events = await s.store.readStream(S);
+    const file = renderHtml(fold(events, s.registry), S, "h", events);
+    assert.match(file, /<nav class="top"><a class="brand" href="#" title="Home: the board" data-home><svg[^]*?<\/svg>tira<\/a><div class="tabs">/);
+    assert.doesNotMatch(file, /data-workspaces|data-ws-menu/); // a rendered file is one workspace: no switcher
+  } finally {
+    await s.done();
+  }
+});
+
+test("workspaces: one server serves every workspace in the store at ?w=; its page, palette, decisions and writes stay in it; the switcher lists them all", async () => {
+  const s = await serving();
+  const O = "side-project";
+  const wp = new WritePath(s.store, s.registry);
+  const other = (id: string, parent_id?: string) => wp.submit({ stream: O, kind: "create", entity: { type: "node", id }, actor: "isha", payload: parent_id ? { parent_id } : {} });
+  await other("site");
+  await other("hero", "site");
+  await other("contact", "site");
+  await wp.submit({ stream: O, kind: "event", entity: { type: "node", id: "hero" }, event: "BLOCK", actor: "isha", payload: { reason: "waiting on copy" } });
+  try {
+    // the switcher, live only: the workspace you're in, its list read when it opens
+    const home = (await s.http("GET", "/")).body;
+    assert.match(home, /<details class="ws" data-workspaces><summary title="Switch workspace" aria-label="Workspace tasktree-dash: switch workspace"><span class="ws-name">tasktree-dash<\/span>/);
+    assert.doesNotMatch(home, /[?&]w=/); // the first workspace's links stay as they were
+    const list = JSON.parse((await s.http("GET", "/api/workspaces")).body);
+    assert.deepEqual(list, [
+      { stream: O, href: "/?w=side-project", current: false, tasks: 2, open: 2, attention: 1 },
+      { stream: S, href: "/", current: true, tasks: 6, open: 6, attention: 2 },
+    ]);
+    assert.equal(JSON.parse((await s.http("GET", "/api/workspaces?w=side-project")).body).find((w: { current: boolean }) => w.current).stream, O);
+    // its page: its tree, every link back to the server carries it on
+    const page = (await s.http("GET", "/?w=side-project")).body;
+    assert.match(page, /<main data-stream="side-project"/);
+    assert.match(page, /<a class="brand" href="\/\?w=side-project"/);
+    assert.match(page, /<a class="act" href="\/confirm\?type=node&#38;id=hero&#38;event=UNBLOCK&#38;w=side-project" data-act="UNBLOCK">/);
+    assert.deepEqual(JSON.parse((await s.http("GET", "/api/tasks?w=side-project")).body).map((t: { id: string }) => t.id), ["site", "hero", "contact"]);
+    // its decisions: about its tasks, posting back to it
+    const decision = (await s.http("GET", "/confirm?type=node&id=hero&event=UNBLOCK&w=side-project")).body;
+    assert.match(decision, /<form method="post" action="\/act\?w=side-project"/);
+    assert.match(decision, /<a class="how" href="\/\?w=side-project">← the page<\/a>/);
+    assert.match((await s.http("GET", "/confirm?type=node&id=hero&event=UNBLOCK")).body, /There is no task hero\./); // not in the first workspace
+    // its writes land in it, and the result comes back to it
+    const seen = String((await s.store.readStream(O)).at(-1)?.seq);
+    const before = (await s.store.readStream(S)).length;
+    const done = await s.http("POST", "/act?w=side-project", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", type: "node", id: "hero", event: "UNBLOCK", seen }).toString() });
+    assert.equal(done.status, 303);
+    assert.match(String(done.headers.location), /^\/\?r=\d+&w=side-project$/);
+    assert.equal((await s.store.readStream(O)).at(-1)?.type, "node.unblock");
+    assert.equal((await s.store.readStream(S)).length, before);
+    assert.match((await s.http("GET", String(done.headers.location))).body, /data-flash>Unblock hero: done/);
+    // a workspace the store doesn't hold is a 404 with the way home; a name that can't be one, a 400
+    const missing = await s.http("GET", "/?w=nope");
+    assert.equal(missing.status, 404);
+    assert.match(missing.body, /No workspace named nope[^]*?<a class="how" href="\/">Back to your board<\/a>/);
+    assert.equal((await s.http("GET", `/?w=${encodeURIComponent("a\u0001b")}`)).status, 400);
+  } finally {
+    await s.done();
+  }
+  // the pieces
+  const u = (q: string) => new URL(`http://h/${q}`);
+  assert.deepEqual(workspaceIn(u(""), "main"), { stream: "main", q: "" });
+  assert.deepEqual(workspaceIn(u("?w=main"), "main"), { stream: "main", q: "" });
+  assert.deepEqual(workspaceIn(u("?w=a%20b"), "main"), { stream: "a b", q: "w=a%20b" });
+  assert.equal(workspaceIn(u(`?w=${"x".repeat(201)}`), "main"), undefined);
+  assert.equal(workspaceIn(u("?w=a%7Fb"), "main"), undefined);
+  assert.equal(withQ("/", ""), "/");
+  assert.equal(withQ("/", "w=x"), "/?w=x");
+  assert.equal(withQ("/?r=1", "w=x"), "/?r=1&w=x");
+  assert.deepEqual(workspaceList(fold([], defaultRegistry()), ["b", "a", "b"], "a", "b").map((w) => [w.stream, w.href, w.current]), [["a", "/", false], ["b", "/?w=b", true]]);
+});
+
+test("the page's script keeps the workspace: the palette's index and verbs, and the dialog's post", () => {
+  const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
+  assert.match(app, /const load = \(\) => fetch\(withW\("\/api\/tasks"\)\)/);
+  assert.match(app, /if \(verb\) void openConfirm\(withW\(`\/confirm\?/);
+  assert.match(app, /await fetch\(form\.action, \{ method: "POST", body \}\)/);
+  assert.match(app, /await fetch\(withW\("\/api\/workspaces"\)\)/);
 });

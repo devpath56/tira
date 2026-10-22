@@ -4,14 +4,26 @@
 //   or ⌘/Ctrl + scroll to zoom around the pointer. The corner tools zoom, fit the whole
 //   tree, go to the next task and go full screen (Esc leaves). With the canvas focused,
 //   arrows pan, + and − zoom, 0 is life size and 1 fits.
+// - Zoomed out (below 50%) the boxes become tiles coloured by state and each branch gets a
+//   label at a readable size; the minimap in the corner shows where you are, and a click or
+//   drag on it moves there.
 // - Fold: the button under a parent hides its whole branch (its subtasks and their lines)
 //   and says how many tasks are inside; the parent stays where it was on screen. "Collapse
 //   done" folds every finished branch, "Expand all" opens everything, and the found-while
 //   lines can be hidden.
+// - Motion (GSAP-style easing): Fit, Next, the zoom buttons and finding a task glide there;
+//   a fold opening or closing moves the boxes to their new places. None of it with reduced
+//   motion. After an action, the task it changed glows (the page marks it) and the view
+//   glides to it when it is out of sight.
+// - Find: `reveal(key)` opens the folds above a task (or an idea), glides to it and rings it;
+//   the ⌘K palette and a dialog's "Show on graph" use it.
 // - Ideas: an open idea's dashed ghost moves and folds with the task it was proposed under.
 // Folds are remembered per browser and stream, the view per tab, so both survive the reload
 // after every action. Places come from layout.mjs, the code the page was rendered with.
-import { G, fx, layout, treePath, foundPath, subtree, finishedBranches, zoomAt, fitView, centreOn } from "./layout.mjs";
+import {
+  G, fx, layout, treePath, foundPath, subtree, finishedBranches, zoomAt, fitView, centreOn,
+  isFar, branchSpans, labelFits, MINI, miniScale, viewRect, centreAt, viewBetween, placesBetween,
+} from "./layout.mjs";
 
 const read = (area, key, fallback) => {
   try {
@@ -28,10 +40,19 @@ const write = (area, key, value) => {
     // storage blocked: it lasts until the page is left
   }
 };
+const still = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 const ICONS = {
   full: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>',
   fit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5M8 5.5v5"/></svg>',
+};
+const SVG = "http://www.w3.org/2000/svg";
+
+// What the rest of the page can ask of the canvas (app.mjs: the palette, "Show on graph").
+let api = null;
+export const graph = {
+  reveal: (key) => api?.reveal(key) ?? false,
+  has: (key) => api?.has(key) ?? false,
 };
 
 const wrap = document.querySelector("[data-graph]");
@@ -54,6 +75,7 @@ function canvas(wrap) {
   let view = { x: 0, y: 0, s: 1 };
   let full = saved?.full === true;
   let last = layout(nodes);
+  let spans = new Map();
   let placed = false; // the first view is set (by the first layout, or by a move before it)
 
   wrap.classList.add("canvas");
@@ -79,7 +101,7 @@ function canvas(wrap) {
   };
   const size = () => [wrap.clientWidth, wrap.clientHeight];
   const middle = () => [wrap.clientWidth / 2, wrap.clientHeight / 2];
-  const zoomLabel = tool("100%", "Back to life size", () => setView(zoomAt(view, 1 / view.s, ...middle())), "zoom");
+  const zoomLabel = tool("100%", "Back to life size", () => glideTo(zoomAt(view, 1 / view.s, ...middle()), 260), "zoom");
   const foundBtn = tool("Found links", "Show or hide the dotted found-while lines", () => {
     showFound = !showFound;
     write(localStorage, "tira-found-lines", showFound);
@@ -87,15 +109,15 @@ function canvas(wrap) {
   });
   const fullBtn = tool("", "Full screen", () => setFull(!full), "icon");
   fullBtn.innerHTML = ICONS.full; // a fixed icon, no page text
-  const fitBtn = tool("", "Fit the whole tree", () => setView(fitView(last.width, last.height, ...size())), "icon");
+  const fitBtn = tool("", "Fit the whole tree", () => glideTo(fitView(last.width, last.height, ...size())), "icon");
   fitBtn.innerHTML = ICONS.fit;
   const nextBtn = tool("◆ Next", "Go to the next task", goToNext);
   const tools = document.createElement("div");
   tools.className = "canvas-tools";
   tools.dataset.canvasTools = "";
   tools.append(
-    group(tool("Collapse done", "Fold every finished branch", foldDone), tool("Expand all", "Open every folded branch", () => { folded.clear(); saveFolds(); draw(); }), foundBtn),
-    group(tool("−", "Zoom out", () => setView(zoomAt(view, 1 / 1.25, ...middle()))), zoomLabel, tool("+", "Zoom in", () => setView(zoomAt(view, 1.25, ...middle()))), fitBtn),
+    group(tool("Collapse done", "Fold every finished branch", foldDone), tool("Expand all", "Open every folded branch", () => { folded.clear(); saveFolds(); draw({ animate: true }); }), foundBtn),
+    group(tool("−", "Zoom out", () => glideTo(zoomAt(view, 1 / 1.25, ...middle()), 220)), zoomLabel, tool("+", "Zoom in", () => glideTo(zoomAt(view, 1.25, ...middle()), 220)), fitBtn),
     group(nextBtn, fullBtn),
   );
   const hint = document.createElement("div");
@@ -128,15 +150,19 @@ function canvas(wrap) {
   }
   const nameOf = (key) => byKey.get(key)?.el.querySelector(".name")?.getAttribute("title") ?? key;
   function saveFolds() { write(localStorage, FOLDS, [...folded]); }
-  // fold or open one branch, keeping its parent still on screen
+  // fold or open one branch, keeping its parent still on screen while the rest moves
   function toggle(key) {
-    const before = last.at.get(key);
+    const was = last.at;
+    const before = was.get(key);
     if (folded.has(key)) folded.delete(key);
     else folded.add(key);
     saveFolds();
-    draw();
-    const after = last.at.get(key);
-    if (before && after) setView({ x: view.x + (before.x - after.x) * view.s, y: view.y + (before.y - after.y) * view.s, s: view.s });
+    const after = layout(nodes, folded).at.get(key);
+    const dx = before && after ? after.x - before.x : 0;
+    const dy = before && after ? after.y - before.y : 0;
+    setView({ x: view.x - dx * view.s, y: view.y - dy * view.s, s: view.s });
+    // the old places, seen from the new view: the parent doesn't move
+    draw({ animate: true, from: new Map([...was].map(([k, p]) => [k, { ...p, x: p.x + dx, y: p.y + dy }])) });
   }
   // only the outermost finished branches: opening one shows everything in it
   function foldDone() {
@@ -152,48 +178,85 @@ function canvas(wrap) {
       if (outer(k)) folded.add(k);
     }
     saveFolds();
-    draw();
+    draw({ animate: true });
   }
 
+  // ---------- branch labels and the minimap ----------
+  const labels = new Map();
+  for (const key of inside.keys()) {
+    const el = document.createElement("div");
+    el.className = "branch-label";
+    el.setAttribute("aria-hidden", "true");
+    el.textContent = nameOf(key);
+    world.append(el);
+    labels.set(key, el);
+  }
+  const mini = document.createElement("div");
+  mini.className = "minimap";
+  mini.dataset.minimap = "";
+  mini.setAttribute("aria-hidden", "true");
+  mini.title = "Click or drag to move there";
+  const msvg = document.createElementNS(SVG, "svg");
+  const mboxes = document.createElementNS(SVG, "g");
+  const mview = document.createElementNS(SVG, "rect");
+  mview.setAttribute("class", "mm-view");
+  msvg.append(mboxes, mview);
+  mini.append(msvg);
+  wrap.append(mini);
+  let mscale = 1;
+
   // ---------- drawing ----------
-  function draw() {
+  let tween = 0;
+  // the layout for the folds as they are now; `animate` moves the boxes from `from` (the old
+  // places) to the new ones
+  function draw({ animate = false, from = last.at } = {}) {
+    cancelAnimationFrame(tween);
     last = layout(nodes, folded);
+    spans = branchSpans(nodes, last.at);
     world.style.width = `${last.width}px`;
     world.style.height = `${last.height}px`;
     svg.setAttribute("viewBox", `0 0 ${fx(last.width)} ${last.height}`);
-    drawNodes();
-    drawLines();
     wrap.classList.toggle("hide-found", !showFound);
     foundBtn.setAttribute("aria-pressed", String(showFound));
-    for (const [key, b] of folds) drawFold(key, b);
+    drawMini();
+    drawLabels();
+    if (!animate || still()) return paint(last.at);
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / 320);
+      const { at, fade } = placesBetween(nodes, from, last.at, t);
+      paint(at, fade);
+      if (t < 1) tween = requestAnimationFrame(step);
+    };
+    tween = requestAnimationFrame(step);
   }
-  function drawNodes() {
+  function paint(at, fade) {
     for (const n of nodes) {
-      const p = last.at.get(n.key);
+      const p = at.get(n.key);
       n.el.hidden = p === undefined;
       n.el.classList.toggle("folded", folded.has(n.key));
-      if (p) { n.el.style.left = `${fx(p.x)}px`; n.el.style.top = `${p.y}px`; }
+      n.el.style.opacity = fade?.has(n.key) && fade.get(n.key) < 1 ? String(fade.get(n.key)) : "";
+      if (p) { n.el.style.left = `${fx(p.x)}px`; n.el.style.top = `${fx(p.y)}px`; }
     }
-  }
-  function drawLines() {
     for (const line of lines) {
       // arcs: found-while (can be hidden) and a blocker elsewhere in the tree (always shown)
       const found = line.dataset.found !== undefined;
       const arc = found || line.dataset.blocks !== undefined;
-      const a = last.at.get(line.dataset.from);
-      const b = last.at.get(line.dataset.found ?? line.dataset.blocks ?? line.dataset.to);
+      const a = at.get(line.dataset.from);
+      const b = at.get(line.dataset.found ?? line.dataset.blocks ?? line.dataset.to);
       const shown = a !== undefined && b !== undefined && (!found || showFound);
       line.style.display = shown ? "" : "none";
       if (shown) line.setAttribute("d", arc ? foundPath(a, b) : treePath(a, b));
     }
+    for (const [key, b] of folds) drawFold(key, b, at);
   }
   // the fold button under a parent: "−" open, "+N" folded (red when a blocked task is inside)
-  function drawFold(key, b) {
-    const p = last.at.get(key);
+  function drawFold(key, b, at) {
+    const p = at.get(key);
     b.hidden = p === undefined;
     if (!p) return;
     b.style.left = `${fx(p.x)}px`;
-    b.style.top = `${p.y + G.box}px`;
+    b.style.top = `${fx(p.y + G.box)}px`;
     const isFolded = folded.has(key);
     const kids = inside.get(key) ?? [];
     const has = (test) => isFolded && kids.some((k) => test(byKey.get(k)?.el));
@@ -207,20 +270,92 @@ function canvas(wrap) {
     b.classList.toggle("has-blocked", has((el) => el?.dataset.state === "blocked"));
     b.classList.toggle("has-next", has((el) => el?.classList.contains("is-next")));
   }
+  // each branch's label sits across its branch, at the parent's row
+  function drawLabels() {
+    for (const [key, el] of labels) {
+      const p = last.at.get(key);
+      const span = spans.get(key);
+      el.hidden = !p || !span;
+      if (!p || !span) continue;
+      el.style.left = `${fx((span[0] + span[1]) / 2)}px`;
+      el.style.top = `${fx(p.y + G.box / 2)}px`;
+      el.style.setProperty("--w", `${fx(span[1] - span[0])}px`);
+    }
+    fitLabels();
+  }
+  function fitLabels() {
+    for (const [key, el] of labels) {
+      const span = spans.get(key);
+      el.classList.toggle("fits", span !== undefined && labelFits(span, view.s, Number(byKey.get(key)?.el.dataset.depth ?? 0)));
+    }
+  }
+  // every shown box as a dot of its state's colour, and the viewport over them
+  function drawMini() {
+    const small = wrap.clientWidth > 0 && wrap.clientWidth < 520;
+    mscale = miniScale(last.width, last.height, small ? MINI.w * 0.66 : MINI.w, small ? MINI.h * 0.66 : MINI.h);
+    msvg.setAttribute("width", fx(last.width * mscale));
+    msvg.setAttribute("height", fx(last.height * mscale));
+    msvg.setAttribute("viewBox", `0 0 ${fx(last.width)} ${last.height}`);
+    mboxes.replaceChildren(...nodes.filter((n) => last.at.has(n.key)).map((n) => {
+      const p = last.at.get(n.key);
+      const r = document.createElementNS(SVG, "rect");
+      r.setAttribute("x", fx(p.x - G.node / 2));
+      r.setAttribute("y", fx(p.y));
+      r.setAttribute("width", fx(G.node));
+      r.setAttribute("height", fx(G.box));
+      r.setAttribute("rx", "8");
+      r.setAttribute("class", n.el.dataset.idea !== undefined ? "mm-idea" : `mm-${n.el.dataset.state}`);
+      return r;
+    }));
+    drawMiniView();
+  }
+  function drawMiniView() {
+    const r = viewRect(view, ...size());
+    mview.setAttribute("x", fx(r.x));
+    mview.setAttribute("y", fx(r.y));
+    mview.setAttribute("width", fx(Math.max(0, r.w)));
+    mview.setAttribute("height", fx(Math.max(0, r.h)));
+  }
 
   // ---------- the view ----------
   function setView(v, remember = true) {
     placed = true;
+    const wasFar = isFar(view.s);
     view = { x: v.x, y: v.y, s: v.s };
     world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.s})`;
+    world.style.setProperty("--inv", String(1 / view.s));
+    wrap.classList.toggle("far", isFar(view.s));
     wrap.style.setProperty("--gx", `${view.x}px`);
     wrap.style.setProperty("--gy", `${view.y}px`);
     let grid = 24 * view.s;
     while (grid < 12) grid *= 4; // zoomed out, the dots thin out instead of turning grey
     wrap.style.setProperty("--gs", `${grid}px`);
     zoomLabel.textContent = `${Math.round(view.s * 100)}%`;
+    if (isFar(view.s) || wasFar) fitLabels();
+    drawMiniView();
     if (remember) write(sessionStorage, VIEW, { ...view, full });
   }
+  // glide there (eased), unless motion is reduced; any move of yours stops a glide
+  let glide = 0;
+  function glideTo(v, ms = 420, then) {
+    cancelAnimationFrame(glide);
+    if (still() || ms <= 0 || wrap.clientWidth === 0) {
+      setView(v);
+      then?.();
+      return;
+    }
+    const from = view;
+    const [vw, vh] = size();
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / ms);
+      setView(viewBetween(from, v, t, vw, vh), t === 1);
+      if (t < 1) glide = requestAnimationFrame(step);
+      else then?.();
+    };
+    glide = requestAnimationFrame(step);
+  }
+  const stop = () => cancelAnimationFrame(glide);
   // the first view: the whole tree if it reads at that size, else the next task up close
   function firstView() {
     const fit = fitView(last.width, last.height, ...size());
@@ -229,15 +364,38 @@ function canvas(wrap) {
     const p = next && last.at.get(next.key);
     return p ? centreOn(p, 0.85, ...size()) : fit;
   }
+  // open every fold above a task; true when one opened
+  function unfoldTo(n) {
+    let opened = false;
+    for (let up = n.parent; up !== undefined; up = byKey.get(up)?.parent) if (folded.delete(up)) opened = true;
+    if (opened) { saveFolds(); draw({ animate: true }); }
+    return opened;
+  }
   function goToNext() {
     const next = nodes.find((n) => n.el.classList.contains("is-next"));
     if (!next) return;
-    let opened = false;
-    for (let up = next.parent; up !== undefined; up = byKey.get(up)?.parent) if (folded.delete(up)) opened = true;
-    if (opened) { saveFolds(); draw(); }
+    unfoldTo(next);
     const p = last.at.get(next.key);
-    if (p) setView(centreOn(p, Math.max(view.s, 0.85), ...size()));
+    if (p) glideTo(centreOn(p, Math.max(view.s, 0.85), ...size()));
   }
+  // find a task (or an idea) on the canvas: open its folds, glide to it, ring it, focus it
+  function reveal(key) {
+    const n = byKey.get(key);
+    if (!n) return false;
+    place();
+    unfoldTo(n);
+    const p = last.at.get(key);
+    if (!p) return false;
+    glideTo(centreOn(p, Math.max(view.s, 0.85), ...size()), 520, () => {
+      n.el.classList.remove("pulse");
+      void n.el.offsetWidth; // restart the ring
+      n.el.classList.add("pulse");
+      n.el.focus({ preventScroll: true });
+    });
+    setTimeout(() => n.el.classList.remove("pulse"), 3200);
+    return true;
+  }
+  api = { reveal, has: (key) => byKey.has(key) };
   function setFull(on) {
     const [cx, cy] = middle();
     const at = { x: (cx - view.x) / view.s, y: (cy - view.y) / view.s }; // the world point in the middle
@@ -247,6 +405,7 @@ function canvas(wrap) {
     fullBtn.setAttribute("aria-pressed", String(on));
     const [nx, ny] = middle();
     setView({ x: nx - at.x * view.s, y: ny - at.y * view.s, s: view.s });
+    drawMini();
   }
 
   // ---------- moving ----------
@@ -260,7 +419,8 @@ function canvas(wrap) {
   };
   wrap.addEventListener("pointerdown", (e) => {
     swallowClick = false;
-    if (e.button !== 0 || (e.target instanceof Element && e.target.closest(".canvas-tools, .fold"))) return;
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest(".canvas-tools, .fold, .minimap"))) return;
+    stop();
     pointers.set(e.pointerId, local(e));
     if (pointers.size === 1) drag = { start: local(e), from: view, moved: false };
     if (pointers.size === 2) {
@@ -308,6 +468,7 @@ function canvas(wrap) {
   wrap.addEventListener("dragstart", (e) => e.preventDefault()); // links would drag their address
   wrap.addEventListener("wheel", (e) => {
     e.preventDefault();
+    stop();
     const unit = [1, 16, wrap.clientHeight][e.deltaMode] ?? 1; // pixels, lines, pages
     if (e.ctrlKey || e.metaKey) {
       const dy = Math.max(-60, Math.min(60, e.deltaY * unit)); // a pinch sends small steps, a wheel big ones
@@ -321,14 +482,35 @@ function canvas(wrap) {
     const onTool = e.target instanceof Element && e.target.closest(".canvas-tools, .fold") !== null;
     if (onTool && !e.key.startsWith("Arrow")) return; // Enter and Space press the button
     const pan = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] }[e.key];
-    if (pan) setView({ x: view.x + pan[0], y: view.y + pan[1], s: view.s });
-    else if (e.key === "+" || e.key === "=") setView(zoomAt(view, 1.25, ...middle()));
-    else if (e.key === "-" || e.key === "_") setView(zoomAt(view, 1 / 1.25, ...middle()));
-    else if (e.key === "0") setView(zoomAt(view, 1 / view.s, ...middle()));
-    else if (e.key === "1") setView(fitView(last.width, last.height, ...size()));
+    if (pan) { stop(); setView({ x: view.x + pan[0], y: view.y + pan[1], s: view.s }); }
+    else if (e.key === "+" || e.key === "=") glideTo(zoomAt(view, 1.25, ...middle()), 220);
+    else if (e.key === "-" || e.key === "_") glideTo(zoomAt(view, 1 / 1.25, ...middle()), 220);
+    else if (e.key === "0") glideTo(zoomAt(view, 1 / view.s, ...middle()), 260);
+    else if (e.key === "1") glideTo(fitView(last.width, last.height, ...size()));
     else return;
     e.preventDefault();
   });
+  // the minimap: a click glides there, a drag moves the view with the pointer
+  let miniDrag = false;
+  const miniAt = (e) => {
+    const r = msvg.getBoundingClientRect();
+    return [(e.clientX - r.left) / mscale, (e.clientY - r.top) / mscale];
+  };
+  mini.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    miniDrag = true;
+    mini.setPointerCapture(e.pointerId);
+    glideTo(centreAt(...miniAt(e), view.s, ...size()), 260);
+  });
+  mini.addEventListener("pointermove", (e) => {
+    if (!miniDrag || e.buttons === 0) return;
+    stop();
+    setView(centreAt(...miniAt(e), view.s, ...size()));
+  });
+  const miniEnd = () => { miniDrag = false; };
+  mini.addEventListener("pointerup", miniEnd);
+  mini.addEventListener("pointercancel", miniEnd);
   // Esc leaves full screen, unless a dialog or the palette is open (then Esc closes that)
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !full || e.defaultPrevented) return;
@@ -346,19 +528,29 @@ function canvas(wrap) {
     const [vw, vh] = size();
     const sx = view.x + p.x * view.s;
     const sy = view.y + p.y * view.s;
-    if (sx < 0 || sx > vw || sy < 0 || sy + G.box * view.s > vh) setView(centreOn(p, view.s, vw, vh));
+    if (sx < 0 || sx > vw || sy < 0 || sy + G.box * view.s > vh) glideTo(centreOn(p, view.s, vw, vh), 260);
   });
 
   // ---------- start ----------
   draw();
   if (full) { wrap.classList.add("full"); fullBtn.setAttribute("aria-pressed", "true"); fullBtn.title = "Leave full screen (Esc)"; }
   else fullBtn.setAttribute("aria-pressed", "false");
-  // The canvas has no size while Kanban shows: place the view once it first does.
-  const place = () => {
+  // The canvas has no size while Kanban shows: place the view once it first does. Then, if the
+  // last action changed a task that is out of sight (or folded away), glide to it.
+  function place() {
     if (placed || wrap.clientWidth === 0) return;
     placed = true;
     setView(saved && Number.isFinite(saved.s) ? saved : firstView(), saved !== null);
-  };
-  new ResizeObserver(place).observe(wrap);
+    drawMini();
+    const changed = nodes.find((n) => n.el.classList.contains("changed"));
+    if (!changed) return;
+    unfoldTo(changed);
+    const p = last.at.get(changed.key);
+    const [vw, vh] = size();
+    const sx = p ? view.x + p.x * view.s : 0;
+    const sy = p ? view.y + p.y * view.s : 0;
+    if (p && (sx < 0 || sx > vw || sy < 0 || sy + G.box * view.s > vh)) glideTo(centreOn(p, Math.max(view.s, 0.6), vw, vh));
+  }
+  new ResizeObserver(() => { place(); drawMiniView(); }).observe(wrap);
   place();
 }

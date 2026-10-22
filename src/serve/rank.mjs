@@ -49,13 +49,18 @@ export function parse(query) {
   return verb ? { verb, q: s.slice(cut).trim() } : { verb: undefined, q: query.trim() };
 }
 
+// With nothing typed yet, what needs you comes first: the next task, then work in progress,
+// then blocked work, then the rest to do; closed work last.
+const FIRST = { in_progress: 3, blocked: 2, unstarted: 1 };
+export const priority = (task) => (task.next ? 4 : FIRST[task.state] ?? 0);
+
 // The best matches, best first. With a verb, only tasks whose state allows it.
 export function rank(query, tasks, limit = 8) {
   const { verb, q } = parse(query);
   const scored = [];
   tasks.forEach((task, order) => {
     if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;
-    const s = Math.max(score(q, task.id), Math.floor(score(q, task.path ?? "") / 4));
+    const s = q === "" ? 1 + priority(task) : Math.max(score(q, task.id), Math.floor(score(q, task.path ?? "") / 4));
     if (s > 0) scored.push({ task, s, order });
   });
   scored.sort((a, b) => b.s - a.s || a.order - b.order);

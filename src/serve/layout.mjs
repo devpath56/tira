@@ -205,3 +205,89 @@ export function fitView(width, height, vw, vh, pad = 24) {
 
 // A node at the middle across and a third of the way down, at scale s.
 export const centreOn = (p, s, vw, vh) => ({ x: vw / 2 - p.x * s, y: vh / 3 - (p.y + G.box / 2) * s, s: clamp(s) });
+
+// ---------- reading a big tree zoomed out ----------
+
+// Below FAR the boxes turn into tiles coloured by state and each branch gets a label at a
+// readable size (the live canvas, like Figma zoomed out).
+export const FAR = 0.5;
+export const isFar = (s) => s < FAR;
+
+// Each parent's branch, across: from its leftmost shown box's left edge to its rightmost's
+// right edge (px, the layout's). Only parents with a shown child.
+export function branchSpans(nodes, at) {
+  const { kids } = kidsOf(nodes);
+  const half = G.node / 2;
+  const spans = new Map();
+  for (const n of [...nodes].reverse()) {
+    const p = at.get(n.key);
+    if (!p) continue;
+    let lo = p.x - half;
+    let hi = p.x + half;
+    for (const k of kids.get(n.key) ?? []) {
+      const c = spans.get(k);
+      if (c) { lo = Math.min(lo, c[0]); hi = Math.max(hi, c[1]); }
+    }
+    spans.set(n.key, [lo, hi]);
+  }
+  return new Map([...spans].filter(([k]) => (kids.get(k) ?? []).some((c) => at.has(c))));
+}
+
+// A branch's label shows when it has room on screen (LABEL.min px across); below LABEL.deep
+// only the top two levels are labelled, so rows of labels never stack on each other.
+export const LABEL = { min: 72, deep: 0.22 };
+export const labelFits = (span, s, depth) => (span[1] - span[0]) * s >= LABEL.min && (depth <= 1 || s >= LABEL.deep);
+
+// ---------- the minimap ----------
+
+export const MINI = { w: 168, h: 96 };
+// the scale that fits the whole layout in at most maxW × maxH
+export const miniScale = (width, height, maxW = MINI.w, maxH = MINI.h) => (width > 0 && height > 0 ? Math.min(maxW / width, maxH / height) : 1);
+// the part of the layout a viewport of vw × vh shows
+export const viewRect = (view, vw, vh) => ({ x: -view.x / view.s, y: -view.y / view.s, w: vw / view.s, h: vh / view.s });
+// the view that puts layout point (x, y) in the middle, at scale s
+export const centreAt = (x, y, s, vw, vh) => ({ x: vw / 2 - x * s, y: vh / 2 - y * s, s: clamp(s) });
+
+// ---------- motion ----------
+
+// GSAP's power3.out: quick, then settling. t past 0..1 is held at the ends.
+export const ease = (t) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
+const lerp = (a, b, k) => a + (b - a) * k;
+
+// The camera part way from view a to view b (t from 0 to 1, eased): the point in the middle
+// of the viewport travels in a straight line while the scale changes evenly (geometrically),
+// so a zoom never swings sideways.
+export function viewBetween(a, b, t, vw, vh) {
+  const k = ease(t);
+  const s = a.s * (b.s / a.s) ** k;
+  const cx = lerp((vw / 2 - a.x) / a.s, (vw / 2 - b.x) / b.s, k);
+  const cy = lerp((vh / 2 - a.y) / a.s, (vh / 2 - b.y) / b.s, k);
+  return { x: vw / 2 - cx * s, y: vh / 2 - cy * s, s };
+}
+
+// Places part way from one layout to the next (a fold opening or closing): a box shown in
+// both moves from its old place to its new one; one appearing grows out of its nearest
+// ancestor's old place; one going moves into its nearest ancestor's new place and is gone at
+// the end. `fade` is how much of each box shows (0 to 1).
+export function placesBetween(nodes, from, to, t) {
+  const parentOf = new Map(nodes.map((n) => [n.key, n.parent]));
+  const anchor = (key, map) => {
+    for (let k = parentOf.get(key); k !== undefined; k = parentOf.get(k)) if (map.has(k)) return map.get(k);
+    return undefined;
+  };
+  const k = ease(t);
+  const at = new Map();
+  const fade = new Map();
+  for (const n of nodes) {
+    const was = from.get(n.key);
+    const will = to.get(n.key);
+    if (!was && !will) continue;
+    if (!will && k >= 1) continue;
+    const a = was ?? anchor(n.key, from);
+    const b = will ?? anchor(n.key, to);
+    if (!a || !b) continue;
+    at.set(n.key, { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), ...((will ?? was)?.stack ? { stack: true } : {}) });
+    fade.set(n.key, was && will ? 1 : was ? 1 - k : k);
+  }
+  return { at, fade };
+}

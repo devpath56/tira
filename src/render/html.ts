@@ -24,44 +24,83 @@ import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../f
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
 // The node table's closed states (its tree config's terminal list), for progress.
 const CLOSED = new Set(["done", "cancelled"]);
-// Tree labels stay inside their column; the SVG title, aria-label and drawer keep the full id.
-const MAX_LABEL = 22;
-const short = (id: string) => ([...id].length > MAX_LABEL ? `${[...id].slice(0, MAX_LABEL - 1).join("")}…` : id);
+// A graph box shows a task's name in words (underscores as spaces) on up to two lines; the
+// box's title, aria-label and dialog keep the exact id.
+const spaced = (id: string) => id.replaceAll("_", " ");
+// A card's title wraps after an underscore, never inside a word (the text stays the exact id).
+const wraps = (id: string) => esc(id).replaceAll("_", "_<wbr>");
 
-// Jira's palette (Atlassian's design tokens): white or near-black surfaces, Jira blue as the
-// one accent, muted status colours, squared tags, no decoration. The theme follows the
-// system unless the switch at the top right picks one (radio inputs, so it is CSS only);
+// Jira's status colours and blue accent on calm surfaces: a warm off-white page under white
+// cards with soft shadows (light), near-black (dark), squared tags, no decoration. Living is
+// the fourth theme: the same page in moss greens, where a done task blooms, a task to do is a
+// bud and the active one breathes (it follows the system's light or dark). The theme follows
+// the system unless the switch at the top right picks one (radio inputs, so it is CSS only);
 // print is always light.
-const LIGHT = `--bg:#ffffff;--panel:#ffffff;--panel-2:#f7f8f9;--sunken:#f7f8f9;--raised:#ffffff;--hover:#f0f1f2;--line:#dcdfe4;--line-2:#b7bcc4;--fg:#292a2e;--mut:#505258;--dim:#6b6e76;
+const LIGHT = `--bg:#f7f6f3;--panel:#ffffff;--panel-2:#f9f8f6;--sunken:#f1f0ec;--raised:#ffffff;--hover:#f1f0ec;--line:#e4e2dd;--line-2:#c4c1ba;--fg:#25262a;--mut:#505258;--dim:#65676e;
 --accent:#1868db;--accent-bg:#e9f2fe;--accent-text:#1558bc;--btn:#1868db;--btn-fg:#ffffff;
---prog:#1558bc;--prog-bg:#e9f2fe;--block:#ae2e24;--block-bg:#ffeceb;--done:#216e4e;--done-bg:#dcfff1;--gone:#6b6e76;--gone-bg:#f0f1f2;--warn:#a54800;--warn-bg:#fff7d6;
---shadow:0 1px 1px rgba(30,31,33,.1),0 0 1px rgba(30,31,33,.18)`;
+--prog:#1558bc;--prog-bg:#e9f2fe;--block:#ae2e24;--block-bg:#ffeceb;--done:#216e4e;--done-bg:#dcfff1;--gone:#62656c;--gone-bg:#efeeea;--warn:#a54800;--warn-bg:#fff7d6;
+--shadow:0 1px 2px rgba(31,29,25,.06),0 2px 8px rgba(31,29,25,.04);--brand:#1868db`;
 const DARK = `--bg:#1f1f21;--panel:#242528;--panel-2:#2b2c2f;--sunken:#242528;--raised:#2b2c2f;--hover:#2f3034;--line:#3b3d42;--line-2:#56585e;--fg:#cecfd2;--mut:#a9abaf;--dim:#96999e;
 --accent:#669df1;--accent-bg:#1c2b42;--accent-text:#8fb8f6;--btn:#669df1;--btn-fg:#1f1f21;
 --prog:#8fb8f6;--prog-bg:#1c2b42;--block:#fd9891;--block-bg:#42221f;--done:#7ee2b8;--done-bg:#1c3329;--gone:#96999e;--gone-bg:#2b2c2f;--warn:#f5cd47;--warn-bg:#3a2f12;
---shadow:none`;
+--shadow:none;--brand:#1868db`;
+// Living (Sylva, and mockup B): moss, petal and pollen
+const LIVING_LIGHT = `--bg:#eef1e8;--panel:#fbfcf8;--panel-2:#f3f5ee;--sunken:#e6ebdf;--raised:#ffffff;--hover:#e7ece0;--line:#d5dccd;--line-2:#aab6a1;--fg:#18201a;--mut:#47524a;--dim:#566259;
+--accent:#4f8a12;--accent-bg:#e1eecc;--accent-text:#3d6d0c;--btn:#4f7a2a;--btn-fg:#ffffff;
+--prog:#3d6d0c;--prog-bg:#e1eecc;--block:#9e3a24;--block-bg:#f6e3dc;--done:#33602a;--done-bg:#dfecd6;--gone:#5c665e;--gone-bg:#e6eae2;--warn:#7f5900;--warn-bg:#f6ecca;
+--shadow:0 1px 2px rgba(24,32,26,.07),0 2px 10px rgba(24,32,26,.05);--brand:#58773c;--petal:#f1c3cb;--pollen:#d6a52b;--moss:#6f9147`;
+const LIVING_DARK = `--bg:#141915;--panel:#1b221d;--panel-2:#212922;--sunken:#171d18;--raised:#212922;--hover:#28312a;--line:#2e3830;--line-2:#4a584c;--fg:#f1ecdf;--mut:#b6beb3;--dim:#959f95;
+--accent:#c4f26a;--accent-bg:#27341c;--accent-text:#c4f26a;--btn:#a6d65e;--btn-fg:#141815;
+--prog:#c4f26a;--prog-bg:#27341c;--block:#f39a7f;--block-bg:#3b231b;--done:#a9d68a;--done-bg:#1f2e1c;--gone:#9aa39a;--gone-bg:#252c26;--warn:#e7c35f;--warn-bg:#352e16;
+--shadow:none;--brand:#7f9f5a;--petal:#f6eedf;--pollen:#e7c35f;--moss:#7f9f5a`;
+// what only Living draws: blooms, buds, a breathing active task, branches for lines
+const LIVING = `#th-living:checked~main`;
+const LIVING_CSS = `@media screen{body:has(#th-living:checked){background:radial-gradient(1200px 640px at 72% 0%,var(--panel-2),var(--bg) 70%) fixed,var(--bg)}}
+${LIVING} .st-done .sd{border:0;background:radial-gradient(circle,var(--pollen) 0 2.2px,transparent 2.7px),radial-gradient(circle at 50% 16%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 84% 41%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 71% 83%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 29% 83%,var(--petal) 0 3.3px,transparent 3.8px),radial-gradient(circle at 16% 41%,var(--petal) 0 3.3px,transparent 3.8px);filter:drop-shadow(0 0 1px rgba(0,0,0,.35))}
+${LIVING} .st-done .sd svg,${LIVING} .st-unstarted .sd svg,${LIVING} .st-in_progress .sd svg{display:none}
+${LIVING} .st-unstarted .sd{border:2px solid var(--moss);background:radial-gradient(circle,var(--moss) 0 2px,transparent 2.5px),var(--panel);border-radius:50% 50% 50% 8%}
+${LIVING} .st-in_progress .sd{border:2px solid var(--accent);background:radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px),var(--panel);animation:breathe 2.6s ease-in-out infinite}
+${LIVING} .gn.st-in_progress,${LIVING} .gn.is-active{animation:breathe-box 2.6s ease-in-out infinite}
+${LIVING} .st-cancelled .sd{border-color:var(--gone);background:var(--gone-bg);transform:rotate(-24deg);border-radius:50% 8% 50% 8%}
+${LIVING} .edges path{stroke:var(--moss);stroke-width:2;stroke-linecap:round;opacity:.75}${LIVING} .edges path.done{stroke:var(--done);opacity:1}
+${LIVING} .graph-wrap.canvas{background-image:radial-gradient(circle,color-mix(in srgb,var(--moss) 45%,transparent) 1px,transparent 1.4px)}
+${LIVING} .big{color:var(--accent-text)}
+@keyframes breathe{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 22%,transparent)}}
+@keyframes breathe-box{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 16%,transparent)}}`;
 export const CSS = `
-:root{color-scheme:light dark;${LIGHT};--brand:#1868db;--r-lg:8px;--r:6px;
---sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+:root{color-scheme:light dark;${LIGHT};--r-lg:10px;--r:7px;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--serif:ui-serif,"New York","Iowan Old Style",Palatino,Georgia,serif}
 @media screen and (prefers-color-scheme:dark){:root{${DARK}}}
 :root:has(#th-light:checked){color-scheme:light;${LIGHT}}
 @media screen{:root:has(#th-dark:checked){color-scheme:dark;${DARK}}}
+:root:has(#th-living:checked){color-scheme:light;${LIVING_LIGHT}}
+@media screen and (prefers-color-scheme:dark){:root:has(#th-living:checked){color-scheme:dark;${LIVING_DARK}}}
+${LIVING_CSS}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;color:var(--fg);font:13.5px/1.5 var(--sans);background:var(--bg);-webkit-font-smoothing:antialiased}
-main{max-width:1240px;margin:0 auto;padding:0 24px 56px;position:relative}
+main{max-width:1240px;margin:0 auto;padding:0 28px 72px;position:relative}
 a{color:inherit;text-decoration:none}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .top{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;min-height:56px;padding:8px 0;border-image:linear-gradient(to top,var(--line) 1px,var(--bg) 1px) fill 0/0/0 100vmax}
 .brand{display:inline-flex;align-items:center;gap:8px;font-weight:650;font-size:16px;letter-spacing:-.01em;color:var(--fg);padding-right:8px}
-.brand svg{width:24px;height:24px;color:var(--brand)}
+.brand svg{width:24px;height:24px;color:var(--brand)}a.brand{border-radius:var(--r)}a.brand:hover{opacity:.8}
+.ws{position:relative}.ws>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;max-width:240px;height:32px;padding:0 10px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--panel);font-weight:600;font-size:13px;cursor:pointer}
+.ws>summary::-webkit-details-marker{display:none}.ws>summary:hover{background:var(--hover)}.ws>summary svg{flex:none;width:13px;height:13px;color:var(--dim)}.ws[open]>summary svg{transform:rotate(180deg)}
+.ws-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-menu{position:absolute;left:0;top:calc(100% + 6px);z-index:30;width:min(320px,calc(100vw - 32px));max-height:min(60vh,520px);overflow:auto;padding:6px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:0 12px 32px rgba(16,24,40,.18)}
+.ws-head{margin:0;padding:6px 10px 4px;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
+.ws-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r);color:var(--fg)}.ws-item:hover,.ws-item:focus-visible{background:var(--hover)}
+.ws-item[aria-current=page]{background:var(--accent-bg)}.ws-item .ws-t{min-width:0;flex:1;display:grid;gap:1px}.ws-item b{font-weight:600;overflow-wrap:anywhere}.ws-item small{font-size:12px;color:var(--mut)}
+.ws-item .ws-n{flex:none;min-width:22px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:999px;font-size:11.5px;font-weight:650;color:var(--btn-fg);background:var(--btn)}
+.ws-item .ws-n.calm{color:var(--mut);background:var(--panel-2);border:1px solid var(--line)}.ws-note{margin:0;padding:8px 10px;color:var(--dim);font-size:12.5px}
 .tabs{display:flex;align-self:stretch;margin:-8px 0}
 .tabs label{display:flex;align-items:center;cursor:pointer;font-weight:550;font-size:14px;padding:0 10px;color:var(--mut);border-top:2px solid transparent;border-bottom:2px solid transparent}
 .tabs label:hover{color:var(--fg)}
 .view-radio{position:absolute;opacity:0;pointer-events:none}
 #v-board:checked~main .tabs label[for=v-board],#v-lanes:checked~main .tabs label[for=v-lanes],#v-log:checked~main .tabs label[for=v-log]{color:var(--accent);border-bottom-color:var(--accent)}
 #v-board:focus-visible~main .tabs label[for=v-board],#v-lanes:focus-visible~main .tabs label[for=v-lanes],#v-log:focus-visible~main .tabs label[for=v-log]{outline:2px solid var(--accent);outline-offset:-2px}
-.kbd{margin-left:auto;min-width:240px;text-align:left;font:500 13px var(--sans);color:var(--dim);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:6px 10px;cursor:pointer}
+.kbd{margin-left:auto;min-width:190px;text-align:left;font:500 13px var(--sans);color:var(--dim);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:6px 10px;cursor:pointer}
 .kbd:hover{background:var(--hover)}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
 .verify{font-family:var(--mono);font-size:11.5px;color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r);padding:4px 9px;white-space:nowrap}
@@ -69,24 +108,23 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .theme{display:inline-flex;gap:2px;padding:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r)}.brand+.theme{margin-left:auto}
 .theme label{display:grid;place-items:center;width:28px;height:24px;border-radius:4px;color:var(--dim);cursor:pointer}
 .theme label:hover{color:var(--fg)}.theme svg{width:15px;height:15px}
-#th-system:checked~main .theme label[for=th-system],#th-light:checked~main .theme label[for=th-light],#th-dark:checked~main .theme label[for=th-dark]{color:var(--accent-text);background:var(--accent-bg)}
-#th-system:focus-visible~main .theme label[for=th-system],#th-light:focus-visible~main .theme label[for=th-light],#th-dark:focus-visible~main .theme label[for=th-dark]{outline:2px solid var(--accent);outline-offset:1px}
+#th-system:checked~main .theme label[for=th-system],#th-light:checked~main .theme label[for=th-light],#th-dark:checked~main .theme label[for=th-dark],#th-living:checked~main .theme label[for=th-living]{color:var(--accent-text);background:var(--accent-bg)}
+#th-system:focus-visible~main .theme label[for=th-system],#th-light:focus-visible~main .theme label[for=th-light],#th-dark:focus-visible~main .theme label[for=th-dark],#th-living:focus-visible~main .theme label[for=th-living]{outline:2px solid var(--accent);outline-offset:1px}
 .flash{margin:16px 0 0;padding:10px 14px;border-radius:var(--r);font-size:13px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-left-width:4px}
 .flash.ok{border-left-color:var(--done);background:var(--done-bg)}.flash.no{border-left-color:var(--block);background:var(--block-bg)}
-.hero{display:flex;flex-wrap:wrap;align-items:stretch;gap:12px;margin:24px 0 16px}
+.hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 0;margin:36px 0 26px}
 .hero .who{display:contents}
-.hero h1{order:-1;flex:1 0 100%;margin:0 0 4px;font-size:20px;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere}
-.hero h1::before{content:"Stream";display:block;margin-bottom:2px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
-.big,.stats li{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 16px;box-shadow:var(--shadow)}
-.big{flex:0 0 auto;min-width:200px;font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
-.big small{font-size:.62em;font-weight:500;letter-spacing:0;color:var(--dim)}
-.big::before{content:attr(title);display:block;margin-bottom:6px}
+.hero h1{order:-1;flex:1 1 300px;margin:0 24px 0 0;font-size:32px;font-weight:650;letter-spacing:-.03em;line-height:1.1;overflow-wrap:anywhere}
+.hero h1::before{content:"stream";margin-right:.3em;font:italic 400 1em/1 var(--serif);letter-spacing:-.01em;color:var(--accent-text)}
+.big{flex:none;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
+.big small{font-size:.66em;font-weight:500;letter-spacing:0;color:var(--dim)}
+.big::before{content:attr(title);display:block;margin-bottom:5px}
 .big::before,.stats li{font-size:11px;font-weight:600;letter-spacing:.05em;line-height:1.3;text-transform:uppercase;color:var(--mut)}
-.stats{display:flex;flex:1 1 480px;flex-wrap:wrap;gap:12px;margin:0;padding:0;list-style:none}
-.stats li{flex:1 1 120px;display:flex;flex-direction:column-reverse;justify-content:flex-end;gap:6px}
-.stats b{font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.15;text-transform:none;color:var(--fg);font-variant-numeric:tabular-nums}
+.stats{display:flex;flex:0 1 auto;min-width:0;flex-wrap:wrap;gap:12px 0;margin:0;padding:0;list-style:none}
+.stats li{display:flex;flex-direction:column-reverse;justify-content:flex-end;gap:5px;margin-left:22px;padding-left:22px;border-left:1px solid var(--line)}
+.stats b{font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.15;text-transform:none;color:var(--fg);font-variant-numeric:tabular-nums}
 .stats svg{display:none}
-.stats .warn{border-color:var(--block)}.stats .warn,.stats .warn b{color:var(--block)}
+.stats .warn,.stats .warn b{color:var(--block)}
 .view{display:none;margin-top:16px}
 #v-board:checked~main .view-board,#v-lanes:checked~main .view-lanes,#v-log:checked~main .view-log{display:block}
 .attention{margin:0 0 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
@@ -97,7 +135,14 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .att-group h3{margin:0;padding:7px 16px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;background:var(--panel-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
 .att-group.blocked h3{color:var(--block)}.att-group.working h3{color:var(--prog)}
 .att-group h3 .why{text-transform:none;letter-spacing:0;font-weight:600;font-size:12.5px;color:var(--fg);overflow-wrap:anywhere}
-.att-group h3 .k{margin-left:auto;color:var(--mut);font-weight:600;letter-spacing:0}
+.att-group h3 .k,.att-group summary .k{margin-left:auto;color:var(--mut);font-weight:600;letter-spacing:0}
+details.att-group>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:40px;padding:8px 16px;border-top:1px solid var(--line);cursor:pointer;font-size:13px}
+details.att-group>summary::-webkit-details-marker{display:none}details.att-group>summary:hover{background:var(--hover)}
+details.att-group>summary::before{content:"";flex:none;width:7px;height:7px;border-right:1.5px solid var(--dim);border-bottom:1.5px solid var(--dim);transform:rotate(-45deg);transition:transform .15s ease}
+details.att-group[open]>summary::before{transform:rotate(45deg)}details.att-group[open]>summary{background:var(--panel-2);border-bottom:1px solid var(--line)}
+details.att-group .kind{flex:none;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block)}
+details.att-group .why{flex:none;max-width:45%;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+details.att-group .names{min-width:0;flex:1;color:var(--mut);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .att-list{list-style:none;margin:0;padding:0}
 .att-row{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;padding:8px 16px;min-height:44px;border-top:1px solid var(--line)}
 .att-row:first-child{border-top:0}.att-row:hover{background:var(--hover)}
@@ -119,7 +164,7 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .dv-row .v{font-size:11px;font-weight:650;letter-spacing:.04em;color:var(--warn)}.dv-row .id{font-family:var(--mono);font-size:11.5px;color:var(--mut);overflow-wrap:anywhere}
 .dv-row .detail{grid-column:1/-1;font-size:13px;overflow-wrap:anywhere}
 .dv-meta{margin:0;padding:8px 16px 12px;color:var(--dim);font-size:12px;overflow-wrap:anywhere;border-top:1px solid var(--line)}.dv-meta code{font-family:var(--mono);font-size:11.5px}
-.divergence.unevaluable p.why{margin:0;padding:0 16px 12px;font-size:13px;overflow-wrap:anywhere}
+.divergence.unevaluable .att-head{padding:9px 16px}.divergence.unevaluable h2{font-size:13px}.divergence.unevaluable .why{color:var(--fg);overflow-wrap:anywhere}
 .act{display:inline-block;font:550 12.5px/1.4 var(--sans);color:var(--fg);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r);padding:4px 11px;cursor:pointer;box-shadow:var(--shadow)}
 .act:hover{background:var(--hover)}
 .board-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin:0 0 12px}
@@ -140,16 +185,16 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .edges{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .edges path{fill:none;stroke:var(--line-2);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .edges path.done{stroke:var(--done)}.edges path.found{stroke:var(--accent);stroke-dasharray:2 4;stroke-linecap:round}.edges path.done.found{stroke:var(--done)}
-.gn{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:2px;padding:6px 10px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.gn{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow)}
 .gn:hover{border-color:var(--accent);background:var(--hover)}
-.gn .gt{display:flex;align-items:center;gap:6px;min-width:0}
-.sd{flex:none;width:16px;height:16px;border-radius:999px;display:grid;place-items:center;background:var(--panel);border:1.5px solid var(--line-2);color:var(--dim)}.sd svg{width:9px;height:9px}
+.gn .gt{display:flex;align-items:flex-start;gap:6px;min-width:0}
+.sd{flex:none;width:15px;height:15px;margin-top:0;border-radius:999px;display:grid;place-items:center;background:var(--panel);border:1.5px solid var(--line-2);color:var(--dim)}.sd svg{width:9px;height:9px}
 .st-done .sd{background:var(--done);border-color:var(--done);color:var(--panel)}.st-cancelled .sd{background:var(--gone-bg);border-color:var(--gone);color:var(--gone)}
 .st-blocked .sd{background:var(--block-bg);border-color:var(--block);color:var(--block)}.st-in_progress .sd{background:var(--prog-bg);border-color:var(--prog);color:var(--prog)}
 .st-done .name{color:var(--mut)}.st-cancelled .name{color:var(--dim);text-decoration:line-through}
 .here{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:1px 6px;white-space:nowrap}
-.gn .name{min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gn .gm{padding-left:22px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gn .name,.ghost .name{min-width:0;font-size:12px;line-height:1.22;font-weight:600;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.gn .gm{padding-left:21px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gn.parent{background:var(--panel-2)}.gn.parent .name{font-weight:650}
 .gn.st-in_progress{border-color:var(--prog)}.gn.st-blocked{border-color:var(--block);background:var(--block-bg)}.gn.st-done{border-color:var(--done)}.gn.st-cancelled{border-style:dashed}
 .gn.is-next{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}.gn.is-active{box-shadow:0 0 0 3px var(--prog-bg)}
@@ -172,9 +217,19 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .canvas-hint{position:absolute;left:12px;bottom:10px;z-index:3;font-size:11.5px;color:var(--dim);pointer-events:none}
 .canvas-flash{position:absolute;left:50%;bottom:12px;z-index:3;transform:translateX(-50%);display:none;max-width:calc(100% - 24px);padding:8px 14px;border-radius:var(--r);font-size:13px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--done);box-shadow:var(--shadow)}
 .canvas-flash.no{border-left-color:var(--block)}.full .canvas-flash{display:block}.full .canvas-hint{display:none}
-.ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:2px;padding:6px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);border-radius:var(--r-lg);color:var(--fg)}
+.far .gn>*,.far .ghost>*,.far .fold{visibility:hidden}
+.far .gn{background:var(--line);border-color:var(--line-2);box-shadow:none}.far .gn.st-done{background:color-mix(in srgb,var(--done) 50%,var(--panel));border-color:transparent}
+.far .gn.st-in_progress{background:var(--prog);border-color:var(--prog)}.far .gn.st-blocked{background:var(--block);border-color:var(--block)}.far .gn.st-cancelled{background:var(--gone-bg)}
+.far .gn.is-next{box-shadow:0 0 0 calc(5px * var(--inv,1)) var(--accent)}.far .ghost{background:var(--accent-bg)}
+.branch-label{position:absolute;z-index:4;display:none;transform:translate(-50%,-50%);max-width:var(--w);padding:calc(2px * var(--inv,1)) calc(8px * var(--inv,1));border:calc(1px * var(--inv,1)) solid var(--line-2);border-radius:calc(6px * var(--inv,1));background:var(--panel);box-shadow:var(--shadow);font:650 calc(13px * var(--inv,1))/1.3 var(--sans);color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.far .branch-label.fits{display:block}
+.minimap{position:absolute;right:10px;bottom:10px;z-index:3;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);cursor:crosshair;touch-action:none}
+.minimap svg{display:block}.minimap rect{fill:var(--line-2)}.minimap .mm-done{fill:color-mix(in srgb,var(--done) 55%,var(--panel))}.minimap .mm-in_progress{fill:var(--prog)}.minimap .mm-blocked{fill:var(--block)}.minimap .mm-cancelled{fill:var(--gone-bg)}.minimap .mm-idea{fill:var(--accent)}
+.minimap .mm-view{fill:color-mix(in srgb,var(--accent) 10%,transparent);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.gn.pulse,.ghost.pulse{animation:changed 1.1s cubic-bezier(.2,.7,.2,1) 2;outline:2px solid var(--accent);outline-offset:3px}
+.ghost{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--accent-bg);border:1.5px dashed var(--accent);border-radius:var(--r-lg);color:var(--fg)}
 .ghost:hover{background:var(--hover)}.ghost[hidden]{display:none}.ghost.loose{border-color:var(--warn);background:var(--warn-bg)}
-.ghost .gt{display:flex;align-items:center;gap:6px;min-width:0}.ghost .name{min-width:0;font-size:12.5px;font-weight:600;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ghost .gt{display:flex;align-items:flex-start;gap:6px;min-width:0}.ghost .name{font-style:italic}
 .ghost .gm{padding-left:22px;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ghost .sd{border-style:dashed;border-color:var(--accent);color:var(--accent)}
 .ghost .tag,.card .tag{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--panel);border:1px dashed var(--accent);border-radius:4px;padding:0 5px;white-space:nowrap}
 .ghost .tag{position:absolute;top:-10px;left:10px}.card .tag{display:inline-block;margin-bottom:6px}
@@ -192,12 +247,14 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .meter{flex:1;min-width:40px;height:6px;border-radius:3px;background:var(--gone-bg);overflow:hidden;display:flex}.meter i{display:block;height:100%}
 .m-done{background:var(--done)}.m-cancelled{background:var(--gone)}.m-in_progress{background:var(--prog)}.m-blocked{background:var(--block)}
 .ct{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:start}
-.col{background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px}
+.cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(184px,1fr);gap:12px;align-items:start;overflow-x:auto;scrollbar-width:thin;padding-bottom:6px}
+.col{min-width:0;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px}
 .ch{display:flex;align-items:center;gap:8px;padding:4px 6px 10px;font-weight:650;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
 .dot{width:8px;height:8px;border-radius:2px}
 .ch .k{margin-left:auto;color:var(--mut);font-weight:600;letter-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:0 7px;font-size:11px}
-.card{display:block;background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;box-shadow:var(--shadow)}
+.card{display:block;background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;margin-bottom:8px;box-shadow:var(--shadow)}
+.more>summary{list-style:none;cursor:pointer;margin:2px 0 8px;padding:7px 10px;border:1px dashed var(--line-2);border-radius:var(--r);font-size:12.5px;font-weight:600;color:var(--accent-text);text-align:center}.more>summary::-webkit-details-marker{display:none}
+.more>summary:hover{background:var(--hover)}.more .m-hide,.more[open] .m-show{display:none}.more[open] .m-hide{display:inline}
 .card:hover{border-color:var(--line-2)}
 .card .t{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
 .card .row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--mut);font-size:12px}
@@ -206,6 +263,10 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .pin{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:1px 6px;margin-bottom:6px}
 .card.is-next{border-left:3px solid var(--accent)}
 .card.is-gone .t{text-decoration:line-through;color:var(--dim)}
+.changed{animation:changed 1.1s cubic-bezier(.2,.7,.2,1) 2}.att-row.changed{animation-name:changed-row}
+@keyframes changed{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 55%,transparent)}100%{box-shadow:0 0 0 12px transparent}}
+@keyframes changed-row{0%{background:var(--accent-bg)}100%{background:transparent}}
+@media (prefers-reduced-motion:reduce){.changed{outline:2px solid var(--accent);outline-offset:2px}}
 .empty{color:var(--dim);font-size:13px;padding:6px 4px;margin:0}
 .lanes{display:grid;grid-template-columns:minmax(90px,.8fr) repeat(var(--n),minmax(120px,1fr));gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 16px;overflow-x:auto;box-shadow:var(--shadow)}
 .lanes-label{margin:20px 0 8px;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}.lanes-label:first-child{margin-top:4px}
@@ -233,7 +294,8 @@ body:has(.drawer:target){overflow:hidden}
 .drawer .close:hover{background:var(--hover);border-color:var(--line);color:var(--fg)}
 .drawer h2{margin:4px 0 2px;font-size:18px;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere;padding-right:32px}
 .path{color:var(--dim);font-size:12px;overflow-wrap:anywhere}
-.badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.badges{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px}
+.locate{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font:550 12.5px var(--sans);color:var(--accent-text);background:none;border:1px solid transparent;border-radius:var(--r);padding:2px 8px;cursor:pointer}.locate:hover{background:var(--accent-bg)}.locate svg{width:14px;height:14px}
 .state{display:inline-block;font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:4px}
 .s-unstarted{color:var(--mut);background:var(--gone-bg)}.s-in_progress{color:var(--prog);background:var(--prog-bg)}.s-blocked{color:var(--block);background:var(--block-bg)}
 .s-done{color:var(--done);background:var(--done-bg)}.s-cancelled{color:var(--gone);background:var(--gone-bg)}
@@ -273,7 +335,10 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .verdict{margin:12px 0 0;padding:8px 12px;border-radius:var(--r);border-left:4px solid;font-weight:600}.verdict.ok{color:var(--done);background:var(--done-bg)}.verdict.no{color:var(--block);background:var(--block-bg)}
 .hint{margin:10px 0 0;font-size:13.5px;color:var(--fg)}.hint b{font-weight:650}
 .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:stretch;margin:0 0 14px}
-.brief p{margin:0 0 8px;font-size:13.5px;line-height:1.55;overflow-wrap:anywhere}.brief p b{font-weight:650}.brief .verdict{margin-top:10px}
+.brief p{margin:0 0 8px;font-size:13.5px;line-height:1.55;overflow-wrap:anywhere}.brief p b{font-weight:650}
+.brief .nutshell{font-size:15px;line-height:1.5;margin-bottom:10px}.brief .nutshell b{display:block;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-bottom:2px}
+.brief .verdict{margin:0 0 10px}.brief .hint{margin:0 0 10px}
+.brief details.why{margin-top:6px;border-top:1px solid var(--line);padding-top:8px}.brief details.why>summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--accent-text);min-height:24px}.brief details.why[open]>summary{margin-bottom:8px}
 .your-action textarea{display:block;width:100%;min-height:150px;resize:vertical;font:12.5px/1.6 var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 12px}.your-action textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 .cmd-help{margin:8px 0 0;font-size:12px;color:var(--mut)}
 .fills{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}.fills span{font-size:12px;color:var(--mut)}
@@ -299,11 +364,13 @@ button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:
 main{padding:0 16px 48px}
 .tabs{margin:0;overflow-x:auto}.tabs label{padding:6px 10px}.kbd{min-width:0}.brand{padding-right:0}
 .graph-wrap{padding:0 12px}.canvas-hint{display:none}
+.cols{grid-auto-columns:minmax(78vw,1fr);scroll-snap-type:x mandatory}.col{scroll-snap-align:start}
+.ws-menu{position:fixed;left:16px;right:16px;top:52px;width:auto}
 .canvas-tools{left:8px;right:8px;max-width:none;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;scrollbar-width:none}.tool-group{flex:none}
 }
-@media (max-width:560px){.big{flex:1 1 100%}.lanes{grid-template-columns:1fr;overflow:visible}.lanes .lh{display:none}.lanes .who{padding-top:10px}.lane::before{content:attr(data-region);font-size:11px;color:var(--dim);min-width:52px}}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
-@media print{body{background:#fff}.top{border-image:none;border-bottom:1px solid var(--line)}.tabs,.kbd,.top .how,.theme{display:none}.view{display:block!important}.drawer{display:none}.board-bar{display:none}.bv{display:block!important}.graph-wrap{overflow:visible}}
+@media (max-width:560px){.hero h1{flex-basis:100%;font-size:26px}.big{flex-basis:100%}.stats li{margin:0 14px 0 0;padding:0 14px 0 0;border-left:0;border-right:1px solid var(--line)}.stats li:last-child{border-right:0}.lanes{grid-template-columns:1fr;overflow:visible}.lanes .lh{display:none}.lanes .who{padding-top:10px}.lane::before{content:attr(data-region);font-size:11px;color:var(--dim);min-width:52px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+@media print{body{background:#fff}.top{border-image:none;border-bottom:1px solid var(--line)}.tabs,.kbd,.top .how,.theme{display:none}.view{display:block!important}.drawer{display:none}.board-bar{display:none}.bv{display:block!important}.graph-wrap{overflow:visible}.cols{grid-auto-flow:row;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));overflow:visible}}
 `;
 
 const ICON = {
@@ -316,6 +383,8 @@ const ICON = {
   system: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.8" width="12" height="8.7" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/></svg>`,
   sun: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>`,
   moon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 9.6A5.5 5.5 0 0 1 6.4 2.8a5.5 5.5 0 1 0 6.8 6.8z"/></svg>`,
+  chev: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>`,
+  leaf: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13c0-6 4-10 10.5-10.5C13 9 9 13 3 13z"/><path d="M3 13l6-6"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
   kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
   graph: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="3.4" rx="1"/><rect x="1.5" y="10.8" width="4.4" height="3.4" rx="1"/><rect x="10.1" y="10.8" width="4.4" height="3.4" rx="1"/><path d="M8 5.2v2.6M3.7 10.8V7.8h8.6v3"/></svg>`,
@@ -357,7 +426,7 @@ const word = (state: string) => STATE_WORD[state] ?? state;
 const nodeAttrs = (r: TreeRow, lines: number) =>
   `data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines}"`;
 
-function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
+function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
   const kids = new Map<Placed, Placed[]>();
   for (const n of nodes) if (n.parent) kids.set(n.parent, [...(kids.get(n.parent) ?? []), n]);
   // ideas after the tree, each under its proposed parent (layout.mjs: a parent before its children)
@@ -384,14 +453,14 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     const [b, k] = [byKey.get(by) as Placed, byKey.get(key) as Placed];
     return `<path class="e blocks${CLOSED.has(b.row.state) ? " done" : ""}" data-from="${esc(by)}" data-blocks="${esc(key)}" d="${foundPath(at(b), at(k))}"/>`;
   });
-  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length);
+  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length, changed.has(n.row.key));
   const ghostAt = (key: string) => L.at.get(key) ?? { x: 0, y: 0 };
   const ideaLines = ghosts.filter((g) => g.parent !== undefined).map((g) =>
     `<path class="e idea" data-from="${esc(g.parent as string)}" data-to="${esc(g.idea.key)}" d="${treePath(ghostAt(g.parent as string), ghostAt(g.idea.key))}"/>`);
   // Live, graph.mjs turns the box into a canvas (pan, zoom, folds); a rendered file scrolls.
   return `<div class="graph-wrap" data-graph><div class="graph" role="group" aria-label="Tasks as a tree" style="width:${fx(L.width)}px;height:${L.height}px">`
     + `<svg class="edges" viewBox="0 0 ${fx(L.width)} ${L.height}" aria-hidden="true">${tree.join("")}${found.join("")}${blockArcs.join("")}${ideaLines.join("")}</svg>`
-    + `${nodes.map(node).join("")}${ghosts.map((g) => ghostHtml(g, ghostAt(g.idea.key), (trail.get(g.idea.key) ?? []).length)).join("")}</div></div>`;
+    + `${nodes.map(node).join("")}${ghosts.map((g) => ghostHtml(g, ghostAt(g.idea.key), (trail.get(g.idea.key) ?? []).length, changed.has(g.idea.key))).join("")}</div></div>`;
 }
 
 // What a graph node says to a screen reader: the task, its state, and its links.
@@ -412,13 +481,13 @@ function nodeLabel(n: Placed, ks: Placed[], closed: number, byKey: ReadonlyMap<s
 const placedAt = (p: { x: number; y: number }) => `style="left:${fx(p.x)}px;top:${p.y}px"`;
 
 // One task on the graph: a link to its dialog, carrying the fold's flags (M1).
-function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number): string {
+function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number, changed: boolean): string {
   const r = n.row;
   const closed = ks.filter((c) => CLOSED.has(c.row.state)).length;
   const left = ks.length - closed;
   const cls = [
     "gn", `st-${r.state}`, ks.length > 0 ? "parent" : "",
-    r.cursor ? "is-next" : "", r.active ? "is-active" : "",
+    r.cursor ? "is-next" : "", r.active ? "is-active" : "", changed ? "changed" : "",
   ].filter(Boolean).join(" ");
   const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
   const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
@@ -431,7 +500,7 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
   return `<a class="${cls}" href="#t${n.i}" ${placedAt(p)} aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
     + pin
-    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(short(r.id))}</span></span>`
+    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(spaced(r.id))}</span></span>`
     + `<span class="gm">${marks}${meta}</span></a>`;
 }
 
@@ -452,25 +521,25 @@ function ghostsOf(ideas: IdeaRow[], onTree: ReadonlySet<string>): Ghost[] {
 // waiting for a person to pick its parent
 const loose = (i: IdeaRow) => i.stage === "node_pending" && i.proposal?.parent === undefined;
 
-function ghostHtml(g: Ghost, p: { x: number; y: number }, history: number): string {
+function ghostHtml(g: Ghost, p: { x: number; y: number }, history: number, changed: boolean): string {
   const i = g.idea;
   let where = "not placed yet";
   if (g.parent !== undefined) where = `proposed under ${bare(g.parent)}`;
   else if (loose(i)) where = "needs a parent";
   const label = `idea ${i.id}${i.summary ? `: ${i.summary}` : ""}, ${stageWord(i)}, ${where}`;
   const parentAttr = g.parent === undefined ? "" : ` data-parent="${esc(g.parent)}"`;
-  return `<a class="ghost${loose(i) ? " loose" : ""}" href="#i${g.i}" ${placedAt(p)} aria-label="${esc(label)}"${parentAttr} data-idea="${esc(i.key)}" data-stage="${esc(i.stage)}" data-history="${history}">`
-    + `<span class="tag">idea</span><span class="gt"><span class="sd">${ICON.spark}</span><span class="name" title="${esc(i.summary ?? i.id)}">${esc(short(i.id))}</span></span>`
+  return `<a class="ghost${loose(i) ? " loose" : ""}${changed ? " changed" : ""}" href="#i${g.i}" ${placedAt(p)} aria-label="${esc(label)}"${parentAttr} data-idea="${esc(i.key)}" data-stage="${esc(i.stage)}" data-history="${history}">`
+    + `<span class="tag">idea</span><span class="gt"><span class="sd">${ICON.spark}</span><span class="name" title="${esc(i.summary ?? i.id)}">${esc(spaced(i.id))}</span></span>`
     + `<span class="gm">${esc(stageWord(i))}</span></a>`;
 }
 
 // The Ideas column: first on the board, while any idea is open.
-function ideasColumn(ghosts: Ghost[], trail: Map<string, TrailEntry[]>): string {
+function ideasColumn(ghosts: Ghost[], trail: Map<string, TrailEntry[]>, changed: ReadonlySet<string>): string {
   if (ghosts.length === 0) return "";
   const cards = ghosts.map((g) => {
     const i = g.idea;
     const under = i.proposal?.parent === undefined ? "" : `<span class="chip">under ${esc(i.proposal.parent)}</span>`;
-    return `<a class="card idea" href="#i${g.i}" data-idea-card="${esc(i.key)}" data-stage="${esc(i.stage)}"><span class="tag">idea</span><div class="t">${esc(i.summary ?? i.id)}</div>`
+    return `<a class="card idea${changed.has(i.key) ? " changed" : ""}" href="#i${g.i}" data-idea-card="${esc(i.key)}" data-stage="${esc(i.stage)}"><span class="tag">idea</span><div class="t">${esc(i.summary ?? i.id)}</div>`
       + `<div class="row"><span class="chip stage${loose(i) ? " loose" : ""}">${esc(stageWord(i))}</span>${under}<span class="hist" title="history">${ICON.history}${(trail.get(i.key) ?? []).length}</span></div></a>`;
   }).join("");
   return `<div class="col"><div class="ch"><span class="dot" style="background:var(--accent)"></span>Ideas<span class="k">${ghosts.length}</span></div>${cards}</div>`;
@@ -492,10 +561,10 @@ function ideaNext(i: IdeaRow): string {
   return `Approve the placement (you can change the parent), and it becomes the task ${i.id}.`;
 }
 
-function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean): string {
+function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean, q: string): string {
   const i = g.idea;
   const verbs = live ? IDEA_ACTIONS[i.stage] ?? [] : [];
-  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink({ type: IDEA, id: i.id }, ev, label)).join("")}</div>` : "";
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink({ type: IDEA, id: i.id }, ev, label, q)).join("")}</div>` : "";
   const p = i.proposal;
   let goes = "not proposed yet: tira proposes it once the file is approved" + (i.under === undefined ? "" : ` (declared under ${i.under})`);
   if (p?.parent !== undefined) goes = `${p.parent}: ${p.basis} (tira's proposal, seq ${p.seq})`;
@@ -503,7 +572,7 @@ function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean): string {
   const file: [string, string][] = [["Why", i.why ?? "not given"], ["Goes under", goes], ["Next", ideaNext(i)]];
   const by = i.declaredBy === undefined ? "" : ` by ${i.declaredBy}`;
   return `<section class="drawer" id="i${g.i}" aria-label="idea ${esc(i.id)}" role="dialog" aria-modal="true" data-idea-dialog="${esc(i.key)}">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">idea ${esc(i.id)} · declared${esc(by)} at seq ${i.declaredSeq}</div><h2>${esc(i.summary ?? i.id)}</h2><div class="badges"><span class="state s-idea">${esc(stageWord(i))}</span><span class="mark">not a task yet</span></div>`
+    + `<div class="path">idea ${esc(i.id)} · declared${esc(by)} at seq ${i.declaredSeq}</div><h2>${esc(i.summary ?? i.id)}</h2><div class="badges"><span class="state s-idea">${esc(stageWord(i))}</span><span class="mark">not a task yet</span>${locate(i.key, live)}</div>`
     + `<dl class="idea-file">${file.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>${acts}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
@@ -515,13 +584,13 @@ const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done">
 // The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
 // Kanban by default; live, app.mjs remembers the choice so it survives the reload after
 // every action.
-function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
+function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
   const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
   const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
   const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
   return radios
     + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
-    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts)}</div>`;
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
 }
 
 // ---------- history ----------
@@ -617,7 +686,7 @@ const DIALOG_ACTIONS: Record<string, [string, string][]> = {
   done: [["REOPEN", "Reopen"]],
 };
 
-interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; links: Links; rowOf: ReadonlyMap<string, TreeRow> }
+interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; q: string; links: Links; rowOf: ReadonlyMap<string, TreeRow> }
 
 // A linked task: one click to its dialog, with its state.
 const linkTo = (key: string, ctx: Pick<DialogContext, "indexOf" | "rowOf">) => {
@@ -629,7 +698,7 @@ function marksHtml(r: TreeRow): string {
   return [
     r.cursor ? `<span class="mark cursor">◆ next</span>` : "",
     r.active ? `<span class="mark active">● active</span>` : "",
-    r.drained ? `<span class="mark drained">drained</span>` : "",
+    r.drained ? `<span class="mark drained">all subtasks closed</span>` : "",
     r.closedByTira ? `<span class="mark tira">closed by tira</span>` : "",
     r.awaitingClose ? `<span class="mark wait">tira closes it when you move on</span>` : "",
     r.discoveredDuring ? `<span class="mark">found during ${esc(bare(r.discoveredDuring))}</span>` : "",
@@ -659,12 +728,16 @@ function linksHtml(r: TreeRow, ctx: DialogContext): string {
   return (byLine + blocksLine) === "" ? "" : `<div class="links" data-links>${byLine}${blocksLine}</div>`;
 }
 
+// Live, a dialog can take you to its task (or idea) on the Graph: folds open, the view moves there.
+const ICON_LOCATE = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg>`;
+const locate = (key: string, live: boolean) => (live ? `<button type="button" class="locate" data-show-on-graph="${esc(key)}">${ICON_LOCATE}Show on graph</button>` : "");
+
 function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
   const r = n.row;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
-  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label)).join("")}</div>` : "";
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>${linksHtml(r, ctx)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
+    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${linksHtml(r, ctx)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
@@ -727,26 +800,32 @@ const whyLabel = (reason: string | undefined) => (reason !== undefined && reason
 // Under `tira serve`, each row offers what its state allows. Every action opens the
 // confirm page first (what tira will do, then what you fill in): nothing fires from here.
 const ROW_ACTIONS: Record<string, [string, string][]> = { blocked: [["UNBLOCK", "Unblock"]], in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"]] };
-const confirmHref = (r: { type: string; id: string }, event: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}`);
+// q: the workspace, as the server's links carry it ("w=…"), or "" for the one it started on
+const confirmHref = (r: { type: string; id: string }, event: string, q: string) => esc(`/confirm?type=${encodeURIComponent(r.type)}&id=${encodeURIComponent(r.id)}&event=${event}${q ? `&${q}` : ""}`);
 
-const actLink = (r: { type: string; id: string }, ev: string, label: string) => `<a class="act" href="${confirmHref(r, ev)}" data-act="${ev}">${label}</a>`;
+const actLink = (r: { type: string; id: string }, ev: string, label: string, q: string) => `<a class="act" href="${confirmHref(r, ev, q)}" data-act="${ev}">${label}</a>`;
 
 const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
-function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: Pick<DialogContext, "indexOf" | "rowOf">): string {
-  const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label)).join("");
+function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: Pick<DialogContext, "indexOf" | "rowOf" | "q">, changed: ReadonlySet<string>): string {
+  const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label, ctx.q)).join("");
   const acts = live ? `<span class="acts">${links}</span>` : "";
   // a block on a ticket: which one, and once it's closed, that the wait looks over
   const blocker = n.row.state === "blocked" && since?.blocker !== undefined ? ctx.rowOf.get(since.blocker) : undefined;
   const ready = blocker !== undefined && CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : "";
   const waits = blocker === undefined ? "" : `<span class="by" data-blocked-by>waiting on ${linkTo(blocker.key, ctx)}</span>` + ready;
-  return `<li class="att-row" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
+  return `<li class="att-row${changed.has(n.row.key) ? " changed" : ""}" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
     + `<span class="path">${path}</span>${waits}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
 }
 
-function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>): string {
+// More than FOLD_AT tasks needing you: each blocked group folds to one line (its reason, the
+// tasks' names, how many), so the board stays near the top; a click opens it. The task being
+// worked on never folds.
+const FOLD_AT = 3;
+
+function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>, changed: ReadonlySet<string>, q: string): string {
   const { blocked, working } = attentionSince(events, stream, skip);
-  const ctx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])) };
+  const ctx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])), q };
   const stuck = nodes.filter((n) => n.row.state === "blocked");
   // A finished active parent (every child closed) is no decision for a person: tira closes it
   // when work moves on, so it stays in the tree, not in the count (ruling 2026-10-20).
@@ -764,11 +843,16 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
     const why = whyLabel(blocked.get(n.row.key)?.reason);
     groups.set(why, [...(groups.get(why) ?? []), n]);
   }
-  const blockedHtml = [...groups].map(([why, ns]) =>
-    `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>`
-    + `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live, ctx)).join("")}</ul></div>`).join("");
+  const folds = count > FOLD_AT;
+  const blockedHtml = [...groups].map(([why, ns]) => {
+    const rows = `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live, ctx, changed)).join("")}</ul>`;
+    if (!folds) return `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>${rows}</div>`;
+    const open = ns.some((n) => changed.has(n.row.key)) ? " open" : "";
+    return `<details class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"${open}><summary><span class="kind">Blocked</span><span class="why">${esc(why)}</span>`
+      + `<span class="names">${ns.map((n) => esc(n.row.id)).join(", ")}</span><span class="k">${ns.length}</span></summary>${rows}</details>`;
+  }).join("");
   const workingHtml = busy.length === 0 ? "" : `<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">${busy.length}</span></h3>`
-    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx)).join("")}</ul></div>`;
+    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx, changed)).join("")}</ul></div>`;
   const sum = [stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
   return `<section class="attention" data-attention-count="${count}" aria-label="Needs attention"><div class="att-head"><h2><b>${count}</b>${count === 1 ? "needs" : "need"} you</h2><span class="sum">${sum}</span></div>${blockedHtml}${workingHtml}</section>`;
 }
@@ -779,8 +863,10 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 // acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
 // started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
-function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[]): string {
+function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
+  // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
+  const movedAt = (n: Placed) => (trail.get(n.row.key) ?? []).filter((x) => !x.refused).at(-1)?.seq ?? 0;
   const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== "unstarted");
   const columns: [string, string, string][] = [
     ["unstarted", "To do", "var(--dim)"], ["in_progress", "In progress", "var(--prog)"], ["blocked", "Blocked", "var(--block)"],
@@ -788,9 +874,10 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
   ];
   const cols = columns.filter(([s]) => s !== "blocked" || leaves.some((n) => n.row.state === s)).map(([s, title, color]) => {
     const here = leaves.filter((n) => n.row.state === s);
+    if (CLOSED.has(s)) here.sort((a, b) => movedAt(b) - movedAt(a) || a.i - b.i);
     const cards = here.map((n) => {
       const r = n.row;
-      const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : ""].filter(Boolean).join(" ");
+      const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : "", changed.has(r.key) ? "changed" : ""].filter(Boolean).join(" ");
       const lines = (trail.get(r.key) ?? []).length;
       const parent = n.parent ? `<span class="chip">${esc(n.parent.row.id)}</span>` : "";
       const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((c) => CLOSED.has(c.state)).length}/${r.children.length} subtasks</span>`;
@@ -799,12 +886,22 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       const by = links.blockedBy.get(r.key);
       const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
         + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
-      return `<a class="${cls}" href="#t${n.i}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${esc(r.id)}</div>`
+      return `<a class="${cls}" href="#t${n.i}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${wraps(r.id)}</div>`
         + `<div class="row">${parent}${kids}${found}${link}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
-    }).join("");
-    return `<div class="col"><div class="ch"><span class="dot" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${cards || `<p class="empty">Nothing here</p>`}</div>`;
+    });
+    return `<div class="col"><div class="ch"><span class="dot" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${capped(s, cards) || `<p class="empty">Nothing here</p>`}</div>`;
   }).join("");
-  return `<div class="cols">${ideasColumn(ghosts, trail)}${cols}</div>`;
+  return `<div class="cols">${ideasColumn(ghosts, trail, changed)}${cols}</div>`;
+}
+
+// Done and Dropped only grow: past SHOWN cards, the newest stay and the rest wait behind
+// "N more" (a details element, so it opens with no script). The work columns show everything.
+const SHOWN = 8;
+function capped(state: string, cards: string[]): string {
+  if (!CLOSED.has(state) || cards.length <= SHOWN) return cards.join("");
+  const rest = cards.length - SHOWN;
+  return cards.slice(0, SHOWN).join("")
+    + `<details class="more" data-more="${rest}"><summary><span class="m-show">Show ${rest} more</span><span class="m-hide">Show fewer</span></summary>${cards.slice(SHOWN).join("")}</details>`;
 }
 
 // ---------- lanes (D2: regions composed, handoffs paired) ----------
@@ -899,13 +996,21 @@ function guideHtml(dumpHash: string): string {
     + `<p><b>The hash.</b> The chip at the top is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
 }
 
-// The product mark, on every page's top bar (the confirm page's too).
-export const BRAND = `<span class="brand">${ICON.brand}tira</span>`;
+// The product mark, on every page's top bar (the confirm page's too): a link home, to the
+// workspace's board (in a rendered file, the top of the page).
+export const brand = (href: string) => `<a class="brand" href="${esc(href)}" title="Home: the board" data-home>${ICON.brand}tira</a>`;
+export const BRAND = brand("/");
 
-// The theme switch, top right on every page: System (the default), Light or Dark. Radio
+// Live, the workspace you're in, next to the mark: a click lists every workspace in the store
+// (app.mjs fetches /api/workspaces when it opens), each one click away.
+const workspaceSwitch = (stream: string) =>
+  `<details class="ws" data-workspaces><summary title="Switch workspace" aria-label="Workspace ${esc(stream)}: switch workspace"><span class="ws-name">${esc(stream)}</span>${ICON.chev}</summary>`
+  + `<div class="ws-menu" data-ws-menu><p class="ws-note">Loading workspaces…</p></div></details>`;
+
+// The theme switch, top right on every page: System (the default), Light, Dark or Living. Radio
 // inputs before <main> and labels in the top bar, so it works with no script; under
 // tira serve, theme.mjs remembers the choice per browser.
-const THEMES: [string, string, string][] = [["system", "System", ICON.system], ["light", "Light", ICON.sun], ["dark", "Dark", ICON.moon]];
+const THEMES: [string, string, string][] = [["system", "System", ICON.system], ["light", "Light", ICON.sun], ["dark", "Dark", ICON.moon], ["living", "Living", ICON.leaf]];
 export const THEME_RADIOS = THEMES.map(([t, label]) => `<input class="view-radio" type="radio" name="theme" id="th-${t}"${t === "system" ? " checked" : ""} aria-label="${label} theme" data-theme-choice="${t}">`).join("");
 export const THEME_SWITCH = `<span class="theme" data-theme-switch>${THEMES.map(([t, label, icon]) => `<label for="th-${t}" title="${label}">${icon}</label>`).join("")}</span>`;
 
@@ -935,9 +1040,10 @@ export function reportDefect(r: DivergenceReport): string | undefined {
   return undefined;
 }
 
+// One line: the state and why, so a missing factory file never pushes the board down.
 const unevaluableHtml = (why: string) =>
-  `<section class="divergence unevaluable" data-divergence-state="unevaluable" aria-label="Divergence"><div class="att-head"><h2>Divergence UNEVALUABLE</h2>`
-  + `<span class="sum">factory vs tira could not be compared, so no count is shown</span></div><p class="why" data-unevaluable-reason>${esc(why)}</p></section>`;
+  `<section class="divergence unevaluable" data-divergence-state="unevaluable" aria-label="Divergence"><div class="att-head" title="factory vs tira could not be compared, so no count is shown"><h2>Divergence UNEVALUABLE</h2>`
+  + `<span class="sum why" data-unevaluable-reason>${esc(why)}</span></div></section>`;
 
 export function divergenceHtml(panel: DivergencePanel): string {
   if ("unevaluable" in panel) return unevaluableHtml(panel.unevaluable);
@@ -958,11 +1064,11 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
-function navHtml(dumpHash: string, lastSeq: number, live: boolean, views: [string, string][]): string {
+function navHtml(dumpHash: string, lastSeq: number, live: boolean, views: [string, string][], home: string, stream: string): string {
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
   const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
   const search = live ? `<button class="kbd" type="button" data-open-palette>Search ⌘K</button>` : "";
-  return `<nav class="top">${BRAND}<div class="tabs">${tabs}</div>${search}<a class="how" href="#guide">How to read this page</a>`
+  return `<nav class="top">${brand(home)}${live ? workspaceSwitch(stream) : ""}<div class="tabs">${tabs}</div>${search}<a class="how" href="#guide">How to read this page</a>`
     + `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a>${THEME_SWITCH}</nav>`;
 }
 
@@ -975,7 +1081,9 @@ function flashHtml(flash: { ok: boolean; text: string } | undefined): string {
 export interface RenderOptions {
   // `tira serve`: rows and task dialogs get actions (each through a confirm dialog), the ⌘K
   // palette loads, and the last action's result shows. A rendered file never carries any of it.
-  live?: { flash?: { ok: boolean; text: string } };
+  // `changed`: the keys the last action wrote to; their cards and boxes glow once.
+  // `query`: the workspace ("w=…") when it isn't the one the server started on, kept on every link.
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -999,6 +1107,10 @@ export function proofsOf(events: readonly StoredEvent[], stream: string, skip: R
 
 export function renderHtml(r: FoldResult, stream: string, dumpHash: string, events: readonly StoredEvent[] = [], opts: RenderOptions = {}): string {
   const live = opts.live !== undefined;
+  const changed = new Set(opts.live?.flash?.changed ?? []);
+  // the workspace on every link back to the server; home is its board (in a rendered file, the top)
+  const q = opts.live?.query ?? "";
+  const home = live ? `/${q ? `?${q}` : ""}` : "#";
   const v = streamView(r, stream);
   events = events.filter((e) => e.seq <= r.lastSeq); // render --at N: no history from after N
   const rejections = r.rejections.filter((x) => x.stream === stream);
@@ -1024,7 +1136,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const stats = [
     ...(lanesOnly
       ? [`<li title="handoff pairs the dispatcher completed"><b>${handoffCount}</b> handoffs</li>`, `<li title="handoffs still waiting"><b>${r.handoffs[stream]?.length ?? 0}</b> waiting</li>`]
-      : [`<li title="tasks still open"><b>${total - closed}</b> left</li>`, `<li title="parents closed by tira">${ICON.auto}<b>${rows.filter((x) => x.closedByTira).length}</b> by tira</li>`, `<li title="drained: every child done or cancelled"><b>${rows.filter((x) => x.drained).length}</b> drained</li>`]),
+      : [`<li title="tasks still open"><b>${total - closed}</b> left</li>`, `<li title="parents tira closed by itself">${ICON.auto}<b>${rows.filter((x) => x.closedByTira).length}</b> closed by tira</li>`, `<li title="parents whose every subtask is done or dropped"><b>${rows.filter((x) => x.drained).length}</b> parents finished</li>`]),
     `<li title="rejected commands">${ICON.ban}<b>${rejections.length}</b> rejected</li>`,
     ...(anomalies.length > 0 ? [`<li class="warn" title="replay anomalies">${ICON.alert}<b>${anomalies.length}</b> anomalies</li>`] : []),
   ];
@@ -1049,16 +1161,16 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 <title>tira · ${esc(stream)}</title><style>${CSS}</style></head>
 <body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}">
-${navHtml(dumpHash, v.lastSeq, live, views)}
+${navHtml(dumpHash, v.lastSeq, live, views, home, stream)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><h1>${esc(stream)}</h1><ul class="stats">${stats.join("")}</ul></div></header>
 ${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}
-${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip) : ""}
-<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts) : `<p class="empty">No tree yet.</p>`}</section>
+${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
+<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed) : `<p class="empty">No tree yet.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 <section class="view view-log" aria-label="History">${logHtml(all, anomalies, v.others, rejections, dumpHash)}</section>
-${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, links, rowOf })).join("")}
-${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live)).join("")}
+${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf })).join("")}
+${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${guideHtml(dumpHash)}
 </main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>
 `;

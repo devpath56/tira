@@ -11,7 +11,11 @@ closes it when work moves on (ruling 2026-10-20); it stays in the tree. Stale wo
 its time limit is ruled.
 
 **How to read it.** "N need you", then one group per reason ("Blocked · waiting on the
-design-token decision"), then "In progress". Each row: the task (click for its dialog), where
+design-token decision"), then "In progress". When more than 3 tasks need you, each blocked
+group folds to one line (its reason, the tasks' names, how many), so the board stays near the
+top of the page; a click opens it. The task being worked on never folds, and a group holding
+the task the last action changed opens by itself. Under `tira serve` the groups you open stay
+open across the reload after every action. Each row: the task (click for its dialog), where
 it sits in the tree, what it waits on when the block named a ticket ("waiting on
 design_tokens", one click to it, with its state; "ready to unblock" once that ticket is
 closed), and since when ("blocked at seq 12"). Under `tira serve`, each row also has its next
@@ -21,7 +25,7 @@ action. Nothing needs you: "Nothing needs you", and the next task.
 
 - `[data-attention-count]` on the section: the number of rows.
 - `[data-attention-key]` on each row: the task's key. Rows don't reuse the train's per-task marker, so the M1 node count is untouched.
-- `[data-reason]` on each blocked group: the reason, as given.
+- `[data-reason]` on each blocked group: the reason, as given; folded, the group's line carries the tasks' `.names`.
 - `[data-blocked-by]` on a row's blocker ticket; `[data-ready]` once that ticket is closed.
 
 Assertion: the count = blocked tasks + active tasks in the fold, less active parents waiting for tira's close.

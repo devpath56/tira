@@ -1,26 +1,33 @@
 // The ⌘K palette, loaded only by `tira serve` (the static page has no script at all).
-// Find any task by a few letters and open its drawer, or type a verb first
-// ("unblock col") to act on it: acting always goes through the confirm page, which
-// shows what tira will do before anything is written. Ranking lives in rank.mjs,
-// shared with the tests. Untrusted text is only ever set with textContent.
+// Find any task by a few letters and open its drawer (on the Graph: move to it there), or
+// type a verb first ("unblock col") to act on it: acting always goes through the confirm
+// page, which shows what tira will do before anything is written. Opened empty, it offers
+// what needs you first (next, in progress, blocked). Ranking lives in rank.mjs, shared with
+// the tests. Untrusted text is only ever set with textContent.
 import { rank, parse } from "./rank.mjs";
 import "./theme.mjs";
-import "./graph.mjs";
+import { graph } from "./graph.mjs";
 import { fx } from "./layout.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
+// The workspace this page shows (?w=…, none for the one the server started on): every request
+// the script makes carries it on, as the server's own links do.
+const W = new URLSearchParams(location.search).get("w");
+const withW = (path) => (W ? `${path}${path.includes("?") ? "&" : "?"}w=${encodeURIComponent(W)}` : path);
+const STREAM = document.querySelector("main")?.dataset.stream ?? "";
+
 let tasks = [];
-const load = () => fetch("/api/tasks").then((r) => r.json()).then((t) => { tasks = t; });
+const load = () => fetch(withW("/api/tasks")).then((r) => r.json()).then((t) => { tasks = t; });
 
 const root = document.createElement("div");
 root.className = "palette";
 root.id = "palette";
 root.hidden = true;
 root.innerHTML = '<div class="pal-box" role="dialog" aria-modal="true" aria-label="Find a task">'
-  + '<input type="text" aria-label="Find a task" placeholder="Find a task, or start / unblock / complete / block + a task" autocomplete="off" spellcheck="false">'
-  + '<ul class="pal-list" role="listbox" aria-label="Matches"></ul>'
-  + '<div class="pal-hint">↵ open · a verb first to act · esc to close</div></div>';
+  + '<input type="text" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" aria-label="Find a task" placeholder="Find a task, or start / unblock / complete / block + a task" autocomplete="off" spellcheck="false">'
+  + '<ul class="pal-list" id="pal-list" role="listbox" aria-label="Matches"></ul>'
+  + '<div class="pal-hint">↵ open (on the Graph: go to it) · a verb first to act · esc to close</div></div>';
 document.body.append(root);
 const input = root.querySelector("input");
 const list = root.querySelector("ul");
@@ -34,12 +41,13 @@ function draw() {
   sel = Math.min(sel, Math.max(0, shown.length - 1));
   list.replaceChildren(...shown.map((task, i) => {
     const li = document.createElement("li");
+    li.id = `pal-${i}`;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", String(i === sel));
     li.dataset.paletteKey = task.key; // not data-key: that one marks each task once on the page (M1)
     const id = document.createElement("span"); id.className = "pid"; id.textContent = task.id;
     const path = document.createElement("span"); path.className = "ppath"; path.textContent = task.path;
-    const what = document.createElement("span"); what.className = "pverb"; what.textContent = verb ? `${VERB_LABEL[verb]} →` : task.state.replace("_", " ");
+    const what = document.createElement("span"); what.className = "pverb"; what.textContent = verb ? `${VERB_LABEL[verb]} →` : task.next ? "◆ next" : task.state.replace("_", " ");
     li.append(id, path, what);
     li.addEventListener("mousedown", (e) => { e.preventDefault(); sel = i; go(); });
     return li;
@@ -49,6 +57,10 @@ function draw() {
     li.textContent = parse(input.value).verb ? "No task in a state that allows that" : "No task matches";
     list.append(li);
   }
+  // a screen reader hears the highlighted match as the arrows move
+  if (shown[sel]) input.setAttribute("aria-activedescendant", `pal-${sel}`);
+  else input.removeAttribute("aria-activedescendant");
+  list.children[sel]?.scrollIntoView({ block: "nearest" });
   root.dataset.ms = fx(performance.now() - t0); // the brief's latency budget: under 100 ms
 }
 
@@ -56,8 +68,8 @@ function go() {
   const task = shown[sel];
   if (!task) return;
   close();
-  if (verb) void openConfirm(`/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`);
-  else location.hash = `#${task.drawer}`;
+  if (verb) void openConfirm(withW(`/confirm?type=${encodeURIComponent(task.type)}&id=${encodeURIComponent(task.id)}&event=${verb}`));
+  else if (!(graphShown() && graph.reveal(task.key))) location.hash = `#${task.drawer}`;
 }
 
 function open() {
@@ -192,7 +204,7 @@ confirmBox.addEventListener("submit", async (e) => {
   const body = new URLSearchParams(new FormData(form));
   body.set("fragment", "1");
   try {
-    const doc = new DOMParser().parseFromString(await (await fetch("/act", { method: "POST", body })).text(), "text/html");
+    const doc = new DOMParser().parseFromString(await (await fetch(form.action, { method: "POST", body })).text(), "text/html"); // /act, in this workspace
     const go = doc.querySelector("[data-go]")?.dataset.go;
     const packet = doc.querySelector("[data-packet]");
     if (go) location.href = go;
@@ -227,6 +239,97 @@ for (const r of styles) {
       // storage blocked: the choice lasts until the page is left
     }
   });
+}
+
+// "Show on graph" in a dialog: close it, switch the board to the Graph, and move to the task
+// there (its folds open, it is ringed and focused).
+const boardShown = () => document.getElementById("v-board")?.checked === true;
+const graphShown = () => boardShown() && document.getElementById("bv-graph")?.checked === true;
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element ? e.target.closest("[data-show-on-graph]") : null;
+  if (!b) return;
+  const key = b.dataset.showOnGraph ?? "";
+  opener = null; // focus goes to the task on the graph, not back to what opened the dialog
+  location.hash = "_"; // the dialog closes
+  const board = document.getElementById("v-board");
+  if (board) board.checked = true;
+  const pick = document.getElementById("bv-graph");
+  if (pick && !pick.checked) { pick.checked = true; pick.dispatchEvent(new Event("change")); }
+  document.querySelector(".view-board")?.scrollIntoView({ block: "start" });
+  requestAnimationFrame(() => graph.reveal(key));
+});
+
+// Needs attention's folded groups: the ones you opened stay open across the reload after
+// every action (per tab).
+const OPEN_KEY = `tira-attention-open:${STREAM}`;
+const groups = [...document.querySelectorAll("details.att-group[data-reason]")];
+let openReasons = [];
+try {
+  openReasons = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? "[]");
+} catch {
+  // storage blocked or garbled: every group starts folded
+}
+for (const g of groups) {
+  if (openReasons.includes(g.dataset.reason)) g.open = true;
+  g.addEventListener("toggle", () => {
+    const open = groups.filter((x) => x.open).map((x) => x.dataset.reason);
+    try {
+      sessionStorage.setItem(OPEN_KEY, JSON.stringify(open));
+    } catch {
+      // storage blocked: it lasts until the page is left
+    }
+  });
+}
+
+// The workspace switcher, next to the mark: opened, it lists every workspace in the store (read
+// then, not on every page load), each with what's open and how many need you; the one you're in
+// is marked. Arrows move between them, Enter opens one, Esc or a click outside closes the list.
+const switcher = document.querySelector("[data-workspaces]");
+if (switcher) {
+  const menu = switcher.querySelector("[data-ws-menu]");
+  const note = (text) => { const p = document.createElement("p"); p.className = "ws-note"; p.textContent = text; return p; };
+  const entry = (w) => {
+    const a = document.createElement("a");
+    a.className = "ws-item";
+    a.href = w.href;
+    if (w.current) a.setAttribute("aria-current", "page");
+    const t = document.createElement("span"); t.className = "ws-t";
+    const name = document.createElement("b"); name.textContent = w.stream;
+    const said = document.createElement("small");
+    said.textContent = w.tasks === 0 ? "no tasks yet" : `${w.open} open of ${w.tasks} task${w.tasks === 1 ? "" : "s"}`;
+    t.append(name, said);
+    const n = document.createElement("span");
+    n.className = w.attention > 0 ? "ws-n" : "ws-n calm";
+    n.textContent = String(w.attention);
+    n.title = `${w.attention} need${w.attention === 1 ? "s" : ""} you`;
+    a.append(t, n);
+    return a;
+  };
+  let loaded = false;
+  switcher.addEventListener("toggle", async () => {
+    if (!switcher.open) return;
+    if (!loaded) {
+      try {
+        const list = await (await fetch(withW("/api/workspaces"))).json();
+        const head = document.createElement("p"); head.className = "ws-head"; head.textContent = "Workspaces";
+        menu.replaceChildren(head, ...list.map(entry));
+        loaded = true;
+      } catch {
+        menu.replaceChildren(note("Couldn't load the workspaces: try again."));
+      }
+    }
+    (menu.querySelector('[aria-current="page"]') ?? menu.querySelector("a"))?.focus();
+  });
+  switcher.addEventListener("keydown", (e) => {
+    const items = [...menu.querySelectorAll("a.ws-item")];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "Escape" && switcher.open) { switcher.open = false; switcher.querySelector("summary")?.focus(); e.preventDefault(); }
+    else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length > 0) {
+      items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+      e.preventDefault();
+    }
+  });
+  document.addEventListener("click", (e) => { if (switcher.open && e.target instanceof Node && !switcher.contains(e.target)) switcher.open = false; });
 }
 
 // Onboarding, one time: the guide opens by itself on the first visit, then only on demand.

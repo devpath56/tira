@@ -52,7 +52,7 @@ async function scenario() {
 
 // Kanban's columns: title → the cards in it, in order
 const kanbanColumns = (html: string) => Object.fromEntries((/<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(html)?.[0] ?? "").split('<div class="col">').slice(1)
-  .map((col) => [/<\/span>([A-Za-z ]+)<span class="k">/.exec(col)?.[1] ?? "", [...col.matchAll(/<div class="t">([^<]+)<\/div>/g)].map((m) => m[1])]));
+  .map((col) => [/<\/span>([A-Za-z ]+)<span class="k">/.exec(col)?.[1] ?? "", [...col.matchAll(/<div class="t">((?:[^<]|<wbr>)+)<\/div>/g)].map((m) => m[1]?.replaceAll("<wbr>", ""))]));
 
 const attrs = (html: string) =>
   [...html.matchAll(/data-key="([^"]+)" data-state="([^"]+)" data-drained="(true|false)" data-cursor="(true|false)" data-active="(true|false)" data-depth="(\d+)"/g)]
@@ -80,8 +80,10 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.deepEqual(nodes.filter((n) => n.drained).map((n) => n.key), ["node:metrics_card", "node:improve_visual"]);
   assert.deepEqual(nodes.filter((n) => n.active).map((n) => n.key), ["node:table"]);
   assert.deepEqual(nodes.filter((n) => n.cursor).map((n) => n.key), ["node:table"]);
-  assert.match(html, /<b>2<\/b> drained<\/li>/);
-  assert.match(html, /<span class="mark drained">drained<\/span>/);
+  // in plain words on the page (the data-drained flag keeps the fold's name)
+  assert.match(html, /<li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  assert.match(html, /<span class="mark drained">all subtasks closed<\/span>/);
+  assert.doesNotMatch(html, />drained</);
   assert.match(html, new RegExp(`data-node-count="${tree.length}" data-fold-tree-count="${tree.length}"`));
   assert.match(html, new RegExp(`data-dump-hash="${hash}"`));
   assert.match(html, /one active task: node:table is already active/); // the rejection is shown
@@ -102,10 +104,10 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?1 of 3 subtasks closed/);
   // Kanban holds the work (leaves), with the cursor's card marked next; no strip of parents above
   // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards;
-  // the open idea waits in Ideas, first
+  // the open idea waits in Ideas, first; Done is newest first (tira closed metrics_card last)
   assert.deepEqual(Object.keys(kanbanColumns(html))[0], "Ideas");
-  assert.deepEqual(kanbanColumns(html), { Ideas: ["7"], "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "colors", "tokens"], Dropped: ["font"] });
-  assert.match(html, /<div class="t">improve_visual<\/div><div class="row"><span class="chip">metrics_card<\/span><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
+  assert.deepEqual(kanbanColumns(html), { Ideas: ["7"], "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "tokens", "colors"], Dropped: ["font"] });
+  assert.match(html, /<div class="t">improve_<wbr>visual<\/div><div class="row"><span class="chip">metrics_card<\/span><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
   assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
   // the halo marks the active task only; payloads read as words, not JSON
   assert.equal((html.match(/<a class="gn [^"]*is-active/g) ?? []).length, 1);
@@ -122,7 +124,7 @@ test("proof 4: tira-closed parents carry a quiet mark; every node is one click f
   assert.deepEqual(closed, ["node:metrics_card", "node:improve_visual"]);
   assert.equal((html.match(/<span class="tira-mark"/g) ?? []).length, 2); // tira's mark on each, on its graph node
   assert.equal((html.match(/<span class="mark tira">closed by tira<\/span>/g) ?? []).length, 2); // and said in words in their drawers
-  assert.match(html, /<b>2<\/b> by tira<\/li>/);
+  assert.match(html, /<b>2<\/b> closed by tira<\/li>/);
   // one click: every tree node links to a drawer that exists and holds its history
   const links = [...html.matchAll(/<a class="gn[^"]*" href="#(t\d+)"/g)].map((m) => m[1] as string);
   assert.equal(links.length, r.entities.filter((e) => e.tree).length);
@@ -189,7 +191,7 @@ test("render --at N shows nothing from after N; tira's mark only shows on closes
   assert.doesNotMatch(after, /class="tira-mark"/);
 });
 
-test("only the active task is marked active; long names are shortened on the graph, full in the dialog", async () => {
+test("only the active task is marked active; a long name shows in words on the graph (two lines at most), exact in its title and dialog", async () => {
   const store = new SqliteEventStore();
   const registry = defaultRegistry();
   const wp = new WritePath(store, registry);
@@ -205,7 +207,8 @@ test("only the active task is marked active; long names are shortened on the gra
   const html = renderHtml(fold(events, registry), S, "h", events);
   const pulsing = [...html.matchAll(/<a class="(gn [^"]*)"[^>]*data-key="([^"]+)"/g)].filter((m) => m[1]?.includes("is-active")).map((m) => m[2]);
   assert.deepEqual(pulsing, ["node:c"]); // p is in progress too, but c (below it) is the active task
-  assert.match(html, /<span class="name" title="a_really_long_task_name_for_the_tree_view">a_really_long_task_na…<\/span>/);
+  assert.match(html, /<span class="name" title="a_really_long_task_name_for_the_tree_view">a really long task name for the tree view<\/span>/);
+  assert.match(CSS, /\.gn \.name,\.ghost \.name\{[^}]*-webkit-line-clamp:2;line-clamp:2;overflow:hidden/); // two lines, then …
   assert.match(html, new RegExp(`<h2>${long}</h2>`));
 });
 
@@ -352,16 +355,23 @@ test("trust and reading aids: the hash chip says what it is and opens the guide;
   assert.match(lanes, /<h3 class="lanes-label">Handoffs: 0 waiting, 1 done<\/h3>/);
 });
 
-test("the theme switch: System, Light and Dark at the top right; System by default; a picked theme beats the system's, on screen only", async () => {
+test("the theme switch: System, Light, Dark and Living at the top right; System by default; a picked theme beats the system's, on screen only", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
   const radios = [...html.matchAll(/<input class="view-radio" type="radio" name="theme" id="th-(\w+)"( checked)? aria-label="\w+ theme" data-theme-choice="(\w+)">/g)];
-  assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"]]);
-  assert.ok(html.indexOf('id="th-dark"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
-  assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<\/span><\/nav>/);
+  assert.deepEqual(radios.map((m) => [m[1], m[2] !== undefined, m[3]]), [["system", true, "system"], ["light", false, "light"], ["dark", false, "dark"], ["living", false, "living"]]);
+  assert.ok(html.indexOf('id="th-living"') < html.indexOf("<main"), "the radios come before <main>, which the CSS follows");
+  assert.match(html, /<span class="theme" data-theme-switch><label for="th-system" title="System">[^]*?<label for="th-light" title="Light">[^]*?<label for="th-dark" title="Dark">[^]*?<label for="th-living" title="Living">[^]*?<\/span><\/nav>/);
   assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root\{--bg:#1f1f21;/); // System: the computer's setting
-  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#ffffff;/); // Light beats a dark system
+  assert.match(CSS, /:root:has\(#th-light:checked\)\{color-scheme:light;--bg:#f7f6f3;/); // Light (warm off-white) beats a dark system
   assert.match(CSS, /@media screen\{:root:has\(#th-dark:checked\)\{color-scheme:dark;--bg:#1f1f21;/); // Dark, on screen only: print stays light
+  // Living follows the system's light or dark, on screen; its blooms, buds and breathing only under it, and still for reduced motion
+  assert.match(CSS, /:root:has\(#th-living:checked\)\{color-scheme:light;--bg:#eef1e8;/);
+  assert.match(CSS, /@media screen and \(prefers-color-scheme:dark\)\{:root:has\(#th-living:checked\)\{color-scheme:dark;--bg:#141915;/);
+  assert.match(CSS, /#th-living:checked~main \.st-done \.sd\{border:0;background:radial-gradient\(circle,var\(--pollen\)/); // a done task blooms
+  assert.match(CSS, /#th-living:checked~main \.st-in_progress \.sd\{[^}]*animation:breathe /);
+  assert.match(CSS, /@media screen\{body:has\(#th-living:checked\)\{background:/); // print stays plain
+  assert.match(CSS, /@media \(prefers-reduced-motion:reduce\)\{\*,\*::before,\*::after\{transition:none!important;animation:none!important\}\}/);
   assert.ok(!html.includes("<script"), "the switch is CSS only: the rendered file has no script");
 });
 
@@ -770,4 +780,101 @@ test("tira render: no factory file, or one that cannot be read, renders the sect
   const empty = join(dir, "empty.html");
   assert.equal((await cli(["--db", db, "--stream", "nothing-here", "render", "--factory", B3_FACTORY, "--out", empty], env)).code, 0);
   assert.match(panelOf(readFileSync(empty, "utf8")).sec, /stream nothing-here has no events/);
+});
+
+// ---------- the page at 100+ tasks (Isha, 2026-10-21: board up front, Kanban that fits) ----------
+
+// a flat stream: `done` tasks completed in order (t0 first), `todo` untouched, `blocked` blocked
+// on `reasons` (task i on reasons[i % n]), `dropped` cancelled, and one task in progress
+async function flat(opts: { done?: number; todo?: number; dropped?: number; blocked?: number; reasons?: string[]; working?: boolean }) {
+  const store = new SqliteEventStore();
+  const registry = defaultRegistry();
+  const wp = new WritePath(store, registry);
+  const born = (id: string) => wp.submit({ stream: S, kind: "create", entity: { type: "node", id }, actor: "isha" });
+  const send = (id: string, event: string, payload: Record<string, unknown> = {}) => wp.submit({ stream: S, kind: "event", entity: { type: "node", id }, event, actor: "isha", payload });
+  for (let i = 0; i < (opts.done ?? 0); i++) { await born(`d${i}`); await send(`d${i}`, "START"); await send(`d${i}`, "COMPLETE", { evidenceRef: "e" }); }
+  for (let i = 0; i < (opts.todo ?? 0); i++) await born(`t${i}`);
+  for (let i = 0; i < (opts.dropped ?? 0); i++) { await born(`x${i}`); await send(`x${i}`, "CANCEL"); }
+  const reasons = opts.reasons ?? ["waiting on review"];
+  for (let i = 0; i < (opts.blocked ?? 0); i++) { await born(`b${i}`); await send(`b${i}`, "BLOCK", { reason: reasons[i % reasons.length] }); }
+  if (opts.working) { await born("w"); await send("w", "START"); }
+  const events = await store.readStream(S);
+  return { r: fold(events, registry), events };
+}
+
+test("Kanban at 100+ tasks: the columns stay in one row; Done and Dropped show their newest 8, the rest behind 'N more'; the work columns show every card", async () => {
+  assert.match(CSS, /\.cols\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(184px,1fr\);[^}]*overflow-x:auto/); // never wraps a column under the others
+  const { r, events } = await flat({ done: 12, todo: 10, dropped: 3 });
+  const html = renderHtml(r, S, "h", events);
+  const cols = kanbanColumns(html);
+  // newest first: d11 was completed last
+  assert.deepEqual(cols.Done, ["d11", "d10", "d9", "d8", "d7", "d6", "d5", "d4", "d3", "d2", "d1", "d0"]);
+  const done = /<span class="dot" style="background:var\(--done\)"><\/span>Done[^]*?<\/div><div class="col">/.exec(html)?.[0] ?? "";
+  const [shown, rest] = done.split('<details class="more"');
+  assert.equal((shown?.match(/<a class="card/g) ?? []).length, 8);
+  assert.match(done, /<details class="more" data-more="4"><summary><span class="m-show">Show 4 more<\/span><span class="m-hide">Show fewer<\/span><\/summary>/);
+  assert.equal((rest?.match(/<a class="card/g) ?? []).length, 4); // the older four, a click away (no script)
+  // To do holds the work: never folded, however long; Dropped (3) is under the cap
+  assert.equal(cols["To do"]?.length, 10);
+  assert.equal((html.match(/<details class="more"/g) ?? []).length, 1);
+  // a card's title wraps after an underscore, never inside a word; its text is the exact id
+  const { r: r2, events: e2 } = await scenario();
+  assert.match(renderHtml(r2, S, "h", e2), /<div class="t">improve_<wbr>visual<\/div>/);
+});
+
+test("needs attention folds once more than 3 tasks need you: one line per blocked group (reason, names, count); the task being worked on never folds", async () => {
+  const { r, events } = await flat({ blocked: 4, reasons: ["waiting on review", "waiting on tokens"], working: true });
+  const html = renderHtml(r, S, "h", events);
+  const groups = [...html.matchAll(/<details class="att-group blocked" data-group="blocked" data-reason="([^"]+)"( open)?><summary><span class="kind">Blocked<\/span><span class="why">([^<]+)<\/span><span class="names">([^<]+)<\/span><span class="k">(\d+)<\/span><\/summary>/g)];
+  assert.deepEqual(groups.map((m) => [m[1], m[2] !== undefined, m[4], m[5]]), [["waiting on review", false, "b0, b2", "2"], ["waiting on tokens", false, "b1, b3", "2"]]);
+  // the rows (with their actions, live) are inside, a click away
+  assert.equal((html.match(/<li class="att-row[^"]*" data-attention-key="node:b\d"/g) ?? []).length, 4);
+  assert.match(html, /<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">1<\/span><\/h3>/);
+  // 3 or fewer: nothing folds
+  const few = await flat({ blocked: 2, working: true });
+  const calm = renderHtml(few.r, S, "h", few.events);
+  assert.doesNotMatch(calm, /<details class="att-group/);
+  assert.match(calm, /<div class="att-group blocked" data-group="blocked" data-reason="waiting on review"><h3>Blocked <span class="why">waiting on review<\/span>/);
+  // the group holding what the last action changed opens by itself, and its row glows
+  const live = renderHtml(r, S, "h", events, { live: { flash: { ok: true, text: "x", changed: ["node:b3"] } } });
+  assert.match(live, /data-reason="waiting on tokens" open><summary>/);
+  assert.match(live, /data-reason="waiting on review"><summary>/);
+  assert.match(live, /<li class="att-row changed" data-attention-key="node:b3"/);
+});
+
+test("a divergence panel that can't be evaluated is one line: the state and why, never a count", () => {
+  const sec = divergenceHtml({ unevaluable: "no factory file: pass --factory FILE or set TIRA_FACTORY" });
+  assert.equal(sec, `<section class="divergence unevaluable" data-divergence-state="unevaluable" aria-label="Divergence"><div class="att-head" title="factory vs tira could not be compared, so no count is shown"><h2>Divergence UNEVALUABLE</h2><span class="sum why" data-unevaluable-reason>no factory file: pass --factory FILE or set TIRA_FACTORY</span></div></section>`);
+});
+
+test("live only: every task and idea dialog offers Show on graph, and what the last action changed glows once; the rendered file has neither", async () => {
+  const { r, events } = await scenario();
+  const file = renderHtml(r, S, "h", events);
+  assert.doesNotMatch(file, /data-show-on-graph|class="[^"]*\bchanged\b/);
+  const live = renderHtml(r, S, "h", events, { live: { flash: { ok: true, text: "Complete colors: done", changed: ["node:colors", "idea:7"] } } });
+  // one button per dialog, naming its own task (or idea)
+  const dialogs = [...live.matchAll(/<section class="drawer" id="([ti]\d+)"[^]*?<\/section>/g)];
+  assert.ok(dialogs.length > 1);
+  for (const [d, id] of dialogs) {
+    const key = /data-show-on-graph="([^"]+)"/.exec(d)?.[1];
+    assert.ok(key, `${id} has no Show on graph`);
+    if (id?.startsWith("i")) assert.equal(key, "idea:7");
+    else assert.match(live, new RegExp(`<a class="gn[^"]*" href="#${id}"[^>]*data-key="${key}"`), `${id}: its graph box is ${key}`);
+  }
+  // the changed task: its card, its graph box; the idea's card and ghost
+  assert.match(live, /<a class="card changed" href="#t\d+"><div class="t">colors<\/div>/);
+  assert.match(live, /<a class="gn st-done changed" href="#t\d+"[^>]*data-key="node:colors"/);
+  assert.match(live, /<a class="card idea changed" href="#i0"/);
+  assert.match(live, /<a class="ghost changed" href="#i0"/);
+  assert.equal((live.match(/class="[^"]*\bchanged\b/g) ?? []).length, 4);
+  assert.match(CSS, /\.changed\{animation:changed [^}]* 2\}/); // twice, then still
+  assert.match(CSS, /@media \(prefers-reduced-motion:reduce\)\{\.changed\{outline:2px solid var\(--accent\)/); // no motion: a ring instead
+});
+
+test("the header in plain words, calmer: the stream's name with a serif accent, and its numbers in one quiet row", async () => {
+  const { r, events } = await scenario();
+  const html = renderHtml(r, S, "h", events);
+  assert.match(html, /<h1>tasktree-dash<\/h1><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  assert.match(CSS, /\.hero h1::before\{content:"stream";margin-right:\.3em;font:italic 400 1em\/1 var\(--serif\)/);
+  assert.match(CSS, /\.stats li\{[^}]*border-left:1px solid var\(--line\)\}/); // dividers, not boxes
 });

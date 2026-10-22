@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { G, STACK, centreOn, finishedBranches, fitView, foundPath, fx, layout, subtree, treePath, zoomAt, type LayoutNode, type Point } from "../src/serve/layout.mjs";
+import { FAR, LABEL, MINI, branchSpans, centreAt, ease, isFar, labelFits, miniScale, placesBetween, viewBetween, viewRect } from "../src/serve/layout.mjs";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
@@ -163,6 +164,96 @@ test("the canvas: zoom keeps the point under the pointer still and stays within 
   const c = centreOn({ x: 1000, y: 500 }, 1, 1200, 600);
   assert.equal(c.x + 1000, 600);
   assert.equal(c.y + 500 + G.box / 2, 200);
+});
+
+test("zoomed out (below 50%) the canvas shows tiles and branch labels; a label shows only with room on screen, and deep ones only from 22%", () => {
+  assert.equal(FAR, 0.5);
+  assert.equal(isFar(0.49), true);
+  assert.equal(isFar(0.5), false); // 50% still reads as boxes
+  const tree: LayoutNode[] = [{ key: "r" }, { key: "a", parent: "r" }, { key: "a1", parent: "a" }, { key: "a2", parent: "a" }, { key: "b", parent: "r" }];
+  const { at } = layout(tree);
+  const spans = branchSpans(tree, at);
+  // parents only, each across its whole branch
+  assert.deepEqual([...spans.keys()].sort(), ["a", "r"]);
+  const xs = (keys: string[]) => keys.map((k) => at.get(k)?.x ?? NaN);
+  assert.deepEqual(spans.get("a"), [Math.min(...xs(["a1", "a2"])) - G.node / 2, Math.max(...xs(["a1", "a2"])) + G.node / 2]);
+  assert.deepEqual(spans.get("r"), [Math.min(...xs(["a1", "b"])) - G.node / 2, Math.max(...xs(["a2", "b"])) + G.node / 2]);
+  // a folded branch has nothing under it to label
+  assert.deepEqual([...branchSpans(tree, layout(tree, new Set(["a"])).at).keys()], ["r"]);
+  // a big tree's columns count too: the bracketed tasks sit right of their parent
+  const big = randomTree(7, 120);
+  const bigAt = layout(big).at;
+  for (const [key, [lo, hi]] of branchSpans(big, bigAt)) {
+    for (const k of subtree(big, key)) {
+      const p = bigAt.get(k);
+      if (p) assert.ok(p.x - G.node / 2 >= lo - 0.01 && p.x + G.node / 2 <= hi + 0.01, `${k} outside ${key}'s span`);
+    }
+  }
+  // room on screen
+  assert.equal(labelFits([0, 300], LABEL.min / 300, 0), true);
+  assert.equal(labelFits([0, 300], LABEL.min / 300 - 0.01, 0), false);
+  assert.equal(labelFits([0, 2000], 0.2, 1), true);
+  assert.equal(labelFits([0, 2000], 0.2, 2), false); // too far out for a third level
+  assert.equal(labelFits([0, 2000], LABEL.deep, 2), true);
+});
+
+test("the minimap: the whole tree in at most 168 × 96, and the part the viewport shows", () => {
+  assert.deepEqual(MINI, { w: 168, h: 96 });
+  const k = miniScale(4724, 1100);
+  assert.ok(4724 * k <= 168 + 1e-9 && 1100 * k <= 96 + 1e-9 && (4724 * k > 167.99 || 1100 * k > 95.99));
+  assert.equal(miniScale(0, 100), 1); // nothing to show
+  const view = { x: -300, y: 50, s: 0.5 };
+  assert.deepEqual(viewRect(view, 800, 400), { x: 600, y: -100, w: 1600, h: 800 });
+  // a click on the map centres the view on that point, at the same zoom
+  const c = centreAt(1000, 300, 0.5, 800, 400);
+  assert.deepEqual(c, { x: -100, y: 50, s: 0.5 });
+  const r = viewRect(c, 800, 400);
+  assert.deepEqual([r.x + r.w / 2, r.y + r.h / 2], [1000, 300]);
+});
+
+test("motion: glides ease out (GSAP's power3.out) and land exactly; the middle of the view travels straight while the zoom changes evenly", () => {
+  assert.equal(ease(0), 0);
+  assert.equal(ease(1), 1);
+  assert.equal(ease(0.5), 0.875);
+  assert.equal(ease(-1), 0);
+  assert.equal(ease(2), 1);
+  for (let t = 0.1; t < 1; t += 0.1) assert.ok(ease(t) > ease(t - 0.1), "always moving forward");
+  const a = { x: 10, y: 20, s: 0.25 };
+  const b = { x: -900, y: -300, s: 1 };
+  const [vw, vh] = [1000, 600];
+  assert.deepEqual(viewBetween(a, b, 0, vw, vh), a);
+  const end = viewBetween(a, b, 1, vw, vh);
+  assert.ok(Math.abs(end.x - b.x) < 1e-9 && Math.abs(end.y - b.y) < 1e-9 && Math.abs(end.s - b.s) < 1e-12);
+  // half way (eased): the scale is the geometric middle, the middle point on the straight line
+  const mid = viewBetween(a, b, 0.5, vw, vh);
+  const k = ease(0.5);
+  assert.ok(Math.abs(mid.s - 0.25 * 4 ** k) < 1e-12);
+  const centre = (v: { x: number; y: number; s: number }) => [(vw / 2 - v.x) / v.s, (vh / 2 - v.y) / v.s];
+  const [ca, cb, cm] = [centre(a), centre(b), centre(mid)];
+  for (const i of [0, 1]) assert.ok(Math.abs((cm[i] ?? 0) - ((ca[i] ?? 0) + ((cb[i] ?? 0) - (ca[i] ?? 0)) * k)) < 1e-9);
+});
+
+test("motion: a fold opening or closing moves boxes from their old places to their new ones; new ones grow from their parent, gone ones shrink into it", () => {
+  const tree: LayoutNode[] = [{ key: "r" }, { key: "a", parent: "r" }, { key: "a1", parent: "a" }, { key: "a2", parent: "a" }, { key: "b", parent: "r" }];
+  const open = layout(tree).at;
+  const shut = layout(tree, new Set(["a"])).at;
+  // opening a: a1 and a2 start where a was, and fade in
+  const start = placesBetween(tree, shut, open, 0);
+  assert.deepEqual([start.at.get("a1")?.x, start.at.get("a1")?.y], [shut.get("a")?.x, shut.get("a")?.y]);
+  assert.equal(start.fade.get("a1"), 0);
+  assert.equal(start.fade.get("b"), 1);
+  const done = placesBetween(tree, shut, open, 1);
+  for (const [k, p] of open) assert.deepEqual([done.at.get(k)?.x, done.at.get(k)?.y], [p.x, p.y], k);
+  assert.equal(done.fade.get("a1"), 1);
+  // closing a: a1 heads for a's new place and is gone at the end
+  const half = placesBetween(tree, open, shut, 0.5);
+  assert.ok(half.at.has("a1"));
+  assert.ok(Math.abs((half.fade.get("a1") ?? 0) - (1 - ease(0.5))) < 1e-12);
+  const x = (open.get("a1")?.x ?? 0) + ((shut.get("a")?.x ?? 0) - (open.get("a1")?.x ?? 0)) * ease(0.5);
+  assert.ok(Math.abs((half.at.get("a1")?.x ?? NaN) - x) < 1e-9);
+  const closed = placesBetween(tree, open, shut, 1);
+  assert.equal(closed.at.has("a1"), false);
+  assert.deepEqual([...closed.at.keys()].sort(), [...shut.keys()].sort());
 });
 
 // ---------- one numeric formatter (convention fx-display-format, conventions/conventions.jsonl) ----------
