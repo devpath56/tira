@@ -166,6 +166,25 @@ export interface IdeaRow {
 
 export const stageWord = (i: IdeaRow): string => (i.stage === "node_pending" && i.proposal?.parent === undefined ? "needs a parent" : STAGE[i.stage] ?? i.stage);
 
+// tira's proposal, as a propose-node event carried it.
+function proposalFrom(p: Record<string, unknown>, seq: number): Placement & { seq: number } {
+  const parent = text(p.parent_id);
+  const candidates = Array.isArray(p.candidates) ? p.candidates.filter((c): c is string => typeof c === "string") : [];
+  return { ...(parent === undefined ? {} : { parent }), candidates, basis: text(p.basis) ?? "", seq };
+}
+
+// What one idea event adds to its row.
+function applyIdeaEvent(row: IdeaRow, ev: string, p: Record<string, unknown>, seq: number): void {
+  if (ev === "created" || ev === "draft-file") Object.assign(row, fileFrom(p) ?? {});
+  const under = text(p.under);
+  const parent = text(p.parent_id);
+  const reason = text(p.reason);
+  if (ev === "created" && under !== undefined) row.under = under;
+  if (ev === "propose-node") row.proposal = proposalFrom(p, seq);
+  if (ev === "approve-node" && parent !== undefined) row.placedUnder = parent;
+  if ((ev === "reject-file" || ev === "reject-node") && reason !== undefined) row.reason = reason;
+}
+
 // Every idea in a stream, in the order they were declared, from the events replay applied.
 export function ideaRows(r: FoldResult, events: readonly StoredEvent[], stream: string): IdeaRow[] {
   const skip = new Set(r.anomalies.filter((a) => a.stream === stream).map((a) => a.seq));
@@ -178,19 +197,7 @@ export function ideaRows(r: FoldResult, events: readonly StoredEvent[], stream: 
     const d = e.data as unknown as EventData;
     const row = rows.get(`${IDEA}:${d?.entity?.id}`);
     if (!row) continue;
-    const p = d.payload ?? {};
-    const ev = e.type.slice(IDEA.length + 1);
-    if (ev === "created" || ev === "draft-file") Object.assign(row, fileFrom(p) ?? {});
-    const under = text(p.under);
-    const parent = text(p.parent_id);
-    const reason = text(p.reason);
-    if (ev === "created" && under !== undefined) row.under = under;
-    if (ev === "propose-node") {
-      const candidates = Array.isArray(p.candidates) ? p.candidates.filter((c): c is string => typeof c === "string") : [];
-      row.proposal = { ...(parent === undefined ? {} : { parent }), candidates, basis: text(p.basis) ?? "", seq: e.seq };
-    }
-    if (ev === "approve-node" && parent !== undefined) row.placedUnder = parent;
-    if ((ev === "reject-file" || ev === "reject-node") && reason !== undefined) row.reason = reason;
+    applyIdeaEvent(row, e.type.slice(IDEA.length + 1), d.payload ?? {}, e.seq);
   }
   return [...rows.values()].sort((a, b) => a.declaredSeq - b.declaredSeq);
 }

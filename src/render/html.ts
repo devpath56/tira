@@ -457,7 +457,8 @@ function ghostHtml(g: Ghost, p: { x: number; y: number }, history: number): stri
   let where = "not placed yet";
   if (g.parent !== undefined) where = `proposed under ${bare(g.parent)}`;
   else if (loose(i)) where = "needs a parent";
-  const label = `idea ${i.id}${i.summary ? `: ${i.summary}` : ""}, ${stageWord(i)}, ${where}`;
+  const said = i.summary ? `: ${i.summary}` : "";
+  const label = `idea ${i.id}${said}, ${stageWord(i)}, ${where}`;
   const parentAttr = g.parent === undefined ? "" : ` data-parent="${esc(g.parent)}"`;
   return `<a class="ghost${loose(i) ? " loose" : ""}" href="#i${g.i}" ${placedAt(p)} aria-label="${esc(label)}"${parentAttr} data-idea="${esc(i.key)}" data-stage="${esc(i.stage)}" data-history="${history}">`
     + `<span class="tag">idea</span><span class="gt"><span class="sd">${ICON.spark}</span><span class="name" title="${esc(i.summary ?? i.id)}">${esc(short(i.id))}</span></span>`
@@ -502,9 +503,10 @@ function ideaDrawerHtml(g: Ghost, lines: TrailEntry[], live: boolean): string {
   else if (p !== undefined) goes = p.basis + (p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : "");
   const file: [string, string][] = [["Why", i.why ?? "not given"], ["Goes under", goes], ["Next", ideaNext(i)]];
   const by = i.declaredBy === undefined ? "" : ` by ${i.declaredBy}`;
+  const fileHtml = file.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
   return `<section class="drawer" id="i${g.i}" aria-label="idea ${esc(i.id)}" role="dialog" aria-modal="true" data-idea-dialog="${esc(i.key)}">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
     + `<div class="path">idea ${esc(i.id)} · declared${esc(by)} at seq ${i.declaredSeq}</div><h2>${esc(i.summary ?? i.id)}</h2><div class="badges"><span class="state s-idea">${esc(stageWord(i))}</span><span class="mark">not a task yet</span></div>`
-    + `<dl class="idea-file">${file.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>${acts}`
+    + `<dl class="idea-file">${fileHtml}</dl>${acts}`
     + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
@@ -538,11 +540,17 @@ interface TrailEntry {
 }
 
 // A payload in a few words: "under dashboard", "evidence palette.png", anything else as key value.
+function describeValue(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) return val.map(show).join(", ") || "none";
+  return JSON.stringify(val);
+}
+
 function describe(p: Record<string, unknown>): string {
   const words: Record<string, string> = { parent_id: "under", discovered_during: "found during", evidenceRef: "evidence", reason: "reason", blocker: "blocked by" };
   return Object.entries(p)
     .filter(([k, val]) => !(k === "kind" && (val === "discovered" || val === "planned")))
-    .map(([k, val]) => `${words[k] ?? k} ${typeof val === "string" ? val : Array.isArray(val) ? val.map(show).join(", ") || "none" : JSON.stringify(val)}`)
+    .map(([k, val]) => `${words[k] ?? k} ${describeValue(val)}`)
     .join(" · ");
 }
 

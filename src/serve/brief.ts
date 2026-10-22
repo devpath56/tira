@@ -207,7 +207,8 @@ function ideaAdvice(f: IdeaFacts): string {
   if (f.event === "REJECT_FILE") return "Reject it only if it isn't worth doing; say why, so whoever pushed it knows.";
   if (f.event === "APPROVE_NODE") {
     if (p?.parent !== undefined) return `Approve it under ${p.parent} if that's where it fits; change parent_id to put it elsewhere.`;
-    return `Pick where it goes${p && p.candidates.length > 0 ? ` (${list(p.candidates)})` : ""}, then approve it.`;
+    const options = p && p.candidates.length > 0 ? ` (${list(p.candidates)})` : "";
+    return `Pick where it goes${options}, then approve it.`;
   }
   return "Reject it only if it shouldn't become a task at all; if it belongs elsewhere, approve it with another parent_id.";
 }
