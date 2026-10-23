@@ -420,7 +420,10 @@ test("before setup: the board points to Project settings, and Account settings o
     const board = (await s.http("GET", "/")).body;
     // the sidebar's profile: your name on the button, and the menu straight to your Account settings;
     // this project's settings are a link of their own
-    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Account settings<small>/);
+    // a short menu, as Apple's are: Account settings, and (signed in) Sign out, nothing more
+    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Account settings<\/a><\/div><\/details>/);
+    // in the sidebar it opens upward and keeps to the sidebar's width, never spilling past it
+    assert.match(board, /main\[data-stream\]>\.top \.me-menu\{top:auto;bottom:calc\(100% \+ 6px\);left:0;right:0;width:auto;/);
     assert.match(board, /<a class="side-link" href="\/integrations" data-project-settings><svg[^]*?<\/svg>Project settings<\/a>/);
     assert.doesNotMatch(board, /Acting as|class="ws-head"/);
     assert.match(board, /<\/h1><div class="proj-links" data-workspace aria-label="Linked to"><a class="act primary" href="\/integrations" data-integrations><svg[^]*?<\/svg><svg[^]*?<\/svg>Connect GitHub and Jira<\/a><\/div><div class="title-acts">/); // on the name's line, only while nothing is linked
@@ -518,7 +521,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal((await s.http("GET", "/")).headers.location, "/connect");
     assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app" })), "Connected to acme/app. Here's your board.");
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Account settings<small>[^]*?data-signout>Sign out<\/button>/);
+    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Account settings<\/a><form method="post" action="\/signout" class="me-out"><input type="hidden" name="token" value="k"><button class="ws-item" type="submit" data-signout>Sign out<\/button><\/form><\/div><\/details>/);
     assert.doesNotMatch(board, /gho-token/);
     // writes are now recorded as the GitHub login
     const at = String((await s.store.readStream(S)).at(-1)?.seq);

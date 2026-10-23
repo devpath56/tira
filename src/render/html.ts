@@ -92,7 +92,10 @@ a{color:inherit;text-decoration:none}
 .pav{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;font:650 11px/1 var(--sans);color:#fff;background:var(--t)}
 .t0{--t:#5e6ad2}.t1{--t:#0f7b6c}.t2{--t:#b4426b}.t3{--t:#8a5a00}.t4{--t:#2f6fb0}.t5{--t:#7a4fc9}.t6{--t:#3d7a2e}.t7{--t:#b04a2a}
 .me .av{width:22px;height:22px;font-size:11px}.me>summary{gap:8px}
-.me-menu .ws-item{flex-direction:column;align-items:flex-start;gap:1px;width:100%;font:inherit;font-size:13px;text-align:left;background:none;border:0;cursor:pointer}.me-menu form{margin:0}
+.me-menu{padding:5px;border-radius:10px;border-color:color-mix(in srgb,var(--fg) 12%,transparent);background:color-mix(in srgb,var(--panel) 90%,transparent);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
+.me-menu .ws-item{width:100%;min-height:28px;padding:0 10px;font:inherit;font-size:13px;font-weight:500;line-height:1.2;text-align:left;background:none;border:0;border-radius:6px;cursor:pointer}
+.me-menu .me-out{margin:4px 0 0;padding:4px 0 0;border-top:1px solid var(--line)}
+.me[open]>.me-menu{animation:menu-in .14s var(--ease) both}@keyframes menu-in{from{opacity:0;transform:translateY(4px) scale(.98)}}
 .new-project{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:var(--r);font-size:13px;color:var(--mut);transition:background .15s var(--ease),color .15s var(--ease)}.new-project:hover{background:var(--hover);color:var(--fg)}.new-project svg{width:14px;height:14px}
 .log-top{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:16px 0 4px}.log-top h3{margin:0}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
@@ -474,7 +477,7 @@ main[data-stream]>.top .projects .ws-head{display:none}
 main[data-stream]>.top .side-foot{margin:auto 0 0;padding-top:10px;border-top:1px solid var(--line);flex-direction:column;align-items:stretch;gap:6px}
 main[data-stream]>.top .side-foot .theme{align-self:flex-start}
 main[data-stream]>.top .me>summary{max-width:none;width:100%;border:0;background:none;padding:0 8px}
-main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px)}
+main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px);left:0;right:0;width:auto;transform-origin:bottom center}
 main[data-stream]>.side-toggle{display:grid;left:calc(var(--side) - 42px)}
 :root:has(#side-shut:checked){--side:28px}
 #side-shut:checked~main[data-stream]>.top{display:none}
@@ -1224,14 +1227,14 @@ const projectsHtml = (stream: string, home: string, q: string, name = stream) =>
   + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page" data-stream="${esc(stream)}">${projectMark(stream, name)}<span class="ws-t"><b>${esc(name)}</b></span></a></div>`
   + `<a class="new-project" href="${esc(withQ("/projects/new", q))}" data-new-project>${ICON.plus}New project</a></details>`;
 
-// Live, you (your name is on the button already): your Account settings (yours in every project:
-// your accounts, how tira looks, who may sign in) and, signed in, a way out.
+// Live, you (your name is on the button already): a short menu, as Apple's are, sized to the sidebar:
+// your Account settings (yours in every project) and, signed in, Sign out, below a separator.
 // (shown by the name they chose in Account settings, if they chose one)
 const profileHtml = (me: string, live: NonNullable<RenderOptions["live"]>, q: string, shown = live.name ?? me) =>
   `<details class="ws me" data-profile><summary title="You: ${esc(shown)}"${live.user ? " data-user" : ""}><span class="av">${initial(shown)}</span><span class="ws-name">${esc(shown)}</span>${ICON.chev}</summary>`
   + `<div class="ws-menu me-menu" data-me-menu>`
-  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Account settings<small>Your accounts, setup, people, appearance</small></a>`
-  + (live.user && live.token ? `<form method="post" action="/signout"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
+  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Account settings</a>`
+  + (live.user && live.token ? `<form method="post" action="/signout" class="me-out"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
   + `</div></details>`;
 // a path with the project's query on it
 const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
