@@ -759,6 +759,8 @@ const MUTANTS: Mutant[] = [
   { name: "accounts: pages read the accounts as the server started", file: "src/serve/server.ts", find: "    if (route !== liveSeq) await accountsNow(); // the live check reads no one's account\n", replace: "", needs: "postgres" },
   { name: "accounts: the old file overwrites the database", file: "src/sync/accounts-pg.ts", find: "INSERT INTO ${s}.account_github (login, token, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`", replace: "INSERT INTO ${s}.account_github (login, token, name) VALUES ($1, $2, $3) ON CONFLICT (login) DO UPDATE SET token = EXCLUDED.token`", needs: "postgres" },
   { name: "accounts: removing someone ends their links in the database", file: "src/sync/accounts-pg.ts", find: "  async signOutEverywhere(login: string): Promise<void> {\n    await this.write(`DELETE FROM ${this.schema}.account_sessions WHERE lower(login) = lower($1)`, [login]);", replace: "  async signOutEverywhere(login: string): Promise<void> {\n    await this.forget(login);", needs: "postgres" },
+  { name: "ui: ☰ doesn't hide the sidebar", file: "src/render/html.ts", find: "#side-shut:checked~main[data-stream]>.top{display:none}", replace: "" },
+  { name: "ui: the sidebar forgets it was hidden", file: "src/serve/theme.mjs", find: "    if (was !== null) c.checked = was === \"1\";\n", replace: "" },
   { name: "accounts: unlinking GitHub leaves its token in the database", file: "src/sync/accounts-pg.ts", find: "      await c.query(`DELETE FROM ${s}.account_github WHERE lower(login) = lower($1)`, [login]);\n", replace: "", needs: "postgres" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)

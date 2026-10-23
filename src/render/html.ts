@@ -472,7 +472,13 @@ main[data-stream]>.top .side-foot{margin:auto 0 0;padding-top:10px;border-top:1p
 main[data-stream]>.top .side-foot .theme{align-self:flex-start}
 main[data-stream]>.top .me>summary{max-width:none;width:100%;border:0;background:none;padding:0 8px}
 main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px)}
+main[data-stream]>.side-toggle{display:grid;left:calc(var(--side) - 42px)}
+:root:has(#side-shut:checked){--side:28px}
+#side-shut:checked~main[data-stream]>.top{display:none}
+#side-shut:checked~main[data-stream]>.side-toggle{left:14px}
 }
+.side-toggle{display:none;position:fixed;z-index:7;top:13px;place-items:center;width:30px;height:30px;border-radius:var(--r);color:var(--mut);cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease)}
+.side-toggle:hover{background:var(--hover);color:var(--fg)}.side-toggle svg{width:16px;height:16px}#side-shut:focus-visible~main .side-toggle{outline:2px solid var(--accent);outline-offset:-2px}
 @media (max-width:720px){.split{grid-template-columns:1fr}}
 @media (max-width:640px){
 main{padding:0 16px 48px}.hero .title{grid-template-columns:minmax(0,1fr)}.proj-links{grid-column:1;grid-row:auto;justify-self:start;justify-content:flex-start}
@@ -505,6 +511,7 @@ const ICON = {
   jira: `<svg class="ico-jira" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0z"/></svg>`,
   search: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>`,
   sliders: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg>`,
+  menu: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>`,
   chev: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
   kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
@@ -1276,6 +1283,12 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
+// The sidebar hides and comes back with ☰ (wide screens only: a narrow one has the top bar). A
+// checkbox before <main> and its label, so it works with no script; under tira serve, theme.mjs
+// remembers it per browser. The label sits outside the sidebar, so it stays when the sidebar goes.
+const SIDE_SHUT = `<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut">`;
+const SIDE_TOGGLE = `<label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle>${ICON.menu}</label>`;
+
 // The sidebar (after Linear; a top bar on a narrow screen): the mark (home), the views, live a
 // search for projects by name, this project's settings, the projects and you; then help. The theme
 // is chosen in Profile settings (the rendered file, which has none, keeps its switch here).
@@ -1285,7 +1298,7 @@ function navHtml(live: RenderOptions["live"], views: [string, string][], home: s
   const search = live ? `<label class="proj-search">${ICON.search}<input type="search" placeholder="Search projects" aria-label="Search projects by name" autocomplete="off" spellcheck="false" data-project-search></label>` : "";
   const settings = live ? `<a class="side-link" href="${esc(withQ("/integrations", q))}" data-project-settings>${ICON.sliders}Project settings</a>` : "";
   const me = live?.user ?? live?.actor; // who is signed in with GitHub, else who the page acts as
-  return `<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}`
+  return `${SIDE_TOGGLE}<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}`
     + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${live ? "" : THEME_SWITCH}${live && me !== undefined ? profileHtml(me, live, q) : ""}</div></nav>`;
 }
 
@@ -1387,7 +1400,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(name)}</title><style>${CSS}</style></head>
-<body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
+<body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}${SIDE_SHUT}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}"${q === "" ? "" : ` data-q="${esc(q)}"`}>
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}

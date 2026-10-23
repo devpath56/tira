@@ -40,3 +40,21 @@ for (const d of document.querySelectorAll("details[data-remember]")) {
     }
   });
 }
+
+// Switches that hide a part of the page (input[data-remember], like the sidebar's ☰): on or off
+// as you left them, per browser, the same way.
+for (const c of document.querySelectorAll("input[type=checkbox][data-remember]")) {
+  try {
+    const was = localStorage.getItem(c.dataset.remember);
+    if (was !== null) c.checked = was === "1";
+  } catch {
+    // storage blocked: it starts as the page says
+  }
+  c.addEventListener("change", () => {
+    try {
+      localStorage.setItem(c.dataset.remember, c.checked ? "1" : "0");
+    } catch {
+      // storage blocked: it lasts until the page is left
+    }
+  });
+}

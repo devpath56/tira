@@ -709,6 +709,24 @@ test("the mark goes home: the workspace's board live (and from a decision), the 
   }
 });
 
+test("☰ hides the sidebar and brings it back: a checkbox before the page, its label outside the sidebar so it stays when the sidebar goes; live, each browser remembers it", async () => {
+  const s = await serving();
+  try {
+    const events = await s.store.readStream(S);
+    for (const page of [(await s.http("GET", "/")).body, renderHtml(fold(events, s.registry), S, "h", events)]) {
+      assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut">\n<main data-stream=/);
+      assert.match(page, /<main data-stream="[^"]+"[^>]*>\n<label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="top" aria-label="tira">/);
+      // shut: the sidebar goes and the board takes its room; ☰ stays, top left. Only where there is a
+      // sidebar: a narrow screen has the top bar, with no ☰
+      assert.match(page, /:root:has\(#side-shut:checked\)\{--side:28px\}\n#side-shut:checked~main\[data-stream\]>\.top\{display:none\}\n#side-shut:checked~main\[data-stream\]>\.side-toggle\{left:14px\}\n\}\n\.side-toggle\{display:none;position:fixed;/);
+    }
+    const theme = readFileSync(new URL("../src/serve/theme.mjs", import.meta.url), "utf8");
+    assert.match(theme, /for \(const c of document\.querySelectorAll\("input\[type=checkbox\]\[data-remember\]"\)\) \{[^]*?if \(was !== null\) c\.checked = was === "1";[^]*?localStorage\.setItem\(c\.dataset\.remember, c\.checked \? "1" : "0"\);/);
+  } finally {
+    await s.done();
+  }
+});
+
 test("workspaces: one server serves every workspace in the store at ?w=; its page, palette, decisions and writes stay in it; the switcher lists them all", async () => {
   const s = await serving();
   const O = "side-project";
