@@ -114,7 +114,7 @@ async function pages(): Promise<string> {
     // an idea's placement where a person picks the parent (its candidates as buttons)
     const pick = (await get("GET", "/confirm?type=idea&id=both&event=APPROVE_NODE&fragment=1")).body;
     const landing = (await getSignedOut("GET", "/welcome")).body + (await getFirstRun("GET", "/welcome")).body;
-    const signin = (await getSignedOut("POST", "/signin/start", "token=k")).body;
+    const signin = (await getSignedOut("GET", (await getSignedOut("POST", "/signin/start", "token=k")).location ?? "/")).body; // the code, at its own address
     const signedIn = (await getSignedIn("GET", "/integrations")).body + (await getSignedIn("GET", "/")).body + (await getSignedIn("GET", "/connect")).body
       + (await getSignedIn("GET", "/projects/new")).body + (await getSignedIn("POST", "/projects", "token=k&name=-bad&repo=a%2Fb")).body // + New project's page, and a name it refuses
       + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body; // Profile settings; another project's settings (it can be deleted)

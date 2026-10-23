@@ -256,7 +256,7 @@ if (!url) {
     const b = await serve(pgEnv(schema)); // another computer: its own folder, the same database
     try {
       await a.http("POST", "/integrations/setup", "token=k&github_client_id=Iv1.gh&back=%2Fwelcome");
-      const id = /name="id" value="([0-9a-f]+)"/.exec((await a.http("POST", "/signin/start", "token=k")).body)?.[1] ?? "";
+      const id = /[?&]id=([0-9a-f]+)/.exec(String((await a.http("POST", "/signin/start", "token=k")).headers.location))?.[1] ?? "";
       const done = await a.http("POST", "/signin/poll", `token=k&id=${id}&fragment=1`);
       const cookie = String(done.headers["set-cookie"]).split(";")[0] ?? "";
       assert.match(cookie, /^tira_session=[0-9a-f]{64}$/);

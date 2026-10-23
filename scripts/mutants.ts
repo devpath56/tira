@@ -773,6 +773,8 @@ const MUTANTS: Mutant[] = [
   { name: "serve: New project drops Jira's name", file: "src/serve/server.ts", find: "...(jiraName ? { jira_name: jiraName } : {})", replace: "" },
   { name: "cli: --jira-name is ignored", file: "src/cli/cli.ts", find: "  if (jiraName !== undefined) merged.jira_name = jiraName;\n", replace: "" },
   { name: "access: the way back from GitHub works in any browser", file: "src/serve/integrations.ts", find: " || cookieOf(req, SIGNIN_COOKIE) !== state", replace: "" },
+  { name: "access: GitHub's code has no address of its own (Back lands on a blank page)", file: "src/serve/integrations.ts", find: "      c.send(res, 303, \"text/plain; charset=utf-8\", \"\", { Location: `/signin/code?id=${id}` });", replace: "      signinPage(res, id, s);" },
+  { name: "access: an old code's page still opens", file: "src/serve/integrations.ts", find: "    if (!p || p.until < Date.now()) return back(res, \"/welcome\", { ok: false, text: \"That sign-in expired: start again.\" });", replace: "    if (false) return back(res, \"/welcome\", { ok: false, text: \"That sign-in expired: start again.\" });" },
   { name: "access: a sign-in from another project comes back to the first", file: "src/serve/integrations.ts", find: "    if (p?.w && !url.searchParams.has(\"w\")) return c.send(", replace: "    if (false) return c.send(" },
   { name: "access: the way back from GitHub works twice", file: "src/serve/integrations.ts", find: "    pendingGithub.delete(state); // a state works once\n", replace: "" },
   { name: "access: turned down on GitHub reads as a bad code", file: "src/serve/integrations.ts", find: "    if (error) return back(res, \"/welcome\",", replace: "    if (false) return back(res, \"/welcome\"," },

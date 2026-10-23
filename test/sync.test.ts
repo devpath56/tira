@@ -401,7 +401,7 @@ async function serving(home: string, actor: string | null = "isha") {
   // sign in with the stand-in GitHub, approved at once (GitHub sign-in must be set up)
   const signInWithGitHub = async () => {
     githubAuthApi.approveAfter = 0;
-    const id = /name="id" value="([0-9a-f]+)"/.exec((await post("/signin/start", {})).body)?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await post("/signin/start", {})).headers.location))?.[1] ?? "";
     const done = await post("/signin/poll", { id, fragment: "1" });
     cookie = String(done.headers["set-cookie"]).split(";")[0] ?? "";
     return done;
@@ -488,9 +488,16 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "repo", repo: "acme/app" })), "Sign in with GitHub first.");
     assert.equal(workspaceOf(await s.state(), S), undefined);
     assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Continue with GitHub<\/span><\/button>/);
-    // the code, and the page that waits for it
-    const start = await s.post("/signin/start", {});
+    // the code, and the page that waits for it, at its own address: Back from GitHub (when it
+    // opened in the same tab) or a reload comes back to the code, never to a blank page
+    const started = await s.post("/signin/start", {});
+    assert.equal(started.status, 303);
+    const codeAt = String(started.headers.location);
+    assert.match(codeAt, /^\/signin\/code\?id=[0-9a-f]{32}$/);
+    const start = await s.http("GET", codeAt);
     assert.match(start.body, /<code data-user-code>ABCD-1234<\/code>/);
+    assert.match((await s.http("GET", codeAt)).body, /<code data-user-code>ABCD-1234<\/code>/);
+    assert.equal((await s.http("GET", "/signin/start")).headers.location, "/welcome");
     assert.match(start.body, /<a class="land-btn" href="https:\/\/github\.com\/login\/device" target="_blank" rel="noopener noreferrer" data-open-github>/);
     assert.match(start.body, /<script type="module" src="\/signin\.mjs"><\/script>/);
     const id = /name="id" value="([0-9a-f]+)"/.exec(start.body)?.[1] ?? "";
@@ -519,6 +526,9 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal((await s.store.readStream(S)).at(-1)?.metadata.actor, "isha-gh");
     // a code GitHub never approved, or an old one, doesn't sign anyone in
     assert.match((await s.post("/signin/poll", { id: "nope", fragment: "1" })).body, /data-error>That sign-in expired: start again\./);
+    s.signOut();
+    assert.equal(await s.flash(await s.http("GET", "/signin/code?id=nope")), "That sign-in expired: start again.");
+    s.signIn(session);
     // sign out drops the session
     await s.post("/signout", {});
     assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
@@ -598,7 +608,7 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     // away from localhost (where tira's app sends people back), GitHub's code instead
     s.signOut();
     const there = await s.http("POST", "/signin/start", "token=k", `127.0.0.1:${s.port}`);
-    assert.match(there.body, /<code data-user-code>ABCD-1234<\/code>/);
+    assert.match((await s.http("GET", String(there.headers.location), undefined, `127.0.0.1:${s.port}`)).body, /<code data-user-code>ABCD-1234<\/code>/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });
@@ -770,7 +780,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
   const s = await serving(home);
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz" });
-    const id = /name="id" value="([0-9a-f]+)"/.exec((await s.post("/signin/start", {})).body)?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", {})).headers.location))?.[1] ?? "";
     s.githubAuthApi.approveAfter = 0;
     s.signIn(String((await s.post("/signin/poll", { id, fragment: "1" })).headers["set-cookie"]).split(";")[0] ?? "");
     // the repo, from your repos

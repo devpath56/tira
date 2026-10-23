@@ -205,10 +205,19 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       const s = await gh.start(clientId);
       const id = randomBytes(16).toString("hex");
       pendingSignIns.set(id, { deviceCode: s.deviceCode, userCode: s.userCode, verifyAt: s.verifyAt, interval: s.interval, until: Date.now() + s.expiresIn * 1000 });
-      signinPage(res, id, s);
+      // the code at its own address, so Back from GitHub (when it opened in this tab) or a reload comes back to it
+      c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/signin/code?id=${id}` });
     } catch (err) {
       back(res, "/welcome", { ok: false, text: `GitHub sign-in didn't start (${(err as Error).message}).` });
     }
+  };
+
+  // GitHub's code to approve, at its own address: the page waits there, and goes on in once it's approved
+  const signinCode = async (_req: IncomingMessage, res: ServerResponse, url: URL) => {
+    const id = url.searchParams.get("id") ?? "";
+    const p = pendingSignIns.get(id);
+    if (!p || p.until < Date.now()) return back(res, "/welcome", { ok: false, text: "That sign-in expired: start again." });
+    signinPage(res, id, p);
   };
 
   // GitHub, back from the direct way: its one-time code, for a token, once, in the browser that left
@@ -689,6 +698,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/jira/site": jiraSite,
     "POST /integrations/jira/disconnect": jiraDisconnect,
     "POST /signin/start": signinStart,
+    "GET /signin/start": async (_req: IncomingMessage, res: ServerResponse) => back(res, "/welcome"), // a reload of the button's address
+    "GET /signin/code": signinCode,
     "GET /signin/github/callback": signinBack,
     "POST /signin/poll": signinPoll,
     "POST /signout": signout,
