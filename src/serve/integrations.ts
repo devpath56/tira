@@ -401,14 +401,22 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     // keeps what's saved. Open while one is missing; straight to the form while nothing is set.
     const mayKeys = mayChangeApps(me.login);
     const envKeys: [string, string, string | undefined][] = [["github_client_id", "GitHub Client ID", keys.github?.clientId], ["github_secret", "GitHub Secret", keys.github?.secret], ["atlassian_client_id", "Atlassian Client ID", keys.atlassian?.clientId], ["atlassian_secret", "Atlassian Secret", keys.atlassian?.secret]];
-    const envRow = ([k, label, v]: [string, string, string | undefined]) => `<div class="grp-row env-row" data-env="${k}"><span class="grp-k">${label}</span>`
-      + (v ? `<span class="env-v" data-env-value>${"•".repeat(12)}</span>`
-        + (mayKeys ? `<button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy ${label}">${COPY}</button><button type="button" class="env-btn" data-env-show title="Show" aria-label="Show ${label}" aria-pressed="false">${EYE}</button>` : "")
-        : `<span class="env-v none">Not set</span>`) + `</div>`;
-    const envField = ([k, label, v]: [string, string, string | undefined]) => `<label class="grp-row"><span class="grp-k">${label}</span><input type="${k.endsWith("secret") ? "password" : "text"}" name="${k}" value="" autocomplete="off" spellcheck="false" placeholder="${v ? "Saved: leave empty to keep" : k === "github_secret" ? "Optional: sign in in one click" : "Not set"}"></label>`;
+    const envButtons = (label: string) => `<button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy ${label}">${COPY}</button><button type="button" class="env-btn" data-env-show title="Show" aria-label="Show ${label}" aria-pressed="false">${EYE}</button>`;
+    const envRow = ([k, label, v]: [string, string, string | undefined]) => {
+      let value = `<span class="env-v none">Not set</span>`;
+      if (v) value = `<span class="env-v" data-env-value>${"•".repeat(12)}</span>` + (mayKeys ? envButtons(label) : "");
+      return `<div class="grp-row env-row" data-env="${k}"><span class="grp-k">${label}</span>${value}</div>`;
+    };
+    const envPlaceholder = (k: string, v: string | undefined) => {
+      if (v) return "Saved: leave empty to keep";
+      return k === "github_secret" ? "Optional: sign in in one click" : "Not set";
+    };
+    const envField = ([k, label, v]: [string, string, string | undefined]) => `<label class="grp-row"><span class="grp-k">${label}</span><input type="${k.endsWith("secret") ? "password" : "text"}" name="${k}" value="" autocomplete="off" spellcheck="false" placeholder="${envPlaceholder(k, v)}"></label>`;
+    const editFirst = !keys.github && !keys.atlassian ? " checked" : ""; // nothing set yet: straight to the form
+    const editButton = mayKeys ? `<label class="act" for="setup-edit" data-env-edit>Edit</label>` : "";
     const setup = `<details class="grp" data-int="setup" id="setup"${keys.github && keys.atlassian ? "" : " open"}><summary class="grp-h">Setup</summary><p class="grp-desc">${esc(DESC.setup)}</p>`
-      + (mayKeys ? `<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps"${!keys.github && !keys.atlassian ? " checked" : ""}>` : "")
-      + `<div class="grp-list env-list" data-env-list><div class="grp-row env-head"><span class="grp-k">Key</span><span class="env-v">Value</span>${mayKeys ? `<label class="act" for="setup-edit" data-env-edit>Edit</label>` : ""}</div>${envKeys.map(envRow).join("")}</div>`
+      + (mayKeys ? `<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps"${editFirst}>` : "")
+      + `<div class="grp-list env-list" data-env-list><div class="grp-row env-head"><span class="grp-k">Key</span><span class="env-v">Value</span>${editButton}</div>${envKeys.map(envRow).join("")}</div>`
       + (mayKeys ? `<form method="post" action="/integrations/setup" class="grp-list env-edit" data-setup-form>${t}<input type="hidden" name="back" value="/settings">${envKeys.map(envField).join("")}`
         + `<div class="grp-row env-acts"><label class="how" for="setup-edit">Cancel</label><button class="act primary" type="submit">Save</button></div></form>` : "")
       + `<div class="grp-foot">${mayKeys ? "Kept privately and sealed, never in the page: Show and Copy fetch one value when you press them. How to make these apps: ask the Help centre." : "Only this tira's admin can see or change these."}</div></details>`;
@@ -646,7 +654,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (!same) link.jira_name = await nameOfPicked(me.login, link);
     const f = same ? { ok: true, text: "" } : await writeLink(me.login, ws, link);
     if (!f.ok) return back(res, "/connect", f);
-    back(res, "/", { ok: true, text: `Connected to ${repo}${link.jira_project ? ` and Jira ${jiraShown(link, ws)}` : ""}. Here's your board.` });
+    const andJira = link.jira_project ? ` and Jira ${jiraShown(link, ws)}` : "";
+    back(res, "/", { ok: true, text: `Connected to ${repo}${andJira}. Here's your board.` });
   };
 
   // ---------- Atlassian's round trip ----------

@@ -910,7 +910,12 @@ function taskLinksHtml(ext: Ext, task: string): string {
   if (!l || (!l.jira && l.prs.length === 0)) return "";
   const j = l.jira;
   const url = j ? jiraUrl(ext, j.key) : undefined;
-  const jiraLine = !j ? "" : `<p><span class="lk">Jira</span>${url ? `<a href="${esc(url)}" ${OUT}>${esc(j.key)}</a>` : esc(j.key)}${j.status ? `<span class="pill">${esc(j.status)}</span>` : ""}</p>`;
+  let jiraLine = "";
+  if (j) {
+    const issue = url ? `<a href="${esc(url)}" ${OUT}>${esc(j.key)}</a>` : esc(j.key);
+    const pill = j.status ? `<span class="pill">${esc(j.status)}</span>` : "";
+    jiraLine = `<p><span class="lk">Jira</span>${issue}${pill}</p>`;
+  }
   const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" ${OUT}>#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
   return `<div class="task-links" data-task-links>${jiraLine}${prLines}</div>`;
 }
@@ -927,7 +932,8 @@ function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): str
   // by its key alone when no name was saved (linked before tira kept names: until the project is
   // picked again in Project settings, or someone syncs)
   const jiraTitle = ws?.jira_name ? `${ws.jira_name} (${ws.jira_project})` : ws?.jira_project;
-  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" ${OUT} title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
+  const jiraHref = `${ws?.jira_site}/browse/${ws?.jira_project}`;
+  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(jiraHref)}" ${OUT} title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
   const box = (inner: string) => `<div class="proj-links" data-workspace aria-label="Linked to">${inner}</div>`;
   if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>`) : "";
   if (!live) return box(repo + jira);

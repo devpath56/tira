@@ -621,7 +621,7 @@ const MUTANTS: Mutant[] = [
   { name: "integrations: anyone signed in may change tira's apps", file: "src/serve/integrations.ts", find: "(appKeys(env).github ? !!login && isAdmin(access(env), login) : true)", replace: "(appKeys(env).github ? !!login : true)" },
   { name: "integrations: anyone may show or copy tira's keys", file: "src/serve/integrations.ts", find: "    if (!mayChangeApps(who(req).login)) return c.send(res, 403,", replace: "    if (false) return c.send(res, 403," },
   { name: "ui: tira's keys in the page instead of dots", file: "src/serve/integrations.ts", find: "<span class=\"env-v\" data-env-value>${\"•\".repeat(12)}</span>", replace: "<span class=\"env-v\" data-env-value>${esc(v)}</span>" },
-  { name: "ui: Show and Copy for someone who isn't the admin", file: "src/serve/integrations.ts", find: "(mayKeys ? `<button type=\"button\" class=\"env-btn\" data-env-copy", replace: "(true ? `<button type=\"button\" class=\"env-btn\" data-env-copy" },
+  { name: "ui: Show and Copy for someone who isn't the admin", file: "src/serve/integrations.ts", find: "+ (mayKeys ? envButtons(label) : \"\");", replace: "+ envButtons(label);" },
   { name: "integrations: a new secret alone loses its Client ID", file: "src/serve/integrations.ts", find: " || (aSecret ? now.atlassian?.clientId ?? \"\" : \"\");", replace: ";" },
   { name: "ui: Setup shows the list and the form at once", file: "src/render/html.ts", find: ".grp-list.env-edit,#setup-edit:checked~.env-list{display:none}", replace: ".env-edit,#setup-edit:checked~.env-list{display:none}" },
   { name: "ui: a shown key never hides again", file: "src/serve/secrets.mjs", find: "      show.title = \"Hide\";\n      timer = setTimeout(hide, 30_000);\n", replace: "      show.title = \"Hide\";\n" },
