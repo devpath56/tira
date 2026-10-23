@@ -772,6 +772,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: connecting drops Jira's name", file: "src/serve/integrations.ts", find: "    if (!same && link.jira_project && link.jira_site) link.jira_name = await projectName(jiraOf(me.login, { version: 0, jira_site: link.jira_site }), link.jira_project);\n", replace: "" },
   { name: "serve: New project drops Jira's name", file: "src/serve/server.ts", find: "...(jiraName ? { jira_name: jiraName } : {})", replace: "" },
   { name: "cli: --jira-name is ignored", file: "src/cli/cli.ts", find: "  if (jiraName !== undefined) merged.jira_name = jiraName;\n", replace: "" },
+  { name: "ui: GitHub and Jira open over the board", file: "src/render/html.ts", find: "const OUT = `target=\"_blank\" rel=\"noopener noreferrer\"`;", replace: "const OUT = `rel=\"noopener noreferrer\"`;" },
   { name: "ui: ☰ doesn't hide the sidebar", file: "src/render/html.ts", find: "#side-shut:checked~main[data-stream]>.top{display:none}", replace: "" },
   { name: "ui: the sidebar forgets it was hidden", file: "src/serve/theme.mjs", find: "    if (was !== null) c.checked = was === \"1\";\n", replace: "" },
   { name: "accounts: unlinking GitHub leaves its token in the database", file: "src/sync/accounts-pg.ts", find: "      await c.query(`DELETE FROM ${s}.account_github WHERE lower(login) = lower($1)`, [login]);\n", replace: "", needs: "postgres" },

@@ -886,6 +886,9 @@ interface Ext { links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undef
 
 const jiraUrl = (ext: Ext, key: string) => (ext.ws?.jira_site ? `${ext.ws.jira_site}/browse/${encodeURIComponent(key)}` : undefined);
 
+// A link out of tira (GitHub, Jira) opens in a new tab, so the board stays where it was.
+const OUT = `target="_blank" rel="noopener noreferrer"`;
+
 function jiraChip(ext: Ext, task: string): string {
   const key = ext.links.get(task)?.jira?.key;
   return key === undefined ? "" : `<span class="chip jira" data-jira-key="${esc(key)}">${esc(key)}</span>`;
@@ -896,24 +899,24 @@ function taskLinksHtml(ext: Ext, task: string): string {
   if (!l || (!l.jira && l.prs.length === 0)) return "";
   const j = l.jira;
   const url = j ? jiraUrl(ext, j.key) : undefined;
-  const jiraLine = !j ? "" : `<p><span class="lk">Jira</span>${url ? `<a href="${esc(url)}" rel="noopener noreferrer">${esc(j.key)}</a>` : esc(j.key)}${j.status ? `<span class="pill">${esc(j.status)}</span>` : ""}</p>`;
-  const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" rel="noopener noreferrer">#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
+  const jiraLine = !j ? "" : `<p><span class="lk">Jira</span>${url ? `<a href="${esc(url)}" ${OUT}>${esc(j.key)}</a>` : esc(j.key)}${j.status ? `<span class="pill">${esc(j.status)}</span>` : ""}</p>`;
+  const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" ${OUT}>#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
   return `<div class="task-links" data-task-links>${jiraLine}${prLines}</div>`;
 }
 
 // The project's links, on the right of its name: its GitHub repo and its Jira project, each with
-// its mark, one click out. Under tira serve: Sync once something is linked, Add Jira or Add GitHub
+// its mark, one click out (in a new tab). Under tira serve: Sync once something is linked, Add Jira or Add GitHub
 // for what's missing, and, while nothing is, one way in: Connect GitHub and Jira (to Project
 // settings). A rendered file shows the links and none of the actions. (q: the project, as the
 // server's links carry it.)
 function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): string {
   const ws = ext.ws;
-  const repo = ws?.repo ? `<a class="pl" href="https://github.com/${esc(ws.repo)}" rel="noopener noreferrer" title="GitHub: ${esc(ws.repo)}" data-link-repo>${ICON.github}<span>${esc(ws.repo)}</span></a>` : "";
+  const repo = ws?.repo ? `<a class="pl" href="https://github.com/${esc(ws.repo)}" ${OUT} title="GitHub: ${esc(ws.repo)}" data-link-repo>${ICON.github}<span>${esc(ws.repo)}</span></a>` : "";
   // the Jira project by its name, as Jira shows it ("Tira Board"), its key ("KAN") in the tooltip;
   // by its key alone when no name was saved (linked before tira kept names: until the project is
   // picked again in Project settings, or someone syncs)
   const jiraTitle = ws?.jira_name ? `${ws.jira_name} (${ws.jira_project})` : ws?.jira_project;
-  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" rel="noopener noreferrer" title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
+  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" ${OUT} title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
   const box = (inner: string) => `<div class="proj-links" data-workspace aria-label="Linked to">${inner}</div>`;
   if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>`) : "";
   if (!live) return box(repo + jira);

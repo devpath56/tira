@@ -734,7 +734,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.match(board, /title="Jira: Dogma \(DOG\)" data-link-jira><svg[^]*?<\/svg><span>Dogma<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
     assert.doesNotMatch(board, /Connect GitHub and Jira|data-add-jira|data-add-repo/);
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
-    assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
+    assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" target="_blank" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
     assert.doesNotMatch(board, /class="chip" title="pr:|chip" title="jira-issue:/); // links show on their tasks, not as Lanes chips
     // completing the task offers the merged pull request as its proof
     await s.send("table", "START");
@@ -751,13 +751,13 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
   }
 });
 
-test("the rendered file shows the links, never the actions", async () => {
+test("the rendered file shows the links, each opening in a new tab, never the actions", async () => {
   const w = await world();
   await w.link(linked);
   await w.run();
   const events = await w.store.readStream(S);
   const html = renderHtml(fold(events, w.registry), S, "h", events);
-  assert.match(html, /<div class="proj-links" data-workspace aria-label="Linked to"><a class="pl" href="https:\/\/github\.com\/acme\/app"[^>]*data-link-repo><svg[^]*?<\/svg><span>acme\/app<\/span><\/a><a class="pl jira" href="https:\/\/acme\.atlassian\.net\/browse\/DOG"[^>]*data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><\/div>/);
+  assert.match(html, /<div class="proj-links" data-workspace aria-label="Linked to"><a class="pl" href="https:\/\/github\.com\/acme\/app" target="_blank" rel="noopener noreferrer" title="GitHub: acme\/app" data-link-repo><svg[^]*?<\/svg><span>acme\/app<\/span><\/a><a class="pl jira" href="https:\/\/acme\.atlassian\.net\/browse\/DOG" target="_blank" rel="noopener noreferrer" title="Jira: DOG" data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><\/div>/);
   assert.doesNotMatch(html, /data-act="SYNC"|data-act="CONNECT"/);
 });
 
