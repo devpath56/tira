@@ -6,7 +6,7 @@
 // Jira row alone, so what you typed stays as it is).
 // Created, it opens on its own board. A name, repo or Jira project that can't be one comes back here
 // with what was typed and why; nothing is written.
-import { brand, CSS, projectMark, THEME_RADIOS } from "../render/html.ts";
+import { brand, CSS, projectMark, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from "../render/html.ts";
 import { esc } from "../render/escape.ts";
 import type { JiraState } from "./integrations.ts";
 
@@ -37,11 +37,11 @@ function jiraRow(p: NewProject): string {
       + (j.problem ? `<div class="grp-row"><span class="grp-k no">${esc(j.problem)}</span></div>` : "");
   }
   const row = (hint: string, v: string) => `<div class="grp-row np-field">${label(hint)}${v}</div>`;
-  if (j.state === "connected") return row("Optional. Pick your Jira site first.", `<a class="how" href="/settings#accounts">Pick it in Profile settings</a>`);
+  if (j.state === "connected") return row("Optional. Pick your Jira site first.", `<a class="how" href="/settings#account">Pick it in Account settings</a>`);
   if (j.state === "disconnected") return row("Optional. Connect your Atlassian account to pick one now, or add it later.", `<a class="act" href="${esc("/integrations/jira/connect?back=/projects/new&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Connect with Jira</a>`);
   if (j.state === "elsewhere") return row("Optional. Atlassian sends you back to localhost.", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
   if (j.state === "signin") return row("Optional. Sign in with GitHub to connect Jira; add it later from the board.", `<span class="grp-v">Later</span>`);
-  return row("Optional. tira's Atlassian app isn't set up yet.", `<a class="how" href="/settings#setup">Set it up in Profile settings</a>`);
+  return row("Optional. tira's Atlassian app isn't set up yet.", `<a class="how" href="/settings#setup">Set it up in Account settings</a>`);
 }
 
 export function newProjectPage(p: NewProject): string {
@@ -70,6 +70,6 @@ export function newProjectPage(p: NewProject): string {
     + `<p class="np-who">${projectMark(shown)}<span><b data-np-show-name>${esc(shown)}</b><small data-np-show-repo>${esc(repo || "owner/name")}</small></span></p></div>`
     + `<p class="np-k">What happens next</p><ol class="np-next"><li>tira creates the project, as you, linked to its repo and its Jira project, if you picked one.</li><li>Its board opens, empty: add the first task with <code>tira create</code>.</li><li>Sync from its Linked bar: pull requests link to tasks, and each task gets its Jira issue.</li></ol></aside>`;
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · New project</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="settings-page np-page" data-new-project-page>${nav}${main}${aside}</main>`
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · New project</title><style>${CSS}</style></head><body>${THEME_RADIOS}${SIDE_SHUT}<main class="settings-page np-page" data-new-project-page>${SIDE_TOGGLE}${nav}${main}${aside}</main>`
     + `<script type="module" src="/theme.mjs"></script><script type="module" src="/tabs.mjs"></script><script type="module" src="/new-project.mjs"></script></body></html>\n`;
 }

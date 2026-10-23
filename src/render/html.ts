@@ -92,7 +92,10 @@ a{color:inherit;text-decoration:none}
 .pav{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;font:650 11px/1 var(--sans);color:#fff;background:var(--t)}
 .t0{--t:#5e6ad2}.t1{--t:#0f7b6c}.t2{--t:#b4426b}.t3{--t:#8a5a00}.t4{--t:#2f6fb0}.t5{--t:#7a4fc9}.t6{--t:#3d7a2e}.t7{--t:#b04a2a}
 .me .av{width:22px;height:22px;font-size:11px}.me>summary{gap:8px}
-.me-menu .ws-item{flex-direction:column;align-items:flex-start;gap:1px;width:100%;font:inherit;font-size:13px;text-align:left;background:none;border:0;cursor:pointer}.me-menu form{margin:0}
+.me-menu{padding:5px;border-radius:10px;border-color:color-mix(in srgb,var(--fg) 12%,transparent);background:color-mix(in srgb,var(--panel) 90%,transparent);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
+.me-menu .ws-item{width:100%;min-height:28px;padding:0 10px;font:inherit;font-size:13px;font-weight:500;line-height:1.2;text-align:left;background:none;border:0;border-radius:6px;cursor:pointer}
+.me-menu .me-out{margin:4px 0 0;padding:4px 0 0;border-top:1px solid var(--line)}
+.me[open]>.me-menu{animation:menu-in .14s var(--ease) both}@keyframes menu-in{from{opacity:0;transform:translateY(4px) scale(.98)}}
 .new-project{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:var(--r);font-size:13px;color:var(--mut);transition:background .15s var(--ease),color .15s var(--ease)}.new-project:hover{background:var(--hover);color:var(--fg)}.new-project svg{width:14px;height:14px}
 .log-top{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:16px 0 4px}.log-top h3{margin:0}
 .how{margin-left:auto;font-size:13px;color:var(--accent)}.how:hover{text-decoration:underline}.kbd~.how{margin-left:0}
@@ -261,6 +264,7 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 .set-link{padding:6px 10px;border-radius:var(--r);font-size:14px;color:var(--mut)}.set-link:hover{background:var(--hover);color:var(--fg)}
 .set-nav .side-foot{margin:auto 0 0;padding-top:10px;border-top:1px solid var(--line)}
 .set-main{min-width:0;padding:32px 48px 80px}.set-main>.flash{margin:0 0 24px}
+.settings-page .set-main>*{width:100%;max-width:720px;margin-inline:auto}.set-main .grp-h{font-size:15px;padding:0 0 2px;border-bottom:0}.set-main .grp-desc{margin:2px 0 10px}
 .set-help{position:sticky;top:0;height:100vh;overflow-y:auto;padding:20px 16px;background:var(--side-bg);border-left:1px solid var(--line)}
 .set-help[data-help]{padding:0;background:var(--panel);scrollbar-width:thin}
 .help-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;margin:0;padding:18px 18px 20px;list-style:none;cursor:pointer;color:var(--btn-fg);background:linear-gradient(150deg,var(--btn),color-mix(in srgb,var(--btn) 72%,#0b1e40))}
@@ -294,6 +298,11 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 .hc-send:disabled{opacity:.35;cursor:default}.hc-send:not(:disabled):active{transform:scale(.92)}.hc-foot{margin:6px 0 0;text-align:center;font-size:11px;color:var(--dim)}
 .profile{display:flex;align-items:center;gap:14px;padding:14px 16px}.av.av-lg{width:52px;height:52px;font-size:20px}.pf-who{display:grid;gap:2px;min-width:0}.pf-who b{font-size:17px}.pf-who span{color:var(--mut);font-size:13px}.pf-out{margin-left:auto}
 .grp-desc{margin:8px 0 12px;color:var(--mut);font-size:13px}
+.env-row .grp-k,.env-head .grp-k{flex:0 0 170px}.env-v{flex:1;min-width:0;font:13px/1.4 var(--mono);letter-spacing:.14em;color:var(--mut);overflow-wrap:anywhere}.env-v.shown{letter-spacing:0;color:var(--fg);user-select:all}.env-v.none{font-family:var(--sans);letter-spacing:0;color:var(--dim)}
+.env-head{min-height:36px}.env-head .grp-k,.env-head .env-v{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.env-btn{flex:none;display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--mut);cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease)}.env-btn:hover{background:var(--hover);color:var(--fg)}.env-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}.env-btn svg{width:15px;height:15px}
+.env-btn .i-hide,.env-btn .i-done{display:none}.env-btn[aria-pressed=true] .i-show{display:none}.env-btn[aria-pressed=true] .i-hide{display:block}.env-btn[data-done] .i-copy{display:none}.env-btn[data-done] .i-done{display:block;color:var(--done)}
+.grp-list.env-edit,#setup-edit:checked~.env-list{display:none}#setup-edit:checked~.env-edit{display:block}.env-acts{justify-content:flex-end;gap:12px}#setup-edit:focus-visible~.env-list [data-env-edit]{outline:2px solid var(--accent);outline-offset:2px}
 .appear{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .look{display:grid;gap:2px;padding:10px 10px 12px;background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-lg);cursor:pointer;transition:border-color .18s var(--ease),box-shadow .18s var(--ease),transform .1s var(--ease)}.look:hover{border-color:var(--line-2)}.look:active{transform:scale(.98)}
 .look b{font-size:14px}.look small{font-size:12px;color:var(--mut)}
@@ -318,6 +327,8 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 @media (max-width:760px){.np-form .grp-k{flex-basis:100%}.np-steps{display:none}}
 @media (max-width:1180px){.settings-page{grid-template-columns:220px minmax(0,1fr)}.set-help{grid-column:2;position:static;height:auto;border-left:0;border-top:1px solid var(--line);padding:24px 48px}.settings-page:has(.hc:not([open])){grid-template-columns:220px minmax(0,1fr)}.hc:not([open]) .help-head{flex-direction:row}.hc:not([open]) .hc-t{writing-mode:horizontal-tb;transform:none}.set-help[data-help]{padding:0}.help-head{position:static}.hc-body{min-height:0}.hc-log{min-height:160px}}
 @media (max-width:760px){.settings-page{display:block}.set-nav{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line)}.set-nav .side-foot{margin:0 0 0 auto;border:0;padding:0}.set-k,.set-proj{display:none}.set-main{padding:20px 16px 48px}.set-help{padding:20px 16px}}
+@media screen and (min-width:761px){.settings-page>.side-toggle{display:grid;left:190px}#side-shut:checked~.settings-page{grid-template-columns:minmax(0,1fr) 340px}#side-shut:checked~.settings-page:has(.hc:not([open])){grid-template-columns:minmax(0,1fr) 56px}#side-shut:checked~.settings-page>.set-nav{display:none}#side-shut:checked~.settings-page>.side-toggle{left:14px}}
+@media screen and (min-width:761px) and (max-width:1180px){.settings-page>.side-toggle{left:178px}#side-shut:checked~.settings-page,#side-shut:checked~.settings-page:has(.hc:not([open])){grid-template-columns:minmax(0,1fr)}#side-shut:checked~.settings-page>.set-help{grid-column:1}}
 .grp{display:block;margin:0 0 36px;scroll-margin-top:24px}.grp-h{display:block;margin:0;padding:0 0 8px;font-size:17px;font-weight:600;letter-spacing:-.01em;text-transform:none;color:var(--fg);border-bottom:1px solid var(--line)}
 details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-details-marker{display:none}details.grp>summary::after{content:" ›"}details.grp[open]>summary::after{content:" ⌄"}
 .grp-list{display:block;margin:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
@@ -471,8 +482,14 @@ main[data-stream]>.top .projects .ws-head{display:none}
 main[data-stream]>.top .side-foot{margin:auto 0 0;padding-top:10px;border-top:1px solid var(--line);flex-direction:column;align-items:stretch;gap:6px}
 main[data-stream]>.top .side-foot .theme{align-self:flex-start}
 main[data-stream]>.top .me>summary{max-width:none;width:100%;border:0;background:none;padding:0 8px}
-main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px)}
+main[data-stream]>.top .me-menu{top:auto;bottom:calc(100% + 6px);left:0;right:0;width:auto;transform-origin:bottom center}
+main[data-stream]>.side-toggle{display:grid;left:calc(var(--side) - 42px)}
+:root:has(#side-shut:checked){--side:28px}
+#side-shut:checked~main[data-stream]>.top{display:none}
+#side-shut:checked~main[data-stream]>.side-toggle{left:14px}
 }
+.side-toggle{display:none;position:fixed;z-index:7;top:13px;place-items:center;width:30px;height:30px;border-radius:var(--r);color:var(--mut);cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease)}
+.side-toggle:hover{background:var(--hover);color:var(--fg)}.side-toggle svg{width:16px;height:16px}#side-shut:focus-visible~main .side-toggle{outline:2px solid var(--accent);outline-offset:-2px}
 @media (max-width:720px){.split{grid-template-columns:1fr}}
 @media (max-width:640px){
 main{padding:0 16px 48px}.hero .title{grid-template-columns:minmax(0,1fr)}.proj-links{grid-column:1;grid-row:auto;justify-self:start;justify-content:flex-start}
@@ -505,6 +522,7 @@ const ICON = {
   jira: `<svg class="ico-jira" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0z"/></svg>`,
   search: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>`,
   sliders: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg>`,
+  menu: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>`,
   chev: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
   kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
@@ -613,8 +631,8 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
   const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
   const marks = tiraMark + waitRing;
-  const leftText = left === 0 ? "" : " · " + left + " left";
-  const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
+  // a parent says how many of its subtasks are left; with none left, or none at all, its state
+  const progress = left > 0 ? `${left} left` : word(r.state);
   const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
   const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
   const pinWord = r.active ? "now" : "next";
@@ -879,6 +897,9 @@ interface Ext { links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undef
 
 const jiraUrl = (ext: Ext, key: string) => (ext.ws?.jira_site ? `${ext.ws.jira_site}/browse/${encodeURIComponent(key)}` : undefined);
 
+// A link out of tira (GitHub, Jira) opens in a new tab, so the board stays where it was.
+const OUT = `target="_blank" rel="noopener noreferrer"`;
+
 function jiraChip(ext: Ext, task: string): string {
   const key = ext.links.get(task)?.jira?.key;
   return key === undefined ? "" : `<span class="chip jira" data-jira-key="${esc(key)}">${esc(key)}</span>`;
@@ -889,20 +910,30 @@ function taskLinksHtml(ext: Ext, task: string): string {
   if (!l || (!l.jira && l.prs.length === 0)) return "";
   const j = l.jira;
   const url = j ? jiraUrl(ext, j.key) : undefined;
-  const jiraLine = !j ? "" : `<p><span class="lk">Jira</span>${url ? `<a href="${esc(url)}" rel="noopener noreferrer">${esc(j.key)}</a>` : esc(j.key)}${j.status ? `<span class="pill">${esc(j.status)}</span>` : ""}</p>`;
-  const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" rel="noopener noreferrer">#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
+  let jiraLine = "";
+  if (j) {
+    const issue = url ? `<a href="${esc(url)}" ${OUT}>${esc(j.key)}</a>` : esc(j.key);
+    const pill = j.status ? `<span class="pill">${esc(j.status)}</span>` : "";
+    jiraLine = `<p><span class="lk">Jira</span>${issue}${pill}</p>`;
+  }
+  const prLines = l.prs.map((p) => `<p><span class="lk">Pull request</span><a href="${esc(p.url)}" ${OUT}>#${p.number}</a><span class="pill ${esc(p.state)}">${esc(p.state)}</span><span>${esc(p.title)}</span></p>`).join("");
   return `<div class="task-links" data-task-links>${jiraLine}${prLines}</div>`;
 }
 
 // The project's links, on the right of its name: its GitHub repo and its Jira project, each with
-// its mark, one click out. Under tira serve: Sync once something is linked, Add Jira or Add GitHub
+// its mark, one click out (in a new tab). Under tira serve: Sync once something is linked, Add Jira or Add GitHub
 // for what's missing, and, while nothing is, one way in: Connect GitHub and Jira (to Project
 // settings). A rendered file shows the links and none of the actions. (q: the project, as the
 // server's links carry it.)
 function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): string {
   const ws = ext.ws;
-  const repo = ws?.repo ? `<a class="pl" href="https://github.com/${esc(ws.repo)}" rel="noopener noreferrer" title="GitHub: ${esc(ws.repo)}" data-link-repo>${ICON.github}<span>${esc(ws.repo)}</span></a>` : "";
-  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" rel="noopener noreferrer" title="Jira: ${esc(ws.jira_project)}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_project)}</span></a>` : "";
+  const repo = ws?.repo ? `<a class="pl" href="https://github.com/${esc(ws.repo)}" ${OUT} title="GitHub: ${esc(ws.repo)}" data-link-repo>${ICON.github}<span>${esc(ws.repo)}</span></a>` : "";
+  // the Jira project by its name, as Jira shows it ("Tira Board"), its key ("KAN") in the tooltip;
+  // by its key alone when no name was saved (linked before tira kept names: until the project is
+  // picked again in Project settings, or someone syncs)
+  const jiraTitle = ws?.jira_name ? `${ws.jira_name} (${ws.jira_project})` : ws?.jira_project;
+  const jiraHref = `${ws?.jira_site}/browse/${ws?.jira_project}`;
+  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(jiraHref)}" ${OUT} title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
   const box = (inner: string) => `<div class="proj-links" data-workspace aria-label="Linked to">${inner}</div>`;
   if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>`) : "";
   if (!live) return box(repo + jira);
@@ -1207,14 +1238,14 @@ const projectsHtml = (stream: string, home: string, q: string, name = stream) =>
   + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page" data-stream="${esc(stream)}">${projectMark(stream, name)}<span class="ws-t"><b>${esc(name)}</b></span></a></div>`
   + `<a class="new-project" href="${esc(withQ("/projects/new", q))}" data-new-project>${ICON.plus}New project</a></details>`;
 
-// Live, you (your name is on the button already): your Profile settings (yours in every project:
-// your accounts, how tira looks, who may sign in) and, signed in, a way out.
-// (shown by the name they chose in Profile settings, if they chose one)
+// Live, you (your name is on the button already): a short menu, as Apple's are, sized to the sidebar:
+// your Account settings (yours in every project) and, signed in, Sign out, below a separator.
+// (shown by the name they chose in Account settings, if they chose one)
 const profileHtml = (me: string, live: NonNullable<RenderOptions["live"]>, q: string, shown = live.name ?? me) =>
   `<details class="ws me" data-profile><summary title="You: ${esc(shown)}"${live.user ? " data-user" : ""}><span class="av">${initial(shown)}</span><span class="ws-name">${esc(shown)}</span>${ICON.chev}</summary>`
   + `<div class="ws-menu me-menu" data-me-menu>`
-  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Profile settings<small>Accounts, appearance, people</small></a>`
-  + (live.user && live.token ? `<form method="post" action="/signout"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
+  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Account settings</a>`
+  + (live.user && live.token ? `<form method="post" action="/signout" class="me-out"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
   + `</div></details>`;
 // a path with the project's query on it
 const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
@@ -1276,16 +1307,22 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
+// The sidebar hides and comes back with ☰ (wide screens only: a narrow one has the top bar), on the
+// board and the settings pages alike. A checkbox before <main> and its label, so it works with no
+// script; under tira serve, theme.mjs remembers it per browser, one choice for every page. The label sits outside the sidebar, so it stays when the sidebar goes.
+export const SIDE_SHUT = `<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut">`;
+export const SIDE_TOGGLE = `<label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle>${ICON.menu}</label>`;
+
 // The sidebar (after Linear; a top bar on a narrow screen): the mark (home), the views, live a
 // search for projects by name, this project's settings, the projects and you; then help. The theme
-// is chosen in Profile settings (the rendered file, which has none, keeps its switch here).
+// is chosen in Account settings (the rendered file, which has none, keeps its switch here).
 function navHtml(live: RenderOptions["live"], views: [string, string][], home: string, stream: string, name = stream): string {
   const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
   const q = live?.query ?? "";
   const search = live ? `<label class="proj-search">${ICON.search}<input type="search" placeholder="Search projects" aria-label="Search projects by name" autocomplete="off" spellcheck="false" data-project-search></label>` : "";
   const settings = live ? `<a class="side-link" href="${esc(withQ("/integrations", q))}" data-project-settings>${ICON.sliders}Project settings</a>` : "";
   const me = live?.user ?? live?.actor; // who is signed in with GitHub, else who the page acts as
-  return `<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}`
+  return `${SIDE_TOGGLE}<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}`
     + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${live ? "" : THEME_SWITCH}${live && me !== undefined ? profileHtml(me, live, q) : ""}</div></nav>`;
 }
 
@@ -1387,7 +1424,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(name)}</title><style>${CSS}</style></head>
-<body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}
+<body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}${SIDE_SHUT}
 <main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}"${q === "" ? "" : ` data-q="${esc(q)}"`}>
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}

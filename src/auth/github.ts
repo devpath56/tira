@@ -1,7 +1,9 @@
-// Sign in with GitHub, by GitHub's device flow (no secret on this machine): tira asks GitHub for a
-// short code, the person approves it at github.com/login/device, and tira polls until GitHub hands
-// over a token. The token then lists the person's repos (to link one) and reads pull requests
-// (to sync), as them. https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+// Sign in with GitHub, two ways to the same token. Directly (OAuth's web flow), once tira's app has
+// its secret: GitHub's own page asks the person to approve tira and sends them back with a one-time
+// code, which tira trades, with the secret, for a token. Or, with no secret, by GitHub's device
+// flow: tira asks GitHub for a short code, the person approves it at github.com/login/device, and
+// tira polls until GitHub hands over a token. The token then lists the person's repos (to link one)
+// and reads pull requests (to sync), as them. https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
 import type { GitHubClient, Pull } from "../sync/github.ts";
 
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
@@ -14,6 +16,8 @@ export interface DeviceStart { deviceCode: string; userCode: string; verifyAt: s
 export type DevicePoll = { token: string } | { wait: number } | { failed: string };
 
 export interface GitHubAuthApi {
+  authorizeUrl(clientId: string, redirectUri: string, state: string): string; // the direct way: GitHub's page
+  exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string>; // its code, for a token
   start(clientId: string): Promise<DeviceStart>;
   poll(clientId: string, deviceCode: string): Promise<DevicePoll>;
   user(token: string): Promise<{ login: string; name?: string }>;
@@ -25,7 +29,9 @@ const FAILED: Record<string, string> = {
   expired_token: "the code expired: start again",
   access_denied: "you turned it down on GitHub",
   device_flow_disabled: "device sign-in is off for tira's GitHub app: tick Enable Device Flow in its settings",
-  incorrect_client_credentials: "GitHub doesn't know tira's app: check its Client ID",
+  incorrect_client_credentials: "GitHub doesn't know tira's app: check its Client ID and secret",
+  bad_verification_code: "GitHub's code was used or too old: sign in again",
+  redirect_uri_mismatch: "tira's GitHub app doesn't send people back here: set its callback URL to this address",
   incorrect_device_code: "GitHub didn't know that code: start again",
 };
 
@@ -44,6 +50,17 @@ export class GitHubDevice implements GitHubAuthApi {
     const res = await this.fetchFn(`${this.web}${path}`, { method: "POST", headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: form(body) });
     if (!res.ok) throw new Error(`GitHub ${path}: ${res.status}`);
     return (await res.json()) as Record<string, unknown>;
+  }
+
+  authorizeUrl(clientId: string, redirectUri: string, state: string): string {
+    return `${this.web}/login/oauth/authorize?${form({ client_id: clientId, redirect_uri: redirectUri, scope: GITHUB_SCOPES, state })}`;
+  }
+
+  async exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string> {
+    const r = await this.post("/login/oauth/access_token", { client_id: clientId, client_secret: secret, code, redirect_uri: redirectUri });
+    if (typeof r.access_token === "string") return r.access_token;
+    const error = typeof r.error === "string" ? r.error : "no";
+    throw new Error(FAILED[error] ?? `GitHub said ${error}`);
   }
 
   async start(clientId: string): Promise<DeviceStart> {

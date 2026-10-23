@@ -19,8 +19,9 @@
 import pg from "pg";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 
-export interface AppKeys { github?: { clientId: string }; atlassian?: { clientId: string; secret: string } }
+export interface AppKeys { github?: { clientId: string; secret?: string }; atlassian?: { clientId: string; secret: string } }
 export interface GitHubAuth { token: string; name?: string }
+type AppsRow = { github_client_id: string | null; github_secret: string | null; atlassian_client_id: string | null; atlassian_secret: string | null };
 export interface AtlassianAuth {
   access: string;
   refresh?: string;
@@ -84,9 +85,10 @@ const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
   one BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (one),
-  github_client_id TEXT, atlassian_client_id TEXT, atlassian_secret TEXT,
+  github_client_id TEXT, github_secret TEXT, atlassian_client_id TEXT, atlassian_secret TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE ${s}.account_apps ADD COLUMN IF NOT EXISTS github_secret TEXT;
 CREATE TABLE IF NOT EXISTS ${s}.account_access (
   one BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (one),
   admin TEXT, members TEXT[] NOT NULL DEFAULT '{}', contact_name TEXT, contact_email TEXT,
@@ -120,7 +122,9 @@ export class PostgresAccounts {
     this.setup ??= this.transaction(async (c) => {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-accounts:${this.schema}`]);
       const made = await c.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = $1 AND tablename = ANY($2)", [this.schema, TABLES]);
-      if ((made.rows[0]?.n ?? 0) < TABLES.length) await c.query(ddl(this.schema));
+      // tables made before the GitHub app kept a secret (2026-10-23) get its column the same way
+      const secret = await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'account_apps' AND column_name = 'github_secret'", [this.schema]);
+      if ((made.rows[0]?.n ?? 0) < TABLES.length || secret.rowCount === 0) await c.query(ddl(this.schema));
     }).catch((err: unknown) => {
       this.setup = undefined; // try again next time
       throw err;
@@ -153,7 +157,7 @@ export class PostgresAccounts {
     await this.ready();
     const s = this.schema;
     const [apps, acc, gh, at, names, sessions] = await Promise.all([
-      this.pool.query(`SELECT github_client_id, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
+      this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
       this.pool.query(`SELECT admin, members, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
       this.pool.query(`SELECT login, auth FROM ${s}.account_atlassian`),
@@ -161,13 +165,8 @@ export class PostgresAccounts {
       this.pool.query(`SELECT id_hash, login, at FROM ${s}.account_sessions WHERE at > now() - make_interval(days => ${SESSION_DAYS})`),
     ]);
     const out: Accounts = {};
-    const a = apps.rows[0] as { github_client_id: string | null; atlassian_client_id: string | null; atlassian_secret: string | null } | undefined;
-    if (a) {
-      out.apps = {
-        ...(a.github_client_id ? { github: { clientId: a.github_client_id } } : {}),
-        ...(a.atlassian_client_id && a.atlassian_secret ? { atlassian: { clientId: a.atlassian_client_id, secret: this.key.open(a.atlassian_secret, "apps:atlassian_secret") } } : {}),
-      };
-    }
+    const a = apps.rows[0] as AppsRow | undefined;
+    if (a) out.apps = this.appsOf(a);
     const x = acc.rows[0] as { admin: string | null; members: string[]; contact_name: string | null; contact_email: string | null } | undefined;
     if (x) {
       const contact = { ...(x.contact_name ? { name: x.contact_name } : {}), ...(x.contact_email ? { email: x.contact_email } : {}) };
@@ -178,6 +177,17 @@ export class PostgresAccounts {
     out.names = Object.fromEntries((names.rows as { login: string; name: string }[]).map((r) => [r.login, r.name]));
     out.sessions = Object.fromEntries((sessions.rows as { id_hash: string; login: string; at: Date }[]).map((r) => [r.id_hash, { login: r.login, at: r.at.toISOString() }]));
     this.now = out;
+  }
+
+  // tira's own apps, from their row: each secret opened from its seal
+  private appsOf(a: AppsRow): AppKeys {
+    const keys: AppKeys = {};
+    if (a.github_client_id) {
+      keys.github = { clientId: a.github_client_id };
+      if (a.github_secret) keys.github.secret = this.key.open(a.github_secret, "apps:github_secret");
+    }
+    if (a.atlassian_client_id && a.atlassian_secret) keys.atlassian = { clientId: a.atlassian_client_id, secret: this.key.open(a.atlassian_secret, "apps:atlassian_secret") };
+    return keys;
   }
 
   // ---------- writes: the database first, then this snapshot again ----------
@@ -191,10 +201,11 @@ export class PostgresAccounts {
   async saveApps(keys: AppKeys): Promise<void> {
     const s = this.schema;
     await this.write(
-      `INSERT INTO ${s}.account_apps (one, github_client_id, atlassian_client_id, atlassian_secret) VALUES (TRUE, $1, $2, $3)
-       ON CONFLICT (one) DO UPDATE SET github_client_id = COALESCE($1, ${s}.account_apps.github_client_id),
+      `INSERT INTO ${s}.account_apps (one, github_client_id, github_secret, atlassian_client_id, atlassian_secret) VALUES (TRUE, $1, $4, $2, $3)
+       ON CONFLICT (one) DO UPDATE SET github_client_id = COALESCE($1, ${s}.account_apps.github_client_id), github_secret = COALESCE($4, ${s}.account_apps.github_secret),
          atlassian_client_id = COALESCE($2, ${s}.account_apps.atlassian_client_id), atlassian_secret = COALESCE($3, ${s}.account_apps.atlassian_secret), updated_at = now()`,
-      [keys.github?.clientId ?? null, keys.atlassian?.clientId ?? null, keys.atlassian ? this.key.seal(keys.atlassian.secret, "apps:atlassian_secret") : null],
+      [keys.github?.clientId ?? null, keys.atlassian?.clientId ?? null, keys.atlassian ? this.key.seal(keys.atlassian.secret, "apps:atlassian_secret") : null,
+        keys.github?.secret ? this.key.seal(keys.github.secret, "apps:github_secret") : null],
     );
   }
 
@@ -275,8 +286,9 @@ export class PostgresAccounts {
     await this.transaction(async (c) => {
       const n = async (sql: string, params: unknown[]) => (await c.query(sql, params)).rowCount ?? 0;
       if (old.apps?.github || old.apps?.atlassian) {
-        added.apps = (await n(`INSERT INTO ${s}.account_apps (one, github_client_id, atlassian_client_id, atlassian_secret) VALUES (TRUE, $1, $2, $3) ON CONFLICT DO NOTHING`,
-          [old.apps.github?.clientId ?? null, old.apps.atlassian?.clientId ?? null, old.apps.atlassian ? this.key.seal(old.apps.atlassian.secret, "apps:atlassian_secret") : null])) > 0;
+        added.apps = (await n(`INSERT INTO ${s}.account_apps (one, github_client_id, github_secret, atlassian_client_id, atlassian_secret) VALUES (TRUE, $1, $4, $2, $3) ON CONFLICT DO NOTHING`,
+          [old.apps.github?.clientId ?? null, old.apps.atlassian?.clientId ?? null, old.apps.atlassian ? this.key.seal(old.apps.atlassian.secret, "apps:atlassian_secret") : null,
+            old.apps.github?.secret ? this.key.seal(old.apps.github.secret, "apps:github_secret") : null])) > 0;
       }
       if (old.access?.admin) {
         added.access = (await n(`INSERT INTO ${s}.account_access (one, admin, members, contact_name, contact_email) VALUES (TRUE, $1, $2, $3, $4) ON CONFLICT DO NOTHING`,

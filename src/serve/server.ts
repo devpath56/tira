@@ -40,6 +40,7 @@ import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
+import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 
@@ -63,6 +64,7 @@ const ASSETS: Record<string, string> = {
   "/tabs.mjs": readFileSync(new URL("./tabs.mjs", import.meta.url), "utf8"),
   "/new-project.mjs": readFileSync(new URL("./new-project.mjs", import.meta.url), "utf8"),
   "/help.mjs": readFileSync(new URL("./help.mjs", import.meta.url), "utf8"),
+  "/secrets.mjs": readFileSync(new URL("./secrets.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -818,9 +820,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (before.length > 0) return again(409, "name", workspaceOf(fold(before, opts.registry), at.stream)?.deleted
       ? `${name} was a project here, since deleted: pick another name.`
       : `There is a project named ${name} already: pick it in Projects, or name this one differently.`);
-    const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor, payload: { repo, ...(site ? { jira_site: site, jira_project: key } : {}) } })).result;
+    const jiraName = site ? await projectName(acc.jiraOf(me.login, { version: 0, jira_site: site }), key) : undefined;
+    const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor, payload: { repo, ...(site ? { jira_site: site, jira_project: key, ...(jiraName ? { jira_name: jiraName } : {}) } : {}) } })).result;
     if (w.status !== "appended") return again(400, "name", `${name} wasn't created (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
-    const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
+    const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${jiraName ?? key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
     const k = String(++flashSeq);
     flashes.set(k, { ok: true, text: made });
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);

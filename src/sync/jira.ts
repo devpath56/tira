@@ -4,7 +4,7 @@
 // api.atlassian.com, src/auth/atlassian.ts), or an email and API token (JiraCloud, for a terminal).
 // Statuses are judged by their category (To Do, In Progress, Done), so any workflow works.
 // Errors name the call and Jira's answer, never the login.
-import type { Category } from "../tables/links.ts";
+import { TITLE, type Category } from "../tables/links.ts";
 
 // s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
 const trimEnd = (s: string, ch: string): string => {
@@ -35,6 +35,19 @@ export interface JiraClient {
 }
 
 export const TIRA_LABEL = "tira";
+
+// A Jira project's name as Jira shows it ("Tira Board" for KAN), to save beside its key in the
+// link; undefined when Jira can't be asked, doesn't list it, or the name won't fit a link (1 to 80
+// characters, no control characters: tables/links.ts). Never throws: a link is made without it.
+export async function projectName(jira: JiraClient | undefined, key: string): Promise<string | undefined> {
+  if (!jira) return undefined;
+  try {
+    const name = (await jira.projects()).find((p) => p.key === key)?.name.trim();
+    return name !== undefined && name !== key && TITLE.test(name) ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 

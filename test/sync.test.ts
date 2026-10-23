@@ -325,6 +325,15 @@ class FakeGitHubAuth implements GitHubAuthApi {
   polls = 0;
   approveAfter = 1; // polls that come back "not yet" first
   login = "isha-gh"; // who GitHub says signed in
+  // the direct way: GitHub's page, and the one-time code it sends people back with
+  authorizeUrl(clientId: string, redirectUri: string, state: string) {
+    return `https://github.example/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+  }
+  async exchange(clientId: string, secret: string, code: string) {
+    if (secret !== "gh-secret") throw new Error("GitHub doesn't know tira's app: check its Client ID and secret");
+    if (code !== "gh-code") throw new Error("GitHub's code was used or too old: sign in again");
+    return "gho-token";
+  }
   async start() {
     return { deviceCode: "dev-123", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 };
   }
@@ -392,7 +401,7 @@ async function serving(home: string, actor: string | null = "isha") {
   // sign in with the stand-in GitHub, approved at once (GitHub sign-in must be set up)
   const signInWithGitHub = async () => {
     githubAuthApi.approveAfter = 0;
-    const id = /name="id" value="([0-9a-f]+)"/.exec((await post("/signin/start", {})).body)?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await post("/signin/start", {})).headers.location))?.[1] ?? "";
     const done = await post("/signin/poll", { id, fragment: "1" });
     cookie = String(done.headers["set-cookie"]).split(";")[0] ?? "";
     return done;
@@ -404,21 +413,24 @@ async function serving(home: string, actor: string | null = "isha") {
   };
 }
 
-test("before setup: the board points to Project settings, and Profile settings opens on Setup; changes are recorded as the name tira serve was given", async () => {
+test("before setup: the board points to Project settings, and Account settings opens on Setup; changes are recorded as the name tira serve was given", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
     const board = (await s.http("GET", "/")).body;
-    // the sidebar's profile: your name on the button, and the menu straight to your Profile settings;
+    // the sidebar's profile: your name on the button, and the menu straight to your Account settings;
     // this project's settings are a link of their own
-    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Profile settings<small>/);
+    // a short menu, as Apple's are: Account settings, and (signed in) Sign out, nothing more
+    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Account settings<\/a><\/div><\/details>/);
+    // in the sidebar it opens upward and keeps to the sidebar's width, never spilling past it
+    assert.match(board, /main\[data-stream\]>\.top \.me-menu\{top:auto;bottom:calc\(100% \+ 6px\);left:0;right:0;width:auto;/);
     assert.match(board, /<a class="side-link" href="\/integrations" data-project-settings><svg[^]*?<\/svg>Project settings<\/a>/);
     assert.doesNotMatch(board, /Acting as|class="ws-head"/);
     assert.match(board, /<\/h1><div class="proj-links" data-workspace aria-label="Linked to"><a class="act primary" href="\/integrations" data-integrations><svg[^]*?<\/svg><svg[^]*?<\/svg>Connect GitHub and Jira<\/a><\/div><div class="title-acts">/); // on the name's line, only while nothing is linked
     assert.doesNotMatch(board, /data-sign-in|data-user[ >]|data-signout/); // no GitHub sign-in set up: nothing to sign in with
-    // Profile settings: yours, in every project (no project on it)
+    // Account settings: yours, in every project (no project on it)
     const page = (await s.http("GET", "/settings")).body;
-    assert.match(page, /<h1>Profile settings<\/h1><p>Yours, in every project on this tira\.<\/p>/);
+    assert.match(page, /<h1>Account settings<\/h1><p>Yours, in every project on this tira\.<\/p>/);
     assert.doesNotMatch(page, /class="set-proj"|data-int="(?:github|jira|sync|delete)"/);
     assert.match(page, /<span class="grp-k">Working as<\/span><span class="grp-v">isha<\/span>/);
     assert.match(page, /GitHub sign-in isn't set up\. Add it under Setup\./);
@@ -428,7 +440,7 @@ test("before setup: the board points to Project settings, and Profile settings o
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);
     assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "github", "jira", "sync", "delete"]);
-    assert.doesNotMatch(project, /data-int="(?:account|accounts|appearance|people|setup)"/);
+    assert.doesNotMatch(project, /data-int="(?:account|appearance|people|setup)"/);
     // without sign-in set up, tira serve's own name still acts
     assert.equal((await s.post("/integrations/link", { what: "repo", repo: "acme/app" })).status, 303);
     assert.deepEqual(workspaceOf(await s.state(), S), { version: 1, repo: "acme/app", by: "isha" });
@@ -438,23 +450,65 @@ test("before setup: the board points to Project settings, and Profile settings o
   }
 });
 
-test("Setup keeps tira's app keys privately; the Atlassian secret is never shown again", async () => {
+test("Setup shows tira's app keys as Render shows secrets: dots, with Show and Copy for the admin only, one value at a time and never in the page; Edit to change them", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
+    // the first run, before GitHub sign-in is on: whoever runs this tira sets them
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "" })), "Add the Atlassian app's secret too.");
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz" })), "Saved.");
     assert.deepEqual(appKeys(s.env), { github: { clientId: "Iv1.gh" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } });
-    await s.signInWithGitHub();
+    await s.signInWithGitHub(); // the first one in: the admin
     const page = (await s.http("GET", "/settings")).body;
-    assert.doesNotMatch(page, /SECRET-xyz/);
-    assert.match(page, /<input type="password" name="atlassian_secret" value="" autocomplete="off" placeholder="Saved">/);
+    // each value as dots, with Copy and Show; a key not set says so; the page never holds a key
+    assert.match(page, /<div class="grp-row env-row" data-env="atlassian_secret"><span class="grp-k">Atlassian Secret<\/span><span class="env-v" data-env-value>••••••••••••<\/span><button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy Atlassian Secret">[^]*?<button type="button" class="env-btn" data-env-show title="Show" aria-label="Show Atlassian Secret" aria-pressed="false">/);
+    assert.match(page, /<div class="grp-row env-row" data-env="github_secret"><span class="grp-k">GitHub Secret<\/span><span class="env-v none">Not set<\/span><\/div>/);
+    assert.doesNotMatch(page, /SECRET-xyz|value="Iv1\.gh"|value="at-id"/);
+    // Edit swaps in the form, where an empty field keeps what's saved
+    assert.match(page, /<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira&#39;s apps">|<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps">/);
+    assert.match(page, /<label class="act" for="setup-edit" data-env-edit>Edit<\/label>/);
+    assert.match(page, /<input type="password" name="atlassian_secret" value="" autocomplete="off" spellcheck="false" placeholder="Saved: leave empty to keep">/);
     assert.match(page, /<details class="grp" data-int="setup" id="setup">/); // both set: folded away
+    assert.match(page, /<script type="module" src="\/secrets\.mjs"><\/script>/);
+    // the list or the form, never both: the form's own rule outweighs every list's display:block
+    assert.match(page, /\.grp-list\.env-edit,#setup-edit:checked~\.env-list\{display:none\}#setup-edit:checked~\.env-edit\{display:block\}/);
+    // Show and Copy: one value, to the admin, never cached
+    const shown = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
+    assert.equal(shown.status, 200);
+    assert.equal(shown.body, "SECRET-xyz");
+    assert.equal(shown.headers["cache-control"], "no-store");
+    assert.equal((await s.post("/integrations/setup/reveal", { key: "github_secret" })).status, 404); // not set
+    assert.equal((await s.post("/integrations/setup/reveal", { key: "nope" })).status, 404);
+    const noToken = await s.http("POST", "/integrations/setup/reveal", "key=atlassian_secret");
+    assert.equal(noToken.status, 403);
+    assert.doesNotMatch(noToken.body, /SECRET-xyz/);
+    // a new secret alone keeps its Client ID
+    assert.equal(await s.flash(await s.post("/integrations/setup", { atlassian_secret: "SECRET-2" })), "Saved.");
+    assert.deepEqual(appKeys(s.env).atlassian, { clientId: "at-id", secret: "SECRET-2" });
     assert.equal(statSync(join(home, "credentials.json")).mode & 0o777, 0o600);
-    // once sign-in is on, only someone signed in may change them
+    // someone else signed in, not the admin: dots only, and no Show, Copy or change
+    await s.post("/integrations/people", { do: "add", login: "octo" });
+    s.githubAuthApi.login = "octo";
+    s.signOut();
+    await s.signInWithGitHub();
+    const theirs = (await s.http("GET", "/settings")).body;
+    assert.doesNotMatch(theirs, /data-env-copy|data-env-show|data-setup-form|id="setup-edit"/);
+    assert.match(theirs, /<div class="grp-foot">Only this tira's admin can see or change these\.<\/div>/);
+    const refused = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
+    assert.equal(refused.status, 403);
+    assert.doesNotMatch(refused.body, /SECRET/);
+    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Only this tira's admin can change its apps.");
+    assert.equal(appKeys(s.env).github?.clientId, "Iv1.gh");
+    // signed out: no one changes them
     s.signOut();
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Sign in with GitHub to change tira's apps.");
     assert.equal(appKeys(s.env).github?.clientId, "Iv1.gh");
+    // in the browser: a shown value hides again by itself; Copy says so with a tick, falls back to the
+    // older copy command where a browser refuses the clipboard, and else shows the value selected for ⌘C
+    const script = readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8");
+    assert.match(script, /show\.title = "Hide";\n\s+timer = setTimeout\(hide, 30_000\);/);
+    assert.match(script, /await navigator\.clipboard\.writeText\(text\);\n\s+return true;\n\s+\} catch \{[^]*?done = document\.execCommand\("copy"\);/);
+    assert.match(script, /if \(await copyText\(value\)\) \{\n\s+copy\.dataset\.done = "";[^]*?getSelection\(\)\?\.selectAllChildren\(out\);\n\s+copy\.title = "Press ⌘C to copy";/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });
@@ -479,9 +533,16 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "repo", repo: "acme/app" })), "Sign in with GitHub first.");
     assert.equal(workspaceOf(await s.state(), S), undefined);
     assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Continue with GitHub<\/span><\/button>/);
-    // the code, and the page that waits for it
-    const start = await s.post("/signin/start", {});
+    // the code, and the page that waits for it, at its own address: Back from GitHub (when it
+    // opened in the same tab) or a reload comes back to the code, never to a blank page
+    const started = await s.post("/signin/start", {});
+    assert.equal(started.status, 303);
+    const codeAt = String(started.headers.location);
+    assert.match(codeAt, /^\/signin\/code\?id=[0-9a-f]{32}$/);
+    const start = await s.http("GET", codeAt);
     assert.match(start.body, /<code data-user-code>ABCD-1234<\/code>/);
+    assert.match((await s.http("GET", codeAt)).body, /<code data-user-code>ABCD-1234<\/code>/);
+    assert.equal((await s.http("GET", "/signin/start")).headers.location, "/welcome");
     assert.match(start.body, /<a class="land-btn" href="https:\/\/github\.com\/login\/device" target="_blank" rel="noopener noreferrer" data-open-github>/);
     assert.match(start.body, /<script type="module" src="\/signin\.mjs"><\/script>/);
     const id = /name="id" value="([0-9a-f]+)"/.exec(start.body)?.[1] ?? "";
@@ -494,7 +555,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.match(done.body, /^<div data-go="\/connect\?r=\d+"><\/div>$/); // no repo yet: connect one next
     const session = setCookie.split(";")[0] ?? "";
     s.signIn(session);
-    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
     // the store keeps a hash of the session, and the GitHub token, never on a page
     const file = readFileSync(join(home, "credentials.json"), "utf8");
     assert.doesNotMatch(file, new RegExp(session.split("=")[1] ?? "x"));
@@ -502,7 +563,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal((await s.http("GET", "/")).headers.location, "/connect");
     assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app" })), "Connected to acme/app. Here's your board.");
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Profile settings<small>[^]*?data-signout>Sign out<\/button>/);
+    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Account settings<\/a><form method="post" action="\/signout" class="me-out"><input type="hidden" name="token" value="k"><button class="ws-item" type="submit" data-signout>Sign out<\/button><\/form><\/div><\/details>/);
     assert.doesNotMatch(board, /gho-token/);
     // writes are now recorded as the GitHub login
     const at = String((await s.store.readStream(S)).at(-1)?.seq);
@@ -510,9 +571,89 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal((await s.store.readStream(S)).at(-1)?.metadata.actor, "isha-gh");
     // a code GitHub never approved, or an old one, doesn't sign anyone in
     assert.match((await s.post("/signin/poll", { id: "nope", fragment: "1" })).body, /data-error>That sign-in expired: start again\./);
+    s.signOut();
+    assert.equal(await s.flash(await s.http("GET", "/signin/code?id=nope")), "That sign-in expired: start again.");
+    s.signIn(session);
     // sign out drops the session
     await s.post("/signout", {});
     assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
+  } finally {
+    await s.done();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Sign in with GitHub in one click, once tira's app has its secret: straight to GitHub's page and back; the way back works once, in the browser that left, at localhost; the sign-in pages have no theme switch", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tira-home-"));
+  const s = await serving(home);
+  try {
+    await s.post("/integrations/setup", { github_client_id: "Iv1.gh", github_secret: "gh-secret" });
+    // the way in has no theme switch (that's Account settings'); it follows the computer, or this browser's choice
+    const landing = (await s.http("GET", "/welcome")).body;
+    assert.doesNotMatch(landing, /data-theme-switch|class="land-top"/);
+    assert.match(landing, /<input class="view-radio" type="radio" name="theme" id="th-system" checked[^]*?<script type="module" src="\/theme\.mjs"><\/script>/);
+    // Continue with GitHub: off to GitHub's page, with a state, and the same state in a cookie for this browser
+    const leave = async () => {
+      const start = await s.post("/signin/start", {});
+      assert.equal(start.status, 303);
+      const to = new URL(String(start.headers.location));
+      assert.equal(`${to.origin}${to.pathname}`, "https://github.example/login/oauth/authorize");
+      assert.equal(to.searchParams.get("client_id"), "Iv1.gh");
+      assert.equal(to.searchParams.get("redirect_uri"), `http://localhost:${s.port}/signin/github/callback`);
+      const state = to.searchParams.get("state") ?? "";
+      assert.match(state, /^[0-9a-f]{48}$/);
+      assert.equal(String(start.headers["set-cookie"]), `tira_signin=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600`);
+      return state;
+    };
+    const comeBack = (state: string, q: string) => s.http("GET", `/signin/github/callback?${q}&state=${state}`);
+    // back in another browser (without the cookie): refused, and no one signed in
+    const other = await leave();
+    s.signIn("");
+    const elsewhere = await comeBack(other, "code=gh-code");
+    assert.equal(elsewhere.headers["set-cookie"], undefined);
+    assert.equal(await s.flash(elsewhere), "That GitHub sign-in didn't start here, or took too long: sign in again.");
+    // turned down on GitHub, or a code GitHub won't take: back to the landing, saying so
+    const no = await leave();
+    s.signIn(`tira_signin=${no}`);
+    assert.equal(await s.flash(await comeBack(no, "error=access_denied")), "You turned it down on GitHub: sign in again when you're ready.");
+    const old = await leave();
+    s.signIn(`tira_signin=${old}`);
+    assert.equal(await s.flash(await comeBack(old, "code=used-code")), "GitHub sign-in stopped (GitHub's code was used or too old: sign in again).");
+    // the real way back: signed in as the person GitHub says, with no code to type
+    const state = await leave();
+    s.signIn(`tira_signin=${state}`);
+    const back = await comeBack(state, "code=gh-code");
+    assert.equal(back.status, 303);
+    assert.match(String(back.headers.location), /^\/connect\?r=\d+$/); // no repo yet: connect one next
+    const setCookie = String(back.headers["set-cookie"]);
+    assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
+    s.signIn(setCookie.split(";")[0] ?? "");
+    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
+    // the same way back again: refused (a state works once)
+    const session = s.cookie();
+    s.signIn(`tira_signin=${state}`);
+    assert.equal(await s.flash(await comeBack(state, "code=gh-code")), "That GitHub sign-in didn't start here, or took too long: sign in again.");
+    s.signIn(session);
+    // the secret is kept and never shown; saving the Client ID alone keeps it
+    const settings = (await s.http("GET", "/settings")).body;
+    assert.match(settings, /<input type="password" name="github_secret" value="" autocomplete="off" spellcheck="false" placeholder="Saved: leave empty to keep">/);
+    assert.doesNotMatch(settings, /gh-secret/);
+    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh" })), "Saved.");
+    assert.equal(appKeys(s.env).github?.secret, "gh-secret");
+    // left from another project: GitHub comes back to one address, and tira takes it on to that project
+    s.signOut();
+    await s.d.submit({ stream: "side-project", kind: "create", entity: { type: "node", id: "site" }, actor: "isha", payload: {} });
+    const fromSide = await s.post("/signin/start?w=side-project", {});
+    const sideState = new URL(String(fromSide.headers.location)).searchParams.get("state") ?? "";
+    s.signIn(`tira_signin=${sideState}`);
+    const hop = await comeBack(sideState, "code=gh-code");
+    assert.equal(hop.headers.location, `/signin/github/callback?code=gh-code&state=${sideState}&w=side-project`);
+    const inSide = await s.http("GET", String(hop.headers.location));
+    assert.match(String(inSide.headers.location), /^\/\?r=\d+&w=side-project$|^\/connect\?r=\d+&w=side-project$/);
+    // away from localhost (where tira's app sends people back), GitHub's code instead
+    s.signOut();
+    const there = await s.http("POST", "/signin/start", "token=k", `127.0.0.1:${s.port}`);
+    assert.match((await s.http("GET", String(there.headers.location), undefined, `127.0.0.1:${s.port}`)).body, /<code data-user-code>ABCD-1234<\/code>/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });
@@ -566,8 +707,11 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.equal(await s.flash(await s.post("/integrations/setup", { atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz", back: "/connect" })), "Saved.");
     assert.match((await s.http("GET", "/connect", undefined, `127.0.0.1:${s.port}`)).body, /<a class="land-link" href="http:\/\/localhost:\d+\/connect">Open tira at localhost to connect<\/a>/);
     page = (await s.http("GET", "/connect")).body;
-    // Atlassian opens in a tab of its own; the page waits for it (tabs.mjs)
-    assert.match(page, /<a class="act" href="\/integrations\/jira\/connect\?back=\/connect&#38;tab=1" target="_blank" rel="noopener" data-connect-jira>Connect<\/a>/);
+    // a choice, as at sign-in: Sign in to Jira (Atlassian opens in a tab of its own; the page waits
+    // for it: tabs.mjs), or I'll sign in later, which puts Jira away and leaves Open Board
+    assert.match(page, /<input class="view-radio" type="checkbox" id="jira-later" aria-label="Sign in to Jira later"><div class="land-jira" data-jira-ask><a class="land-btn" href="\/integrations\/jira\/connect\?back=\/connect&#38;tab=1" target="_blank" rel="noopener" data-connect-jira><svg[^]*?<\/svg><span>Sign in to Jira<\/span><\/a><label class="land-quiet" for="jira-later" data-jira-later>I'll sign in later<\/label><\/div>/);
+    assert.match(page, /#jira-later:checked~\.land-jira\{display:none\}#jira-later:checked~\.land-jira-later\{display:block\}/);
+    assert.match(page, /<p class="land-jira-later">No Jira for now: sign in any time in Account settings\. <label class="land-quiet" for="jira-later">Sign in now<\/label><\/p>/);
     assert.match(page, /<script type="module" src="\/tabs\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/integrations/jira/connect?back=/connect")).status, 302);
     const back = await s.http("GET", `/integrations/jira/callback?code=good-code&state=${s.atlassian.states.at(-1) ?? ""}`);
@@ -585,8 +729,8 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.doesNotMatch(deniedInTab.body, /data-jira-done/);
     page = (await s.http("GET", "/connect")).body;
     assert.match(page, /<select name="jira_project" form="connect" aria-label="Jira project" data-jira-pick><option value="">None<\/option><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
-    assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app", jira_project: "DOG" })), "Connected to acme/app and Jira DOG. Here's your board.");
-    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", by: "isha-gh" });
+    assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app", jira_project: "DOG" })), "Connected to acme/app and Jira Dogma. Here's your board.");
+    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", jira_name: "Dogma", by: "isha-gh" });
     await s.post("/connect", { repo: "acme/app", jira_project: "DOG" }); // nothing changed: no new version
     await s.post("/connect", { repo: "acme/app" }); // no Jira picker on the form: Jira stays as it is
     assert.equal(workspaceOf(await s.state(), S)?.version, 2);
@@ -614,7 +758,7 @@ test("access: the first person to sign in is the admin; after that only people t
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" });
     // the first in becomes the admin, and sets how people reach them
-    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
     assert.equal(access(s.env).admin, "isha-gh");
     let page = (await s.http("GET", "/settings")).body;
     assert.match(page, /<div class="grp-list" data-people><div class="grp-row"><span class="grp-k">isha-gh<\/span><span class="pill">Admin<\/span><\/div><form [^>]*data-add-person>/);
@@ -663,8 +807,8 @@ test("access: the first person to sign in is the admin; after that only people t
     // the admin can't be removed
     s.githubAuthApi.login = "isha-gh";
     await s.signInWithGitHub();
-    // only you unlink your GitHub: Profile settings' Disconnect GitHub forgets the token and signs you out
-    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/github\/disconnect" class="grp-row" data-disconnect-github>[^]*?Disconnect GitHub<\/button>/);
+    // only you unlink your GitHub: Account settings' Disconnect GitHub forgets the token and signs you out
+    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/github\/disconnect" class="grp-row" data-disconnect-github><input type="hidden" name="token" value="k"><span class="grp-k">GitHub<\/span><span class="grp-v">@isha-gh<\/span><button class="how" type="submit">Disconnect<\/button><\/form>/);
     const unlinked = await s.post("/integrations/github/disconnect", {});
     assert.match(String(unlinked.headers.location), /^\/welcome\?r=\d+$/);
     assert.match(String(unlinked.headers["set-cookie"]), /^tira_session=; /);
@@ -684,7 +828,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
   const s = await serving(home);
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz" });
-    const id = /name="id" value="([0-9a-f]+)"/.exec((await s.post("/signin/start", {})).body)?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", {})).headers.location))?.[1] ?? "";
     s.githubAuthApi.approveAfter = 0;
     s.signIn(String((await s.post("/signin/poll", { id, fragment: "1" })).headers["set-cookie"]).split(";")[0] ?? "");
     // the repo, from your repos
@@ -698,7 +842,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.match(fresh, /<a class="act" href="\/integrations\/jira\/connect\?back=\/projects\/new&#38;tab=1" target="_blank" rel="noopener" data-connect-jira>Connect with Jira<\/a>/);
     assert.match(fresh, /<script type="module" src="\/tabs\.mjs"><\/script>/); // the page reloads when Jira says yes
     // Jira: off to Atlassian and back
-    assert.match(page, /<a class="act primary" href="\/integrations\/jira\/connect\?tab=1" target="_blank" rel="noopener" data-connect-jira>Connect Jira<\/a>/);
+    assert.match(page, /<a class="act primary" href="\/integrations\/jira\/connect\?tab=1" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira<\/a>/);
     const go = await s.http("GET", "/integrations/jira/connect");
     assert.equal(go.status, 302);
     assert.match(String(go.headers.location), new RegExp(`^https://auth\\.example/authorize\\?client_id=at-id&redirect_uri=${encodeURIComponent(`http://localhost:${s.port}/integrations/jira/callback`)}&state=[0-9a-f]{48}$`));
@@ -712,10 +856,11 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     page = (await s.http("GET", "/integrations")).body;
     assert.match(page, /<select name="jira_project" aria-label="Jira project"><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "jira", jira_project: "DOG" })), "Linked (version 2).");
-    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", by: "isha-gh" });
+    // the project's name, as Jira shows it, saved with its key
+    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", jira_name: "Dogma", by: "isha-gh" });
     assert.doesNotMatch(page, /at-token|rt-token|SECRET-xyz|gho-token/);
-    // your Jira is yours, in every project: Profile settings show it, and disconnect it
-    assert.match((await s.http("GET", "/settings")).body, /<span class="grp-k">Jira<\/span><span class="grp-v">Connected: https:\/\/acme\.atlassian\.net<\/span><\/div><form method="post" action="\/integrations\/jira\/disconnect"[^]*?Disconnect Jira/);
+    // your Jira is yours, in every project: Account settings show it, and disconnect it
+    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/jira\/disconnect" class="grp-row" data-disconnect-jira><input type="hidden" name="token" value="k"><span class="grp-k">Jira<\/span><span class="grp-v">acme\.atlassian\.net<\/span><button class="how" type="submit">Disconnect<\/button><\/form>/);
     // a new project, once Jira is connected: pick its Jira project in the first step
     fresh = (await s.http("GET", "/projects/new")).body;
     assert.match(fresh, /<select name="jira_project" aria-label="Jira project" data-np-jira><option value="">None for now<\/option><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
@@ -723,17 +868,17 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.equal(wrongKey.status, 400);
     assert.match(wrongKey.body, /data-np-problem>Pick a Jira project from your connected site, or none for now\.<\/div>/);
     const site = await s.post("/projects", { name: "site", repo: "acme/web", jira_project: "WEB" });
-    assert.equal(await s.flash(site), "Created site, linked to GitHub acme/web and Jira WEB. Sync from here.");
-    assert.deepEqual(workspaceOf(fold(await s.store.readAll(), s.registry), "site"), { version: 1, repo: "acme/web", jira_site: "https://acme.atlassian.net", jira_project: "WEB", by: "isha-gh" });
+    assert.equal(await s.flash(site), "Created site, linked to GitHub acme/web and Jira Website. Sync from here.");
+    assert.deepEqual(workspaceOf(fold(await s.store.readAll(), s.registry), "site"), { version: 1, repo: "acme/web", jira_site: "https://acme.atlassian.net", jira_project: "WEB", jira_name: "Website", by: "isha-gh" });
     // sync, from the board's own button
     s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z" });
     const synced = await s.post("/sync", {});
     assert.match(await s.flash(synced), /^Sync: synced with GitHub acme\/app and Jira DOG; acme\/app#7 linked to table; acme\/app#7 merged \(table\); dashboard: made Jira DOG-1; table: made Jira DOG-2; filters: made Jira DOG-3\.$/);
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
+    assert.match(board, /title="Jira: Dogma \(DOG\)" data-link-jira><svg[^]*?<\/svg><span>Dogma<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
     assert.doesNotMatch(board, /Connect GitHub and Jira|data-add-jira|data-add-repo/);
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
-    assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
+    assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" target="_blank" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
     assert.doesNotMatch(board, /class="chip" title="pr:|chip" title="jira-issue:/); // links show on their tasks, not as Lanes chips
     // completing the task offers the merged pull request as its proof
     await s.send("table", "START");
@@ -750,13 +895,13 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
   }
 });
 
-test("the rendered file shows the links, never the actions", async () => {
+test("the rendered file shows the links, each opening in a new tab, never the actions", async () => {
   const w = await world();
   await w.link(linked);
   await w.run();
   const events = await w.store.readStream(S);
   const html = renderHtml(fold(events, w.registry), S, "h", events);
-  assert.match(html, /<div class="proj-links" data-workspace aria-label="Linked to"><a class="pl" href="https:\/\/github\.com\/acme\/app"[^>]*data-link-repo><svg[^]*?<\/svg><span>acme\/app<\/span><\/a><a class="pl jira" href="https:\/\/acme\.atlassian\.net\/browse\/DOG"[^>]*data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><\/div>/);
+  assert.match(html, /<div class="proj-links" data-workspace aria-label="Linked to"><a class="pl" href="https:\/\/github\.com\/acme\/app" target="_blank" rel="noopener noreferrer" title="GitHub: acme\/app" data-link-repo><svg[^]*?<\/svg><span>acme\/app<\/span><\/a><a class="pl jira" href="https:\/\/acme\.atlassian\.net\/browse\/DOG" target="_blank" rel="noopener noreferrer" title="Jira: DOG" data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><\/div>/);
   assert.doesNotMatch(html, /data-act="SYNC"|data-act="CONNECT"/);
 });
 
@@ -782,6 +927,9 @@ test("the CLI: tira link keeps what it isn't told and clears what's empty; tira 
     assert.match((await tira("link", "--jira", "DOG")).err, /a Jira project needs its site/);
     assert.match((await tira("link", "--jira-site", "https://acme.atlassian.net/", "--jira", "DOG")).out, /\(version 2\): GitHub acme\/app · Jira DOG on https:\/\/acme\.atlassian\.net$/);
     assert.match((await tira("link", "--repo", "")).out, /\(version 3\): Jira DOG on https:\/\/acme\.atlassian\.net$/);
+    // the project's name as Jira shows it; it sticks while the same project stays linked
+    assert.match((await tira("link", "--jira-name", "")).err, /--jira-name is the project's name as Jira shows it, 1 to 80 characters, got ""/);
+    assert.match((await tira("link", "--jira-name", "Dogs")).out, /\(version 4\): Jira Dogs \(DOG\) on https:\/\/acme\.atlassian\.net$/);
     assert.match((await tira("sync")).out, /tira isn't signed in to Jira https:\/\/acme\.atlassian\.net: run tira connect-jira/);
     const connected = await tira("connect-jira", "--email", "isha@example.com");
     assert.equal(connected.code, 0);
@@ -791,7 +939,8 @@ test("the CLI: tira link keeps what it isn't told and clears what's empty; tira 
     assert.deepEqual(jiraLogin("https://acme.atlassian.net", { TIRA_HOME: dir }), { email: "isha@example.com", token: "tok-cli" });
     const synced = await tira("sync");
     assert.equal(synced.code, 0);
-    assert.equal(synced.out, "synced with Jira DOG\ndashboard: made Jira DOG-1");
+    // Jira calls it Dogma, not Dogs: the sync saves Jira's name, as whoever ran it
+    assert.equal(synced.out, "synced with Jira DOG\nJira calls DOG \"Dogma\": the link shows that name now\ndashboard: made Jira DOG-1");
     assert.deepEqual(JSON.parse((await tira("sync", "--json")).out).created, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -810,7 +959,7 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.match(board, /<a class="new-project" href="\/projects\/new" data-new-project><svg[^]*?<\/svg>New project<\/a>/);
     assert.doesNotMatch(board, /<form[^>]*action="\/projects"/); // no form in the sidebar
     const newPage = (await s.http("GET", "/projects/new")).body;
-    assert.match(newPage, /<main class="settings-page np-page" data-new-project-page><nav class="set-nav" aria-label="New project"><a class="brand" href="\/" title="Home: the board" data-home>/); // the mark goes back
+    assert.match(newPage, /<main class="settings-page np-page" data-new-project-page><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="New project"><a class="brand" href="\/" title="Home: the board" data-home>/); // the mark goes back
     assert.match(newPage, /<form method="post" action="\/projects" class="grp-list np-form" data-new-project-form><input type="hidden" name="token" value="k"><label class="grp-row np-field"><span class="grp-k">Project name<small>[^<]+<\/small><\/span><input autofocus name="name" value="" required/);
     assert.match(newPage, /<span class="grp-k">GitHub repository<small>[^<]+<\/small><\/span><input name="repo" value="" required pattern="[^"]+" placeholder="owner\/name"/);
     assert.match(newPage, /<div class="grp-row np-acts"><a class="act" href="\/">Cancel<\/a><button class="act primary" type="submit">Create project<\/button><\/div><\/form>/);
@@ -914,18 +1063,23 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
   assert.equal(carryQ(`<a href="/integrations">x</a>`, ""), `<a href="/integrations">x</a>`);
 });
 
-test("Settings, after GitHub's: Profile settings (yours) and Project settings (the project's), each with sections on the left, the page across the middle, the Help centre as a support chat on the right; the tira mark goes back to the board", async () => {
+test("Settings, after GitHub's: Account settings (yours) and Project settings (the project's), each with sections on the left, the page across the middle, the Help centre as a support chat on the right; the tira mark goes back to the board", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
     const page = (await s.http("GET", "/settings")).body;
     const project = (await s.http("GET", "/integrations")).body;
-    assert.match(page, /<main class="settings-page" data-settings><nav class="set-nav" aria-label="Profile settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
-    assert.match(project, /<main class="settings-page" data-settings><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut"><main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Account settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match(project, /<main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
     const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    assert.deepEqual(nav(page), [["account", "Profile"], ["accounts", "Accounts"], ["appearance", "Appearance"], ["people", "People"], ["setup", "Setup"]]);
+    // yours: you and your accounts in one list, then Setup and People, Appearance last, on the page
+    // in that order; each page a readable column (Apple's settings), never stretched across the window
+    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]]);
+    const at = (id: string) => page.indexOf(`data-int="${id}"`);
+    assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
+    assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
     assert.deepEqual(nav(project), [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "accounts", "appearance", "people", "setup"]], [project, ["general", "github", "jira", "sync", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "github", "jira", "sync", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);
@@ -982,4 +1136,52 @@ test("a project's link may mark it deleted, linked or not; deleted is true or ab
   assert.equal(ok({ title: "Mobile App" }), true); // a rename of a project never linked
   assert.equal(ok({ repo: "acme/app", title: " padded" }), false);
   assert.equal(ok({ repo: "acme/app", title: "x".repeat(81) }), false);
+});
+
+test("a Jira project shows by its name, as Jira shows it: saved with its key, sticking while that project stays linked, and caught up by a sync, as the person syncing", async () => {
+  const ok = (payload: Record<string, unknown>) => LINK_GUARDS.workspaceWellFormed?.({ actor: "isha", payload } as never) === true;
+  assert.equal(ok({ ...linked, jira_name: "Dogma" }), true);
+  assert.equal(ok({ repo: "acme/app", jira_name: "Dogma" }), false); // a name needs its project
+  for (const bad of ["", " padded", "bell\u0007", "x".repeat(81), 7]) assert.equal(ok({ ...linked, jira_name: bad }), false, JSON.stringify(bad));
+
+  const w = await world();
+  // the header's Jira chip: its tooltip | what it says
+  const chip = async () => {
+    const events = await w.store.readStream(S);
+    const m = /<a class="pl jira"[^>]*title="([^"]*)" data-link-jira><svg[^]*?<\/svg><span>([^<]*)<\/span>/.exec(renderHtml(fold(events, w.registry), S, "h", events));
+    return `${m?.[1]} | ${m?.[2]}`;
+  };
+  await w.link(linked); // linked before tira kept names: shown by its key
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, undefined);
+  assert.equal(await chip(), "Jira: DOG | DOG");
+  // a sync with no one named (a test, a script) only reads: the link stays as it is
+  const quiet = await w.run();
+  assert.equal(quiet.jiraName, undefined);
+  assert.deepEqual(quiet.problems, []);
+  assert.equal(workspaceOf(await w.state(), S)?.version, 1);
+  // a person's sync saves Jira's name, as them, and says so
+  const sync1 = await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" });
+  assert.equal(sync1.jiraName, "Dogma");
+  assert.ok(reportLines(sync1).includes(`Jira calls DOG "Dogma": the link shows that name now`));
+  assert.deepEqual(workspaceOf(await w.state(), S), { version: 2, ...linked, jira_name: "Dogma", by: "isha" });
+  assert.equal(await chip(), "Jira: Dogma (DOG) | Dogma");
+  // the same name again: nothing written
+  assert.equal((await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" })).jiraName, undefined);
+  assert.equal(workspaceOf(await w.state(), S)?.version, 2);
+  // a change that doesn't mention the name keeps it, while the same project stays linked
+  await w.link({ ...linked, repo: "acme/web" }, 3);
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, "Dogma");
+  // renamed in Jira: the next sync follows
+  w.jira.names.set("DOG", "Dog Days");
+  assert.equal((await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "devansh" })).jiraName, "Dog Days");
+  assert.deepEqual(workspaceOf(await w.state(), S), { version: 4, ...linked, repo: "acme/web", jira_name: "Dog Days", by: "devansh" });
+  // another project linked: the old name goes with the old project
+  await w.link({ ...linked, jira_project: "WEB" }, 5);
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, undefined);
+  assert.equal(await chip(), "Jira: WEB | WEB");
+  // a name Jira gives that can't be saved (too long) is left out; the sync carries on
+  w.jira.names.set("WEB", "w".repeat(81));
+  const long = await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" });
+  assert.equal(long.jiraName, undefined);
+  assert.deepEqual(long.problems, []);
 });

@@ -49,9 +49,11 @@ export class FakeJira implements JiraClient {
     i.status = WORD[to];
     return i.status;
   }
+  // the projects' names, as Jira shows them (a person may rename one there)
+  readonly names = new Map([["DOG", "Dogma"], ["WEB", "Website"]]);
   async projects() {
     this.check("projects");
-    return [{ key: "DOG", name: "Dogma" }, { key: "WEB", name: "Website" }];
+    return [...this.names].map(([key, name]) => ({ key, name }));
   }
   async setLabels(key: string, add: string[], remove: string[]) {
     if (add.length + remove.length === 0) return;

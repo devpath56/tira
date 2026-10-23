@@ -1,5 +1,5 @@
 // The theme (System / Light / Dark) is CSS only: radio inputs every page carries, picked in
-// Profile settings' Appearance (the rendered file keeps its own switch). Under `tira serve` this
+// Account settings' Appearance (the rendered file keeps its own switch). Under `tira serve` this
 // remembers the choice per browser, so it survives reloads and carries to every page. Loaded by
 // each served page directly and by app.mjs on the live page.
 const KEY = "tira-theme";
@@ -35,6 +35,24 @@ for (const d of document.querySelectorAll("details[data-remember]")) {
   d.addEventListener("toggle", () => {
     try {
       localStorage.setItem(d.dataset.remember, d.open ? "1" : "0");
+    } catch {
+      // storage blocked: it lasts until the page is left
+    }
+  });
+}
+
+// Switches that hide a part of the page (input[data-remember], like the sidebar's ☰): on or off
+// as you left them, per browser, the same way.
+for (const c of document.querySelectorAll("input[type=checkbox][data-remember]")) {
+  try {
+    const was = localStorage.getItem(c.dataset.remember);
+    if (was !== null) c.checked = was === "1";
+  } catch {
+    // storage blocked: it starts as the page says
+  }
+  c.addEventListener("change", () => {
+    try {
+      localStorage.setItem(c.dataset.remember, c.checked ? "1" : "0");
     } catch {
       // storage blocked: it lasts until the page is left
     }

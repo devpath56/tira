@@ -24,7 +24,7 @@ import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } f
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { REJECTED, tableEventName, type EventData, type RejectedData } from "../fold/events.ts";
 import type { StoredEvent } from "../store/types.ts";
-import { JIRA_PROJECT, JIRA_SITE, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
+import { JIRA_PROJECT, JIRA_SITE, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
 import { JiraCloud, type JiraClient } from "../sync/jira.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
@@ -65,10 +65,11 @@ Usage:
                                                   name nothing, a person picks the parent. A person approves the
                                                   file, then the placement (tira serve), and the task is born
   tira ideas                                      the ideas in the stream: stage, file, proposed parent
-  tira link [--repo OWNER/NAME] [--jira-site URL] [--jira KEY]
+  tira link [--repo OWNER/NAME] [--jira-site URL] [--jira KEY] [--jira-name NAME]
                                                   link this workspace (the stream: one project, one tree) to a
                                                   GitHub repo and a Jira project; each change is a new version,
-                                                  and anything left out keeps its current value
+                                                  and anything left out keeps its current value. --jira-name is
+                                                  the project's name as Jira shows it (a sync saves it too)
   tira connect-jira --email EMAIL [--site URL]    sign tira in to the workspace's Jira site: it asks for an API
                                                   token without showing it, checks it, and keeps it in a private
                                                   file ($TIRA_HOME, default ~/.config/tira), never in the log
@@ -166,6 +167,7 @@ const OPTIONS = {
   repo: { type: "string" },
   "jira-site": { type: "string" },
   jira: { type: "string" },
+  "jira-name": { type: "string" },
   site: { type: "string" },
   email: { type: "string" },
   out: { type: "string" },
@@ -327,16 +329,21 @@ async function link(store: ClosableStore, registry: Registry, stream: string, va
   if (actor === undefined) throw new UsageError("tira link needs --actor NAME (or TIRA_ACTOR): who is linking it");
   const siteFlag = values["jira-site"]?.trim();
   const given = { repo: values.repo?.trim(), jira_site: siteFlag === undefined ? undefined : trimEnd(siteFlag, "/"), jira_project: values.jira?.trim() };
-  if (Object.values(given).every((v) => v === undefined)) throw new UsageError("usage: tira link [--repo OWNER/NAME] [--jira-site https://YOUR-SITE.atlassian.net] [--jira KEY] (an empty value clears it)");
+  const jiraName = values["jira-name"]?.trim();
+  if (Object.values(given).every((v) => v === undefined) && jiraName === undefined) throw new UsageError("usage: tira link [--repo OWNER/NAME] [--jira-site https://YOUR-SITE.atlassian.net] [--jira KEY] [--jira-name NAME] (an empty value clears it)");
   // an empty value clears that link; anything else must be well-formed
   if (given.repo && !REPO.test(given.repo)) throw new UsageError(`--repo is a GitHub repo as owner/name, got "${given.repo}"`);
   if (given.jira_site && !JIRA_SITE.test(given.jira_site)) throw new UsageError(`--jira-site is the site's https address, e.g. https://your-site.atlassian.net, got "${given.jira_site}"`);
   if (given.jira_project && !JIRA_PROJECT.test(given.jira_project)) throw new UsageError(`--jira is a Jira project key in capitals, e.g. DOG, got "${given.jira_project}"`);
+  if (jiraName !== undefined && !TITLE.test(jiraName)) throw new UsageError(`--jira-name is the project's name as Jira shows it, 1 to 80 characters, got "${jiraName}"`);
   const now = workspaceOf(fold(await store.readStream(stream), registry), stream);
   const merged: Record<string, string | undefined> = { repo: now?.repo, jira_site: now?.jira_site, jira_project: now?.jira_project };
   for (const [k, v] of Object.entries(given)) if (v !== undefined) merged[k] = v === "" ? undefined : v;
+  // a saved name isn't repeated: it sticks while the same project stays linked (src/fold/workspace.ts)
+  if (jiraName !== undefined) merged.jira_name = jiraName;
   const payload = Object.fromEntries(Object.entries(merged).filter((e): e is [string, string] => e[1] !== undefined));
   if (payload.jira_project !== undefined && payload.jira_site === undefined) throw new UsageError("a Jira project needs its site: add --jira-site https://YOUR-SITE.atlassian.net");
+  if (payload.jira_name !== undefined && payload.jira_project === undefined) throw new UsageError("--jira-name names a Jira project: add --jira KEY");
   if (Object.keys(payload).length === 0) throw new UsageError("that would leave the workspace linked to nothing");
   const version = (now?.version ?? 0) + 1;
   const { result: r } = await new Dispatcher(store, registry).submit({ stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version }, actor, payload });
@@ -346,8 +353,13 @@ async function link(store: ClosableStore, registry: Registry, stream: string, va
   return exitOf(r);
 }
 
-const linkWords = (l: Record<string, unknown>) =>
-  [l.repo ? `GitHub ${String(l.repo)}` : "", l.jira_project ? `Jira ${String(l.jira_project)} on ${String(l.jira_site)}` : l.jira_site ? `Jira site ${String(l.jira_site)}` : ""].filter(Boolean).join(" · ");
+const linkWords = (l: Record<string, string | undefined>) => {
+  const words = l.repo ? [`GitHub ${l.repo}`] : [];
+  const named = `${l.jira_name} (${l.jira_project})`;
+  if (l.jira_project) words.push(`Jira ${l.jira_name ? named : l.jira_project} on ${l.jira_site}`);
+  else if (l.jira_site) words.push(`Jira site ${l.jira_site}`);
+  return words.join(" · ");
+};
 
 // The Jira login: asked for here, checked against the site, kept outside the log.
 async function connectJira(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
@@ -371,7 +383,8 @@ async function syncCmd(store: ClosableStore, registry: Registry, stream: string,
   const ws = workspaceOf(fold(await store.readStream(stream), registry), stream);
   const login = ws?.jira_site ? jiraLogin(ws.jira_site, io.env) : undefined;
   const jira = ws?.jira_site && login ? io.jira?.(ws.jira_site, login) ?? new JiraCloud(ws.jira_site, login.email, login.token) : undefined;
-  const rep = await sync({ store, registry, stream, ...(jira ? { jira } : {}), ...(ws?.repo ? { github: io.github ?? new GhCli() } : {}) });
+  const by = values.actor ?? io.env.TIRA_ACTOR;
+  const rep = await sync({ store, registry, stream, ...(by ? { by } : {}), ...(jira ? { jira } : {}), ...(ws?.repo ? { github: io.github ?? new GhCli() } : {}) });
   if (ws?.jira_project && !jira) rep.problems.push(`tira isn't signed in to Jira ${ws.jira_site}: run tira connect-jira --email YOU, or Connect Jira on the page`);
   if (values.json) io.out(JSON.stringify(rep));
   else for (const l of reportLines(rep)) io.out(l);

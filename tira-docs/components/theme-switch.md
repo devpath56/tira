@@ -2,7 +2,7 @@
 
 **JTBD:** 1 — Track a branching build depth-first (reading it comfortably, day or night).
 
-**What / why.** Three choices, picked in Profile settings' **Appearance** (each a card with a
+**What / why.** Three choices, picked in Account settings' **Appearance** (each a card with a
 small picture of the look) under `tira serve`, and as three small buttons at the foot of the
 sidebar in a rendered file (which has no settings): System (the default), Light and Dark, all in Jira's palette (Atlassian's design tokens): white
 or near-black surfaces, the sidebar a shade off, Jira blue as the one accent, Jira's status

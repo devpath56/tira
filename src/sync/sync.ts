@@ -5,6 +5,8 @@
 //    its title, body or a commit, a branch segment equal to the task's id, or the task's Jira
 //    key) is linked to that task, and follows GitHub to merged or closed. A merged one is
 //    offered as the proof when the task is completed.
+// 1b. In from Jira: the linked project's name, as Jira shows it ("Tira Board" for KAN). When the
+//    link has another, or none, the link follows, written as the person syncing.
 // 2. In from Jira: issues people made in Jira itself become tasks, keeping Jira's structure (an
 //    epic above its issues, an issue above its subtasks), written as whoever made each one in
 //    Jira. Each is linked to its issue (now labelled "tira") and brought to where it is there:
@@ -31,12 +33,12 @@ import { byBirth } from "../fold/view.ts";
 import type { EntityState } from "../fold/types.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import type { WriteResult } from "../write/write-path.ts";
-import { JIRA_ISSUE, PR, type Category } from "../tables/links.ts";
-import { linksOf, tasksNamed, workspaceOf } from "../fold/workspace.ts";
+import { JIRA_ISSUE, PR, WORKSPACE, WORKSPACE_ID, type Category } from "../tables/links.ts";
+import { linksOf, tasksNamed, workspaceOf, type WorkspaceLink } from "../fold/workspace.ts";
 
 export { linksOf, tasksNamed, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
-import { TIRA_LABEL, type JiraClient, type JiraIssue } from "./jira.ts";
-import type { GitHubClient, Pull } from "./github.ts";
+import { projectName, TIRA_LABEL, type JiraClient, type JiraIssue } from "./jira.ts";
+import type { GitHubClient } from "./github.ts";
 
 const TASK = "node";
 
@@ -71,6 +73,7 @@ function plainWhy(why: string): string {
 
 export interface SyncReport {
   linked: { repo?: string; jira?: string };
+  jiraName?: string; // the Jira project's name, saved to the link by this sync (Jira calls it that now)
   prs: { task: string; pr: string; url: string; change: string }[]; // change: linked, merged, closed, reopened
   created: { task: string; key: string }[];
   imported: { key: string; task: string; to: string }[]; // issues made in Jira, now tasks
@@ -85,9 +88,23 @@ export interface SyncOptions {
   stream: string;
   github?: GitHubClient; // absent: the repo isn't read
   jira?: JiraClient; // absent: Jira isn't read or written
+  by?: string; // the person syncing: when Jira calls the linked project by another name, the link follows, as them
 }
 
 const said = (r: WriteResult) => (r.status === "appended" || r.status === "duplicate" ? "" : r.status === "rejected" || r.status === "refused" ? `${r.code}: ${r.detail}` : r.status);
+
+// 1b, for sync(): when the link names its Jira project by another name than Jira's (or none, linked
+// before tira kept names), the link follows, written as the person syncing (a person links a
+// workspace). With no one named, nothing is written.
+async function followJiraName(o: SyncOptions, d: Dispatcher, ws: WorkspaceLink, jira: JiraClient, report: SyncReport): Promise<void> {
+  if (!o.by || !ws.jira_site || !ws.jira_project) return;
+  const name = await projectName(jira, ws.jira_project);
+  if (name === undefined || name === ws.jira_name) return;
+  const payload = { ...(ws.repo ? { repo: ws.repo } : {}), jira_site: ws.jira_site, jira_project: ws.jira_project, jira_name: name };
+  const why = said((await d.submit({ stream: o.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: ws.version + 1 }, actor: o.by, payload })).result);
+  if (why) report.problems.push(`saving Jira's name for ${ws.jira_project}: ${why}`);
+  else report.jiraName = name;
+}
 
 export async function sync(o: SyncOptions): Promise<SyncReport> {
   const d = new Dispatcher(o.store, o.registry);
@@ -148,6 +165,9 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
   if (!ws.jira_project || !o.jira) return report;
   const jira = o.jira;
   const project = ws.jira_project;
+
+  // 1b. the project's name, as Jira shows it now (followJiraName)
+  await followJiraName(o, d, ws, jira, report);
 
   // 2. issues people made in Jira, as tasks
   const site = ws.jira_site ?? "";
@@ -325,6 +345,7 @@ export function reportLines(rep: SyncReport): string[] {
   const out: string[] = [];
   const linked = [rep.linked.repo ? `GitHub ${rep.linked.repo}` : "", rep.linked.jira ? `Jira ${rep.linked.jira}` : ""].filter(Boolean).join(" and ");
   if (linked) out.push(`synced with ${linked}`);
+  if (rep.jiraName) out.push(`Jira calls ${rep.linked.jira} "${rep.jiraName}": the link shows that name now`);
   for (const p of rep.prs) out.push(`${p.pr} ${p.change}${p.change === "linked" ? ` to ${p.task}` : ` (${p.task})`}`);
   for (const m of rep.imported) out.push(`${m.key} brought in as ${m.task} (${m.to})`);
   for (const c of rep.created) out.push(`${c.task}: made Jira ${c.key}`);

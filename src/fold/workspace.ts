@@ -13,10 +13,11 @@ const trimEnd = (s: string, ch: string): string => {
   return s.slice(0, end);
 };
 
-export interface WorkspaceLink { version: number; repo?: string; jira_site?: string; jira_project?: string; by?: string; title?: string; deleted?: true }
+export interface WorkspaceLink { version: number; repo?: string; jira_site?: string; jira_project?: string; jira_name?: string; by?: string; title?: string; deleted?: true }
 
 // The workspace's current link: its latest version's links; its name (title) and whether it was
-// deleted as the latest version that said so (a later link change that doesn't mention them keeps them).
+// deleted as the latest version that said so (a later link change that doesn't mention them keeps them);
+// the Jira project's name likewise, while that version named the project linked now.
 export function workspaceOf(r: FoldResult, stream: string): WorkspaceLink | undefined {
   const all = r.entities.filter((e) => e.stream === stream && e.type === WORKSPACE).sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
   const latest = all.at(-1);
@@ -25,7 +26,9 @@ export function workspaceOf(r: FoldResult, stream: string): WorkspaceLink | unde
   const str = (k: string) => (typeof b[k] === "string" ? { [k]: b[k] as string } : {});
   const title = all.reduce<string | undefined>((t, e) => (typeof e.born?.title === "string" ? e.born.title : t), undefined);
   const deleted = all.some((e) => e.born?.deleted === true);
-  return { version: latest.version ?? 1, ...str("repo"), ...str("jira_site"), ...str("jira_project"), ...(latest.createdBy ? { by: latest.createdBy } : {}), ...(title !== undefined ? { title } : {}), ...(deleted ? { deleted: true as const } : {}) };
+  const named = all.reduce<Record<string, unknown> | undefined>((n, e) => (typeof e.born?.jira_name === "string" ? e.born : n), undefined);
+  const jiraName = named && named.jira_project === b.jira_project && named.jira_site === b.jira_site ? (named.jira_name as string) : undefined;
+  return { version: latest.version ?? 1, ...str("repo"), ...str("jira_site"), ...str("jira_project"), ...(jiraName !== undefined ? { jira_name: jiraName } : {}), ...(latest.createdBy ? { by: latest.createdBy } : {}), ...(title !== undefined ? { title } : {}), ...(deleted ? { deleted: true as const } : {}) };
 }
 
 export interface TaskLinks {

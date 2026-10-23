@@ -80,7 +80,7 @@ async function pages(): Promise<string> {
   await saveAppKeys({ github: { clientId: "Iv1.docs" }, atlassian: { clientId: "docs", secret: "docs-secret" } }, env);
   await saveSession("docs-session", "isha", env);
   await saveAccess(() => ({ admin: "isha", contact: { name: "Isha", email: "isha@example.com" } }), env);
-  const githubAuth = { start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
+  const githubAuth = { authorizeUrl: () => "https://github.example/authorize", exchange: async () => "gho-token", start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
   const signInServer = tiraServer({ store, registry, stream: "t", actor: "isha", token: "k", links: { githubAuth, env } });
   const ask = async (s: typeof server, cookie?: string) => {
     await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
@@ -114,10 +114,10 @@ async function pages(): Promise<string> {
     // an idea's placement where a person picks the parent (its candidates as buttons)
     const pick = (await get("GET", "/confirm?type=idea&id=both&event=APPROVE_NODE&fragment=1")).body;
     const landing = (await getSignedOut("GET", "/welcome")).body + (await getFirstRun("GET", "/welcome")).body;
-    const signin = (await getSignedOut("POST", "/signin/start", "token=k")).body;
+    const signin = (await getSignedOut("GET", (await getSignedOut("POST", "/signin/start", "token=k")).location ?? "/")).body; // the code, at its own address
     const signedIn = (await getSignedIn("GET", "/integrations")).body + (await getSignedIn("GET", "/")).body + (await getSignedIn("GET", "/connect")).body
       + (await getSignedIn("GET", "/projects/new")).body + (await getSignedIn("POST", "/projects", "token=k&name=-bad&repo=a%2Fb")).body // + New project's page, and a name it refuses
-      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body; // Profile settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body; // Account settings; another project's settings (it can be deleted)
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const seen = String((await store.readStream("t")).at(-1)?.seq);

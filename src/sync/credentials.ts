@@ -3,12 +3,12 @@
 // with $TIRA_SECRET_KEY, shared by everyone on that database (accounts-pg.ts; Isha, 2026-10-22);
 // otherwise (tests, a first try with no database yet) in one file on this machine ($TIRA_HOME,
 // default ~/.config/tira/credentials.json, readable by its owner only). They hold:
-//   apps       the keys of tira's own GitHub and Atlassian apps (typed into Profile settings)
+//   apps       the keys of tira's own GitHub and Atlassian apps (typed into Account settings)
 //   github     each signed-in person's GitHub token, by GitHub login (from GitHub's device sign-in)
 //   atlassian  each person's Atlassian sign-in, by GitHub login (access and refresh tokens, site)
 //   sessions   who each page session is: only a hash of the session id, so the store can't sign
 //              anyone in; a session lasts 30 days, like its cookie
-//   names      the name each person chose to be shown as (Profile settings), by login
+//   names      the name each person chose to be shown as (Account settings), by login
 //   access     who may sign in: the admin (the first person to sign in), the people the admin
 //              added, and how people reach the admin to be added
 // and, always in this computer's file (they belong to this computer, not to the team):
