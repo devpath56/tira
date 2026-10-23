@@ -125,7 +125,7 @@ async function pages(): Promise<string> {
     const flash = (await get("GET", acted.location ?? "/")).body;
     const noWorkspace = (await get("GET", "/?w=nope")).body; // a project the store doesn't hold
     const unlinked = (await get("GET", "/?w=busy")).body; // a board with nothing linked: Connect GitHub and Jira
-    const script = ["app.mjs", "graph.mjs", "signin.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
+    const script = ["app.mjs", "graph.mjs", "signin.mjs", "drag.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
     return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, flash, noWorkspace, script, unlinked].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));

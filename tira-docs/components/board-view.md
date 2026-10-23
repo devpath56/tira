@@ -25,6 +25,16 @@ scrolled) and the cards that moved glow once. While you're typing or a dialog is
 then shows them. The header's numbers count up once on a fresh load; with less motion asked for,
 none of this moves.
 
+**Drag a card (tira serve).** As in Todoist, a Kanban card drags to another column, and the drop
+means the move's verb under today's rules. To do → In progress starts the task at once; every
+other move opens its decision in the dialog, as the card's buttons do: In progress → Done asks
+for the proof of work, Blocked asks what it waits on, Dropped and back to In progress ask too.
+While you drag, the columns it can go to are outlined and the rest dim; dropped on one of those,
+or with Esc, the card goes back and nothing is written. If tira would refuse a start (another
+task is already in progress), the dialog opens to say why. A mouse drags once it moves a few
+pixels, so a click still opens the card; a finger holds the card a moment first, so a swipe
+still scrolls. The keyboard acts from the task's dialog or ⌘K.
+
 **Big trees (100+ tasks).** The layout packs a short branch beside a deep one's lower rows.
 In a tree of more than 40 shown tasks, the lowest branches hang as indented columns under
 their parent (a bracket joins each task; steps indent under their task), so the tree grows
@@ -59,6 +69,7 @@ every task and scrolls.
 - `[data-graph]` on the box the live page turns into a canvas; `.canvas-tools` (`[data-canvas-tools]`) holds its tools; `.fold` with `[data-fold]` (the parent's key) under each parent; `.canvas-flash` repeats an action's result in full screen.
 - `.more` (`[data-more]`: how many it holds) on the older Done or Dropped cards; `.more-btn` on its Show more / Show fewer, after them.
 - `[data-card-key]` (the task's key) and `[data-state]` on each Kanban card, which the live page compares across a reload; `.mover` on the card's who-moved-it (`.mover.agent` for an agent).
+- Live only: `[data-moves]` on the Kanban's `.cols` (what each move means, from the rules), `[data-col]` on each status column (its state); while a card drags, `[data-drop]` on each column (home, ok or no) and `[data-dragging]` on the page.
 - `.minimap` (`[data-minimap]`) on the canvas's map; `.branch-label` on each branch's zoomed-out label (below 50% the canvas carries the class far).
 - `.changed` on the card and node (and the needs-attention row) the last action wrote to, live only.
 - `[data-node-count]` and `[data-fold-tree-count]` on the page: they must be equal.

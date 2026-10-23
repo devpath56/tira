@@ -345,7 +345,7 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .links{display:grid;gap:6px;margin-top:12px}.links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block);min-width:78px}.links a{font-weight:600;color:var(--accent)}.links a:hover{text-decoration:underline}
 .att-row .by{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)}.att-row .by a{font-weight:600;color:var(--accent)}.att-row .ready{display:inline;font-size:11px}
 .chip.blocks{color:var(--block);border-color:var(--block);background:var(--block-bg)}
-.blocked-by{display:grid;gap:6px;margin:0 0 10px;font-weight:600;font-size:13px}.blocked-by input{font:500 14px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.blocked-by input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.blocked-by,.proof-of-work{display:grid;gap:6px;margin:0 0 10px;font-weight:600;font-size:13px}.blocked-by input,.proof-of-work input{font:500 14px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.blocked-by input:focus,.proof-of-work input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 .your-action .blocked-by+.fills{margin:-2px 0 10px}
 .wait-ring{width:12px;height:12px;border-radius:999px;border:1.5px dashed var(--warn);flex:none}
 .meter{flex:1;min-width:40px;height:6px;border-radius:3px;background:var(--gone-bg);overflow:hidden;display:flex}.meter i{display:block;height:100%}
@@ -361,6 +361,9 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .more-btn{display:block;cursor:pointer;margin:2px 0 8px;padding:8px 10px;border:1px dashed var(--line-2);border-radius:var(--r);font-size:13px;font-weight:600;color:var(--accent-text);text-align:center;transition:background .15s var(--ease)}.more-btn:hover{background:var(--hover)}
 .more-btn .m-hide,.more-tog:checked~.more-btn .m-show{display:none}.more-tog:checked~.more-btn .m-hide{display:inline}.more-tog:focus-visible~.more-btn{outline:2px solid var(--accent);outline-offset:2px}
 .card{transition:transform .2s var(--ease),box-shadow .2s var(--ease),border-color .2s var(--ease)}.card:hover{border-color:var(--line-2);box-shadow:var(--shadow-raised);transform:translateY(-1px)}
+.cols[data-moves] .card[data-card-key]{cursor:grab;-webkit-user-drag:none;-webkit-touch-callout:none}html[data-dragging],html[data-dragging] .card,html[data-dragging] .col{cursor:grabbing;user-select:none;-webkit-user-select:none}
+.card.drag-src{opacity:.35}.drag-ghost{position:fixed;z-index:40;left:0;top:0;margin:0;pointer-events:none;box-shadow:var(--shadow-raised);rotate:1.5deg;scale:1.02;transition:none}
+.col[data-drop]{transition:background .15s var(--ease),outline-color .15s var(--ease),opacity .15s var(--ease)}.col[data-drop=ok]{outline:2px dashed var(--line-2);outline-offset:-2px}.col[data-drop=ok].drop-over{outline-color:var(--accent);background:var(--accent-bg)}.col[data-drop=no]{opacity:.45}@media (prefers-reduced-motion:reduce){.drag-ghost{rotate:none;scale:none}}
 .card .t{font-weight:600;font-size:14px;overflow-wrap:anywhere}
 .card .row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--mut);font-size:12px}
 .chip{display:inline-flex;align-items:center;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}
@@ -725,13 +728,13 @@ const LEGEND = `<span class="legend" aria-hidden="true"><span><i class="m-done">
 // The board: one view, two styles, switched in its own bar with CSS alone (radio inputs).
 // Kanban by default; live, app.mjs remembers the choice so it survives the reload after
 // every action.
-function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext): string {
+function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext, moves?: Record<string, string>): string {
   const styles: [string, string, string][] = [["kanban", "Kanban", ICON.kanban], ["graph", "Graph", ICON.graph]];
   const radios = styles.map(([s, label]) => `<input class="view-radio" type="radio" name="board-style" id="bv-${s}"${s === "kanban" ? " checked" : ""} aria-label="${label} style" data-board-style="${s}">`).join("");
   const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
   return radios
     + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
-    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed, ext)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed, ext, moves)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
 }
 
 // ---------- history ----------
@@ -1075,7 +1078,9 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 // acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
 // started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
-function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext): string {
+// Live, cards drag between columns (drag.mjs): the board carries what each move means under
+// today's rules (`moves`, from the server) and each status column its state.
+function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext, moves?: Record<string, string>): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
   // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
   const movedAt = (n: Placed) => (trail.get(n.row.key) ?? []).filter((x) => !x.refused).at(-1)?.seq ?? 0;
@@ -1102,9 +1107,11 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${wraps(r.id)}</div>`
         + `<div class="row">${parent}${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     });
-    return `<div class="col"><div class="ch"><span class="dot${s === "in_progress" && here.length > 0 ? " pulse" : ""}" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${capped(s, cards) || `<p class="empty">Nothing here</p>`}</div>`;
+    const colAttr = moves ? ` data-col="${s}"` : "";
+    return `<div class="col"${colAttr}><div class="ch"><span class="dot${s === "in_progress" && here.length > 0 ? " pulse" : ""}" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${capped(s, cards) || `<p class="empty">Nothing here</p>`}</div>`;
   }).join("");
-  return `<div class="cols">${ideasColumn(ghosts, trail, changed)}${cols}</div>`;
+  const drag = moves === undefined ? "" : ` data-moves="${esc(JSON.stringify(moves))}"`;
+  return `<div class="cols"${drag}>${ideasColumn(ghosts, trail, changed)}${cols}</div>`;
 }
 
 // Done and Dropped only grow: past SHOWN cards, the newest stay and the rest wait behind
@@ -1345,8 +1352,9 @@ export interface RenderOptions {
   // `changed`: the keys the last action wrote to; their cards and boxes glow once.
   // `query`: the project ("w=…") when it isn't the one the server started on, kept on every link.
   // `actor`: who the page acts as; `user`: who is signed in with GitHub (shown in their place);
-  // `token`: the page's own, for its forms.
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string };
+  // `token`: the page's own, for its forms. `moves`: what a drag between the Kanban's columns
+  // means ("node:unstarted>in_progress" → START), from today's rules (command.ts dragMoves).
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string> };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -1430,7 +1438,7 @@ ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}${esc(name)}</h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
-<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext) : `<p class="empty board-empty">No tasks yet. Add the first with <code>tira create</code>; Sync then mirrors them to Jira and links their pull requests.</p>`}</section>
+<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : `<p class="empty board-empty">No tasks yet. Add the first with <code>tira create</code>; Sync then mirrors them to Jira and links their pull requests.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
