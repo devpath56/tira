@@ -38,6 +38,7 @@ import { esc } from "../render/escape.ts";
 import { brand, CSS, projectMark, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from "../render/html.ts";
 import { quote } from "./command.ts";
 import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
+import { SIGNIN_CSP } from "./csp.ts";
 
 export const SESSION_COOKIE = "tira_session";
 // Setup's buttons: copy (a tick once copied), and show / hide, as SF Symbols draw them
@@ -186,7 +187,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (me.actor) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: await nextStep(me.login) });
     const flash = c.takeFlash(url.searchParams.get("r") ?? "");
     const a = access(env);
-    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), ...(a.admin ? { admin: { login: a.admin, ...(a.contact ? { contact: a.contact } : {}) } } : {}), ...(flash ? { flash } : {}) }));
+    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), ...(a.admin ? { admin: { login: a.admin, ...(a.contact ? { contact: a.contact } : {}) } } : {}), ...(flash ? { flash } : {}) }), { "Content-Security-Policy": SIGNIN_CSP });
   };
 
   // ---------- sign in with GitHub ----------

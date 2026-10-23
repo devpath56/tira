@@ -379,7 +379,7 @@ const MUTANTS: Mutant[] = [
   { name: "serve: writes need no token", file: "src/serve/server.ts", find: "    if (!safeEqual(form.get(\"token\") ?? \"\", token)) { send(res, 403, text,", replace: "    if (false) { send(res, 403, text," },
   { name: "serve: any entity type accepted", file: "src/serve/server.ts", find: "  if (!verb || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined) || id === \"\") return undefined;", replace: "  if (!verb || id === \"\") return undefined;" },
   { name: "serve: a posted actor is honoured", file: "src/serve/server.ts", find: "const cmd = commandOf(ask, ws.stream, actor);", replace: "const cmd = commandOf(ask, ws.stream, form.get(\"actor\") ?? actor);" },
-  { name: "serve: inline scripts allowed", file: "src/serve/server.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
+  { name: "serve: inline scripts allowed", file: "src/serve/csp.ts", find: "script-src 'self';", replace: "script-src 'self' 'unsafe-inline';" },
   { name: "serve: Origin null on the page's own posts", file: "src/serve/server.ts", find: "\"Referrer-Policy\": \"same-origin\"", replace: "\"Referrer-Policy\": \"no-referrer\"" },
   { name: "serve: the dry run ignores fields still to fill", file: "src/serve/server.ts", find: "payload: verb.field ? { [verb.field.name]: \"(you fill this in)\" } : {} })", replace: "payload: {} })" },
   { name: "serve: confirm form without the token", file: "src/serve/server.ts", find: "const hidden = [[\"token\", opts.token], ", replace: "const hidden = [" },
@@ -803,6 +803,9 @@ const MUTANTS: Mutant[] = [
   { name: "ui: ☰ doesn't hide the sidebar", file: "src/render/html.ts", find: "#side-shut:checked~main[data-stream]>.top{display:none}", replace: "" },
   { name: "ui: the sidebar forgets it was hidden", file: "src/serve/theme.mjs", find: "    if (was !== null) c.checked = was === \"1\";\n", replace: "" },
   { name: "accounts: unlinking GitHub leaves its token in the database", file: "src/sync/accounts-pg.ts", find: "      await c.query(`DELETE FROM ${s}.account_github WHERE lower(login) = lower($1)`, [login]);\n", replace: "", needs: "postgres" },
+  { name: "signin: Continue with GitHub is stopped at tira", file: "src/serve/integrations.ts", find: "...(flash ? { flash } : {}) }), { \"Content-Security-Policy\": SIGNIN_CSP });", replace: "...(flash ? { flash } : {}) }));" },
+  { name: "signin: every page lets forms go on to GitHub", file: "src/serve/server.ts", find: "import { CSP } from \"./csp.ts\";\n", replace: "import { SIGNIN_CSP as CSP } from \"./csp.ts\";\n" },
+  { name: "signin: the way in lets forms go anywhere on GitHub", file: "src/serve/csp.ts", find: "\"form-action 'self' https://github.com/login/oauth/authorize\"", replace: "\"form-action 'self' https://github.com\"" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.

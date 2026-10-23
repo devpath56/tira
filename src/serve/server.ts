@@ -43,10 +43,10 @@ import { appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccoun
 import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
+import { CSP } from "./csp.ts";
 
 export { PAGE_VERBS } from "./command.ts";
-
-export const CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+export { CSP } from "./csp.ts";
 // Referrer-Policy is same-origin, not no-referrer: under no-referrer browsers send
 // `Origin: null` on form posts, and the same-origin check below would refuse the page's
 // own writes (found by submitting a real form, 2026-10-20).
