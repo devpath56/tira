@@ -643,7 +643,7 @@ const MUTANTS: Mutant[] = [
   { name: "access: the first person in isn't the admin", file: "src/serve/integrations.ts", find: "    if (first) await saveAccess((x) => (x.admin === undefined ? { ...x, admin: me.login } : x), env); // the first one in, even if two arrive at once\n", replace: "" },
   { name: "access: removing someone leaves their sessions", file: "src/serve/integrations.ts", find: "      await signOutEverywhere(who2, env);\n", replace: "" },
   { name: "access: the admin can be removed", file: "src/serve/integrations.ts", find: "    if (what === \"remove\" && !isAdmin(a, who2)) {", replace: "    if (what === \"remove\") {" },
-  { name: "serve: the page token changes on every restart", file: "src/cli/cli.ts", find: "token: pageToken(io.env), ", replace: "" },
+  { name: "serve: the page token changes on every restart", file: "src/cli/cli.ts", find: "token: pageToken(io.env), ", replace: "", needs: "postgres" },
   { name: "header: zero counts show", file: "src/render/html.ts", find: "(n > 0 ? [li(n)] : [])", replace: "[li(n)]" },
   // Jira's own issues brought in (2026-10-22), and both sides on record so neither is moved
   // until it changes
