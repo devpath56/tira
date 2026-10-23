@@ -325,6 +325,15 @@ class FakeGitHubAuth implements GitHubAuthApi {
   polls = 0;
   approveAfter = 1; // polls that come back "not yet" first
   login = "isha-gh"; // who GitHub says signed in
+  // the direct way: GitHub's page, and the one-time code it sends people back with
+  authorizeUrl(clientId: string, redirectUri: string, state: string) {
+    return `https://github.example/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+  }
+  async exchange(clientId: string, secret: string, code: string) {
+    if (secret !== "gh-secret") throw new Error("GitHub doesn't know tira's app: check its Client ID and secret");
+    if (code !== "gh-code") throw new Error("GitHub's code was used or too old: sign in again");
+    return "gho-token";
+  }
   async start() {
     return { deviceCode: "dev-123", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 };
   }
@@ -513,6 +522,83 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     // sign out drops the session
     await s.post("/signout", {});
     assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
+  } finally {
+    await s.done();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Sign in with GitHub in one click, once tira's app has its secret: straight to GitHub's page and back; the way back works once, in the browser that left, at localhost; the sign-in pages have no theme switch", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tira-home-"));
+  const s = await serving(home);
+  try {
+    await s.post("/integrations/setup", { github_client_id: "Iv1.gh", github_secret: "gh-secret" });
+    // the way in has no theme switch (that's Profile settings'); it follows the computer, or this browser's choice
+    const landing = (await s.http("GET", "/welcome")).body;
+    assert.doesNotMatch(landing, /data-theme-switch|class="land-top"/);
+    assert.match(landing, /<input class="view-radio" type="radio" name="theme" id="th-system" checked[^]*?<script type="module" src="\/theme\.mjs"><\/script>/);
+    // Continue with GitHub: off to GitHub's page, with a state, and the same state in a cookie for this browser
+    const leave = async () => {
+      const start = await s.post("/signin/start", {});
+      assert.equal(start.status, 303);
+      const to = new URL(String(start.headers.location));
+      assert.equal(`${to.origin}${to.pathname}`, "https://github.example/login/oauth/authorize");
+      assert.equal(to.searchParams.get("client_id"), "Iv1.gh");
+      assert.equal(to.searchParams.get("redirect_uri"), `http://localhost:${s.port}/signin/github/callback`);
+      const state = to.searchParams.get("state") ?? "";
+      assert.match(state, /^[0-9a-f]{48}$/);
+      assert.equal(String(start.headers["set-cookie"]), `tira_signin=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600`);
+      return state;
+    };
+    const comeBack = (state: string, q: string) => s.http("GET", `/signin/github/callback?${q}&state=${state}`);
+    // back in another browser (without the cookie): refused, and no one signed in
+    const other = await leave();
+    s.signIn("");
+    const elsewhere = await comeBack(other, "code=gh-code");
+    assert.equal(elsewhere.headers["set-cookie"], undefined);
+    assert.equal(await s.flash(elsewhere), "That GitHub sign-in didn't start here, or took too long: sign in again.");
+    // turned down on GitHub, or a code GitHub won't take: back to the landing, saying so
+    const no = await leave();
+    s.signIn(`tira_signin=${no}`);
+    assert.equal(await s.flash(await comeBack(no, "error=access_denied")), "You turned it down on GitHub: sign in again when you're ready.");
+    const old = await leave();
+    s.signIn(`tira_signin=${old}`);
+    assert.equal(await s.flash(await comeBack(old, "code=used-code")), "GitHub sign-in stopped (GitHub's code was used or too old: sign in again).");
+    // the real way back: signed in as the person GitHub says, with no code to type
+    const state = await leave();
+    s.signIn(`tira_signin=${state}`);
+    const back = await comeBack(state, "code=gh-code");
+    assert.equal(back.status, 303);
+    assert.match(String(back.headers.location), /^\/connect\?r=\d+$/); // no repo yet: connect one next
+    const setCookie = String(back.headers["set-cookie"]);
+    assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
+    s.signIn(setCookie.split(";")[0] ?? "");
+    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    // the same way back again: refused (a state works once)
+    const session = s.cookie();
+    s.signIn(`tira_signin=${state}`);
+    assert.equal(await s.flash(await comeBack(state, "code=gh-code")), "That GitHub sign-in didn't start here, or took too long: sign in again.");
+    s.signIn(session);
+    // the secret is kept and never shown; saving the Client ID alone keeps it
+    const settings = (await s.http("GET", "/settings")).body;
+    assert.match(settings, /<input type="password" name="github_secret" value="" autocomplete="off" placeholder="Saved">/);
+    assert.doesNotMatch(settings, /gh-secret/);
+    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh" })), "Saved.");
+    assert.equal(appKeys(s.env).github?.secret, "gh-secret");
+    // left from another project: GitHub comes back to one address, and tira takes it on to that project
+    s.signOut();
+    await s.d.submit({ stream: "side-project", kind: "create", entity: { type: "node", id: "site" }, actor: "isha", payload: {} });
+    const fromSide = await s.post("/signin/start?w=side-project", {});
+    const sideState = new URL(String(fromSide.headers.location)).searchParams.get("state") ?? "";
+    s.signIn(`tira_signin=${sideState}`);
+    const hop = await comeBack(sideState, "code=gh-code");
+    assert.equal(hop.headers.location, `/signin/github/callback?code=gh-code&state=${sideState}&w=side-project`);
+    const inSide = await s.http("GET", String(hop.headers.location));
+    assert.match(String(inSide.headers.location), /^\/\?r=\d+&w=side-project$|^\/connect\?r=\d+&w=side-project$/);
+    // away from localhost (where tira's app sends people back), GitHub's code instead
+    s.signOut();
+    const there = await s.http("POST", "/signin/start", "token=k", `127.0.0.1:${s.port}`);
+    assert.match(there.body, /<code data-user-code>ABCD-1234<\/code>/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });

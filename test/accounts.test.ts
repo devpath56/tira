@@ -70,14 +70,14 @@ if (!url) {
   test("postgres: every account kept in the database, sealed; nothing in this computer's file", async () => {
     const env = pgEnv(fresh());
     try {
-      await saveAppKeys({ github: { clientId: "Iv1.gh" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } }, env);
+      await saveAppKeys({ github: { clientId: "Iv1.gh", secret: "gh-secret-1" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } }, env);
       await saveGithubAuth("isha-gh", { token: "gho-token-1", name: "Isha" }, env);
       await saveAtlassianAuth("isha-gh", { access: "at-token", refresh: "rt-token", expiresAt: 1, site: "https://acme.atlassian.net", cloudId: "c1" }, env);
       await saveAccess(() => ({ admin: "isha-gh", members: ["octo"], contact: { name: "Isha", email: "isha@example.com" } }), env);
       await saveDisplayName("isha-gh", "Isha M", env);
       await saveSession("session-1", "isha-gh", env);
       await refreshAccounts(env);
-      assert.deepEqual(appKeys(env), { github: { clientId: "Iv1.gh" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } });
+      assert.deepEqual(appKeys(env), { github: { clientId: "Iv1.gh", secret: "gh-secret-1" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } });
       assert.deepEqual(githubAuth("isha-gh", env), { token: "gho-token-1", name: "Isha" });
       assert.equal(atlassianAuth("isha-gh", env)?.refresh, "rt-token");
       assert.deepEqual(access(env), { admin: "isha-gh", members: ["octo"], contact: { name: "Isha", email: "isha@example.com" } });
@@ -89,7 +89,10 @@ if (!url) {
         ...(await pg.query(`SELECT * FROM ${env.TIRA_SCHEMA}.account_apps`)).rows, ...(await pg.query(`SELECT * FROM ${env.TIRA_SCHEMA}.account_github`)).rows,
         ...(await pg.query(`SELECT * FROM ${env.TIRA_SCHEMA}.account_atlassian`)).rows, ...(await pg.query(`SELECT * FROM ${env.TIRA_SCHEMA}.account_sessions`)).rows,
       ]);
-      assert.doesNotMatch(raw, /SECRET-xyz|gho-token-1|at-token|rt-token|session-1/);
+      assert.doesNotMatch(raw, /SECRET-xyz|gh-secret-1|gho-token-1|at-token|rt-token|session-1/);
+      // saving the Client ID alone keeps the secret
+      await saveAppKeys({ github: { clientId: "Iv1.gh2" } }, env);
+      assert.deepEqual(appKeys(env).github, { clientId: "Iv1.gh2", secret: "gh-secret-1" });
       assert.match(raw, /"token":"v1\./);
       // and this computer's file holds none of it
       let file = "";
@@ -181,6 +184,25 @@ if (!url) {
     }
   });
 
+  test("postgres: account tables made before tira's GitHub app kept a secret get its column on first use, and the secret is sealed", async () => {
+    const schema = fresh();
+    const before = new PostgresAccounts(url, schema, KEY);
+    let after: PostgresAccounts | undefined;
+    try {
+      await before.saveApps({ github: { clientId: "Iv1.gh" } });
+      await before.query(`ALTER TABLE ${schema}.account_apps DROP COLUMN github_secret`); // as the tables were made on 2026-10-22
+      after = new PostgresAccounts(url, schema, KEY);
+      await after.saveApps({ github: { clientId: "Iv1.gh", secret: "gh-secret-2" } });
+      assert.deepEqual(after.snapshot().apps?.github, { clientId: "Iv1.gh", secret: "gh-secret-2" });
+      const raw = JSON.stringify((await after.query(`SELECT github_secret FROM ${schema}.account_apps`)).rows);
+      assert.match(raw, /v1\./);
+      assert.doesNotMatch(raw, /gh-secret-2/);
+    } finally {
+      await after?.close();
+      await before.close();
+    }
+  });
+
   test("postgres: a login that may use the account tables but create nothing works once the owner has made them (production's least-privilege tira login)", async () => {
     const schema = fresh();
     const owner = new PostgresAccounts(url, schema, KEY);
@@ -208,6 +230,8 @@ if (!url) {
   test("postgres: two people's tira serve on one database: a sign-in on one computer, the people list from the other", async () => {
     const schema = fresh();
     class FakeGitHub implements GitHubAuthApi {
+      authorizeUrl() { return "https://github.example/authorize"; }
+      async exchange() { return "gho-token"; }
       async start() { return { deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 0, expiresIn: 900 }; }
       async poll() { return { token: "gho-token" }; }
       async user() { return { login: "isha-gh", name: "Isha" }; }

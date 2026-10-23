@@ -80,7 +80,7 @@ async function pages(): Promise<string> {
   await saveAppKeys({ github: { clientId: "Iv1.docs" }, atlassian: { clientId: "docs", secret: "docs-secret" } }, env);
   await saveSession("docs-session", "isha", env);
   await saveAccess(() => ({ admin: "isha", contact: { name: "Isha", email: "isha@example.com" } }), env);
-  const githubAuth = { start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
+  const githubAuth = { authorizeUrl: () => "https://github.example/authorize", exchange: async () => "gho-token", start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
   const signInServer = tiraServer({ store, registry, stream: "t", actor: "isha", token: "k", links: { githubAuth, env } });
   const ask = async (s: typeof server, cookie?: string) => {
     await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));

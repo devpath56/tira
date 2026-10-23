@@ -1,5 +1,5 @@
 // The way into `tira serve` for people who sign in: a landing page (one button: Continue with
-// GitHub), GitHub's code to approve, then one step to connect the workspace to a GitHub repo and,
+// GitHub), straight to GitHub and back once tira's app has its secret (else GitHub's code to approve), then one step to connect the workspace to a GitHub repo and,
 // if you use one, a Jira project; then the board.
 //
 // Apple's Human Interface Guidelines, as in debugAssist: a material card on a quiet background,
@@ -116,8 +116,9 @@ export function landingPage(o: LandingOpts): string {
     : `<div class="land-mark">${BRAND_MARK}</div><h1>Set up sign-in</h1>${flashHtml(o.flash)}`
       + `<form method="post" action="/integrations/setup" data-setup-github>${hiddenToken(o.token)}<input type="hidden" name="back" value="/welcome">`
       + `<label class="land-field"><span>GitHub Client ID</span><input type="text" name="github_client_id" autocomplete="off" spellcheck="false" required></label>`
+      + `<label class="land-field"><span>GitHub Secret (optional: sign in in one click)</span><input type="password" name="github_secret" autocomplete="off"></label>`
       + `<button class="land-btn blue" type="submit">Continue</button></form>`
-      + `<details class="land-how"><summary>Where do I find it?</summary><ol><li>GitHub → Settings → Developer settings → OAuth Apps → New.</li><li>Homepage <code>http://localhost:${esc(o.port)}</code>, callback <code>http://localhost:${esc(o.port)}/</code>.</li><li>Register, tick Enable Device Flow, copy the Client ID.</li></ol></details>`;
+      + `<details class="land-how"><summary>Where do I find it?</summary><ol><li>GitHub → Settings → Developer settings → OAuth Apps → New.</li><li>Homepage <code>http://localhost:${esc(o.port)}</code>, callback <code>http://localhost:${esc(o.port)}/</code>.</li><li>Register, tick Enable Device Flow, copy the Client ID.</li><li>For sign-in in one click: Generate a new client secret, and paste it too.</li></ol></details>`;
   return page("Sign in to tira", `<div class="land-card" data-landing>${brandSide()}<section class="land-form">${form}</section></div>`);
 }
 

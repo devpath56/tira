@@ -40,6 +40,8 @@ import { quote } from "./command.ts";
 import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
 
 export const SESSION_COOKIE = "tira_session";
+// a direct GitHub sign-in under way, in the browser that started it (integrations.ts: signinStart)
+const SIGNIN_COOKIE = "tira_signin";
 
 type Env = Record<string, string | undefined>;
 type Flash = { ok: boolean; text: string };
@@ -161,8 +163,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const { env, gh, at, jiraOf, githubOf } = acc;
   const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number }>();
   const pendingJira = new Map<string, { login: string; until: number; back: string; tab: boolean }>();
+  const pendingGithub = new Map<string, { until: number; w: string | null }>(); // the direct way's sign-ins under way, by state: until when, and the project it left from
   const back = (res: ServerResponse, to: string, f?: Flash) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: f ? `${to}?r=${c.flash(f)}` : to });
   const redirectUri = (host: string) => `http://${host}/integrations/jira/callback`;
+  const githubBack = (host: string) => `http://${host}/signin/github/callback`;
 
 
   // the step after signing in: connect a repo while the workspace has none, else the board
@@ -181,11 +185,22 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const signinPage = (res: ServerResponse, id: string, p: { userCode: string; verifyAt: string; interval: number }, note?: string) =>
     c.send(res, 200, html, codePage({ token: c.token, id, userCode: p.userCode, verifyAt: p.verifyAt, interval: p.interval, ...(note ? { note } : {}) }));
 
-  const signinStart = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+  const signinStart = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
     if (form === undefined) return;
     const clientId = appKeys(env).github?.clientId;
     if (!clientId) return back(res, "/welcome", { ok: false, text: "GitHub sign-in isn't set up yet: add tira's GitHub app first." });
+    // the direct way, once tira's app has its secret: off to GitHub's page and straight back, at
+    // localhost (where tira's GitHub app sends people back to). The state rides in a cookie too, so
+    // only the browser that started a sign-in can finish it.
+    const secret = appKeys(env).github?.secret;
+    if (secret && /^localhost(:\d+)?$/.test(host)) {
+      const now = Date.now();
+      for (const [s, p] of pendingGithub) if (p.until < now) pendingGithub.delete(s);
+      const state = randomBytes(24).toString("hex");
+      pendingGithub.set(state, { until: now + 10 * 60_000, w: url.searchParams.get("w") });
+      return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: gh.authorizeUrl(clientId, githubBack(host), state), "Set-Cookie": `${SIGNIN_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600` });
+    }
     try {
       const s = await gh.start(clientId);
       const id = randomBytes(16).toString("hex");
@@ -194,6 +209,50 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     } catch (err) {
       back(res, "/welcome", { ok: false, text: `GitHub sign-in didn't start (${(err as Error).message}).` });
     }
+  };
+
+  // GitHub, back from the direct way: its one-time code, for a token, once, in the browser that left
+  const signinBack = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
+    const state = url.searchParams.get("state") ?? "";
+    const p = pendingGithub.get(state);
+    // GitHub comes back to one address: first, to the project the sign-in left from
+    if (p?.w && !url.searchParams.has("w")) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/signin/github/callback${url.search}&w=${encodeURIComponent(p.w)}` });
+    pendingGithub.delete(state); // a state works once
+    const keys = appKeys(env).github;
+    if (!keys?.secret || state === "" || p === undefined || p.until < Date.now() || cookieOf(req, SIGNIN_COOKIE) !== state) {
+      return back(res, "/welcome", { ok: false, text: "That GitHub sign-in didn't start here, or took too long: sign in again." });
+    }
+    const error = url.searchParams.get("error");
+    if (error) return back(res, "/welcome", { ok: false, text: error === "access_denied" ? "You turned it down on GitHub: sign in again when you're ready." : `GitHub sign-in stopped: ${error}.` });
+    try {
+      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false);
+    } catch (err) {
+      back(res, "/welcome", { ok: false, text: `GitHub sign-in stopped (${(err as Error).message}).` });
+    }
+  };
+
+  // In, with GitHub's token (either way): only the admin and the people they added get in (the first
+  // person in becomes the admin); anyone else is told who to ask, and tira keeps nothing of theirs.
+  // fragment: signin.mjs asked, and goes where the answer says.
+  const enter = async (res: ServerResponse, token: string, fragment: boolean) => {
+    const me = await gh.user(token);
+    const a = access(env);
+    if (!mayEnter(a, me.login)) {
+      const key = c.flash({ ok: false, text: `${me.login} doesn't have access to this tira yet. ${askAdmin(a)}` });
+      return fragment ? c.send(res, 200, html, `<div data-go="/welcome?r=${key}"></div>`) : back(res, "/welcome", c.takeFlash(key));
+    }
+    const first = a.admin === undefined;
+    if (first) await saveAccess((x) => (x.admin === undefined ? { ...x, admin: me.login } : x), env); // the first one in, even if two arrive at once
+    await saveGithubAuth(me.login, { token, ...(me.name ? { name: me.name } : {}) }, env);
+    const session = randomBytes(32).toString("hex");
+    await saveSession(session, me.login, env);
+    const cookie = `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`;
+    const key = c.flash({ ok: true, text: first
+      ? `Signed in as ${me.login}: you're this tira's admin. Add the people who may sign in in Profile settings.`
+      : `Signed in as ${me.login}. tira records your changes as ${me.login}.` });
+    const go = `${await nextStep(me.login)}?r=${key}`;
+    if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
+    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: go, "Set-Cookie": cookie });
   };
 
   const signinPoll = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
@@ -218,27 +277,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         if (got.wait > 0) p.interval = got.wait;
         return fragment ? c.send(res, 202, html, `<div data-waiting data-interval="${p.interval}"></div>`) : signinPage(res, id, p, "Not approved on GitHub yet.");
       }
-      const me = await gh.user(got.token);
       pendingSignIns.delete(id);
-      // only the admin and the people they added get in (the first person in becomes the admin);
-      // anyone else is told who to ask, and tira keeps nothing of theirs
-      const a = access(env);
-      if (!mayEnter(a, me.login)) {
-        const key = c.flash({ ok: false, text: `${me.login} doesn't have access to this tira yet. ${askAdmin(a)}` });
-        return fragment ? c.send(res, 200, html, `<div data-go="/welcome?r=${key}"></div>`) : back(res, "/welcome", c.takeFlash(key));
-      }
-      const first = a.admin === undefined;
-      if (first) await saveAccess((x) => (x.admin === undefined ? { ...x, admin: me.login } : x), env); // the first one in, even if two arrive at once
-      await saveGithubAuth(me.login, { token: got.token, ...(me.name ? { name: me.name } : {}) }, env);
-      const session = randomBytes(32).toString("hex");
-      await saveSession(session, me.login, env);
-      const cookie = `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`;
-      const key = c.flash({ ok: true, text: first
-        ? `Signed in as ${me.login}: you're this tira's admin. Add the people who may sign in in Profile settings.`
-        : `Signed in as ${me.login}. tira records your changes as ${me.login}.` });
-      const go = `${await nextStep(me.login)}?r=${key}`;
-      if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
-      c.send(res, 303, "text/plain; charset=utf-8", "", { Location: go, "Set-Cookie": cookie });
+      await enter(res, got.token, fragment);
     } catch (err) {
       fail(`GitHub sign-in stopped (${(err as Error).message}).`);
     }
@@ -337,10 +377,11 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const setup = `<details class="grp" data-int="setup" id="setup"${keys.github && keys.atlassian ? "" : " open"}><summary class="grp-h">Setup</summary><p class="grp-desc">${esc(DESC.setup)}</p>`
       + `<form method="post" action="/integrations/setup" class="grp-list">${t}<input type="hidden" name="back" value="/settings">`
       + `<label class="grp-row"><span class="grp-k">GitHub Client ID</span><input type="text" name="github_client_id" value="${esc(keys.github?.clientId ?? "")}" autocomplete="off" spellcheck="false"></label>`
+      + `<label class="grp-row"><span class="grp-k">GitHub Secret</span><input type="password" name="github_secret" value="" autocomplete="off" placeholder="${keys.github?.secret ? "Saved" : "Optional: sign in in one click"}"></label>`
       + `<label class="grp-row"><span class="grp-k">Atlassian Client ID</span><input type="text" name="atlassian_client_id" value="${esc(keys.atlassian?.clientId ?? "")}" autocomplete="off" spellcheck="false"></label>`
       + `<label class="grp-row"><span class="grp-k">Atlassian Secret</span><input type="password" name="atlassian_secret" value="" autocomplete="off"${keys.atlassian ? ` placeholder="Saved"` : ""}></label>`
       + `<div class="grp-row"><span class="grp-k"></span><button class="act primary" type="submit">Save</button></div></form>`
-      + `<div class="grp-foot">Kept privately on this machine. The secret is never shown again. How to make these apps: ask the Help centre.</div></details>`;
+      + `<div class="grp-foot">Kept privately, sealed. A secret is never shown again. How to make these apps: ask the Help centre.</div></details>`;
 
     const body = `<header class="int-head"><h1>Profile settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + accountsCard + appearance + people + setup;
     c.send(res, 200, html, settingsPage({ title: "Profile settings", label: "Profile settings", sections: [["account", "Profile"], ["accounts", "Accounts"], ["appearance", "Appearance"], ["people", "People"], ["setup", "Setup"]] }, body, helpPanel(portOf(host), shown), scripts));
@@ -466,10 +507,13 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     // once GitHub sign-in is on, only someone signed in may change tira's apps
     if (now.github && !who(req).login) return back(res, to, { ok: false, text: "Sign in with GitHub to change tira's apps." });
     const ghId = (form.get("github_client_id") ?? "").trim();
+    const ghSecret = (form.get("github_secret") ?? "").trim();
     const aId = (form.get("atlassian_client_id") ?? "").trim();
     const aSecret = (form.get("atlassian_secret") ?? "").trim();
     const next: Parameters<typeof saveAppKeys>[0] = {};
-    if (ghId) next.github = { clientId: ghId };
+    // a secret left empty keeps the one saved (the direct sign-in; without one, GitHub's code)
+    const keptSecret = ghSecret || now.github?.secret;
+    if (ghId) next.github = { clientId: ghId, ...(keptSecret ? { secret: keptSecret } : {}) };
     if (aId && (aSecret || now.atlassian?.secret)) next.atlassian = { clientId: aId, secret: aSecret || (now.atlassian?.secret as string) };
     if (aId && !aSecret && !now.atlassian?.secret) return back(res, to, { ok: false, text: "Add the Atlassian app's secret too." });
     await saveAppKeys(next, env);
@@ -645,6 +689,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/jira/site": jiraSite,
     "POST /integrations/jira/disconnect": jiraDisconnect,
     "POST /signin/start": signinStart,
+    "GET /signin/github/callback": signinBack,
     "POST /signin/poll": signinPoll,
     "POST /signout": signout,
     "POST /sync": syncPost,
@@ -689,7 +734,7 @@ const SEND = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-
 function helpPanel(port: string, name?: string): string {
   // a question, its answer, and the words someone might type for it
   const qa: [string, string, string][] = [
-    ["How do I make tira's GitHub app?", `On GitHub: Settings → Developer settings → OAuth Apps → New. Homepage <code>http://localhost:${esc(port)}</code>, callback <code>http://localhost:${esc(port)}/</code>. Tick Enable Device Flow, then paste its Client ID under Setup.`, "github app oauth client id device flow setup create"],
+    ["How do I make tira's GitHub app?", `On GitHub: Settings → Developer settings → OAuth Apps → New. Homepage <code>http://localhost:${esc(port)}</code>, callback <code>http://localhost:${esc(port)}/</code>. Tick Enable Device Flow, then paste its Client ID under Setup. For sign-in in one click (straight to GitHub and back, no code), generate a client secret there too and paste it beside the Client ID.`, "github app oauth client id secret device flow setup create sign in code direct"],
     ["How do I make the Atlassian app for Jira?", `In Atlassian's developer console: Create → OAuth 2.0. Jira scopes <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code>. Callback <code>http://localhost:${esc(port)}/integrations/jira/callback</code>. Paste its Client ID and secret under Setup.`, "atlassian jira app oauth scopes console client secret create"],
     ["Where are my keys and tokens kept?", "Only on this machine, in tira's private store. The Atlassian secret is never shown again, and nothing goes into the project's log.", "keys tokens secret stored kept saved private safe credentials password"],
     ["What does Sync do?", "It links pull requests that name a task, makes a Jira issue for each task, and brings moves made in Jira back as commands, which tira's rules may refuse. A merged pull request counts as proof of work.", "sync syncing pull request pr issue mirror update proof merge"],
