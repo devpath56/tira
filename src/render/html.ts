@@ -261,6 +261,7 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 .set-link{padding:6px 10px;border-radius:var(--r);font-size:14px;color:var(--mut)}.set-link:hover{background:var(--hover);color:var(--fg)}
 .set-nav .side-foot{margin:auto 0 0;padding-top:10px;border-top:1px solid var(--line)}
 .set-main{min-width:0;padding:32px 48px 80px}.set-main>.flash{margin:0 0 24px}
+.settings-page .set-main>*{width:100%;max-width:720px;margin-inline:auto}.set-main .grp-h{font-size:15px;padding:0 0 2px;border-bottom:0}.set-main .grp-desc{margin:2px 0 10px}
 .set-help{position:sticky;top:0;height:100vh;overflow-y:auto;padding:20px 16px;background:var(--side-bg);border-left:1px solid var(--line)}
 .set-help[data-help]{padding:0;background:var(--panel);scrollbar-width:thin}
 .help-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;margin:0;padding:18px 18px 20px;list-style:none;cursor:pointer;color:var(--btn-fg);background:linear-gradient(150deg,var(--btn),color-mix(in srgb,var(--btn) 72%,#0b1e40))}
@@ -318,6 +319,8 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 @media (max-width:760px){.np-form .grp-k{flex-basis:100%}.np-steps{display:none}}
 @media (max-width:1180px){.settings-page{grid-template-columns:220px minmax(0,1fr)}.set-help{grid-column:2;position:static;height:auto;border-left:0;border-top:1px solid var(--line);padding:24px 48px}.settings-page:has(.hc:not([open])){grid-template-columns:220px minmax(0,1fr)}.hc:not([open]) .help-head{flex-direction:row}.hc:not([open]) .hc-t{writing-mode:horizontal-tb;transform:none}.set-help[data-help]{padding:0}.help-head{position:static}.hc-body{min-height:0}.hc-log{min-height:160px}}
 @media (max-width:760px){.settings-page{display:block}.set-nav{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line)}.set-nav .side-foot{margin:0 0 0 auto;border:0;padding:0}.set-k,.set-proj{display:none}.set-main{padding:20px 16px 48px}.set-help{padding:20px 16px}}
+@media screen and (min-width:761px){.settings-page>.side-toggle{display:grid;left:190px}#side-shut:checked~.settings-page{grid-template-columns:minmax(0,1fr) 340px}#side-shut:checked~.settings-page:has(.hc:not([open])){grid-template-columns:minmax(0,1fr) 56px}#side-shut:checked~.settings-page>.set-nav{display:none}#side-shut:checked~.settings-page>.side-toggle{left:14px}}
+@media screen and (min-width:761px) and (max-width:1180px){.settings-page>.side-toggle{left:178px}#side-shut:checked~.settings-page,#side-shut:checked~.settings-page:has(.hc:not([open])){grid-template-columns:minmax(0,1fr)}#side-shut:checked~.settings-page>.set-help{grid-column:1}}
 .grp{display:block;margin:0 0 36px;scroll-margin-top:24px}.grp-h{display:block;margin:0;padding:0 0 8px;font-size:17px;font-weight:600;letter-spacing:-.01em;text-transform:none;color:var(--fg);border-bottom:1px solid var(--line)}
 details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-details-marker{display:none}details.grp>summary::after{content:" ›"}details.grp[open]>summary::after{content:" ⌄"}
 .grp-list{display:block;margin:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
@@ -1221,13 +1224,13 @@ const projectsHtml = (stream: string, home: string, q: string, name = stream) =>
   + `<div class="ws-menu" data-ws-menu><a class="ws-item" href="${esc(home)}" aria-current="page" data-stream="${esc(stream)}">${projectMark(stream, name)}<span class="ws-t"><b>${esc(name)}</b></span></a></div>`
   + `<a class="new-project" href="${esc(withQ("/projects/new", q))}" data-new-project>${ICON.plus}New project</a></details>`;
 
-// Live, you (your name is on the button already): your Profile settings (yours in every project:
+// Live, you (your name is on the button already): your Account settings (yours in every project:
 // your accounts, how tira looks, who may sign in) and, signed in, a way out.
-// (shown by the name they chose in Profile settings, if they chose one)
+// (shown by the name they chose in Account settings, if they chose one)
 const profileHtml = (me: string, live: NonNullable<RenderOptions["live"]>, q: string, shown = live.name ?? me) =>
   `<details class="ws me" data-profile><summary title="You: ${esc(shown)}"${live.user ? " data-user" : ""}><span class="av">${initial(shown)}</span><span class="ws-name">${esc(shown)}</span>${ICON.chev}</summary>`
   + `<div class="ws-menu me-menu" data-me-menu>`
-  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Profile settings<small>Accounts, appearance, people</small></a>`
+  + `<a class="ws-item" href="${esc(withQ("/settings", q))}" data-integrations-nav>Account settings<small>Your accounts, setup, people, appearance</small></a>`
   + (live.user && live.token ? `<form method="post" action="/signout"><input type="hidden" name="token" value="${esc(live.token)}"><button class="ws-item" type="submit" data-signout>Sign out</button></form>` : "")
   + `</div></details>`;
 // a path with the project's query on it
@@ -1290,15 +1293,15 @@ export function divergenceHtml(panel: DivergencePanel): string {
     + `<div class="att-head">${head}<span class="sum">factory file state vs tira's log, computed at read time</span></div><ul class="dv-counts">${counts}</ul>${rows}${meta}</section>`;
 }
 
-// The sidebar hides and comes back with ☰ (wide screens only: a narrow one has the top bar). A
-// checkbox before <main> and its label, so it works with no script; under tira serve, theme.mjs
-// remembers it per browser. The label sits outside the sidebar, so it stays when the sidebar goes.
-const SIDE_SHUT = `<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut">`;
-const SIDE_TOGGLE = `<label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle>${ICON.menu}</label>`;
+// The sidebar hides and comes back with ☰ (wide screens only: a narrow one has the top bar), on the
+// board and the settings pages alike. A checkbox before <main> and its label, so it works with no
+// script; under tira serve, theme.mjs remembers it per browser, one choice for every page. The label sits outside the sidebar, so it stays when the sidebar goes.
+export const SIDE_SHUT = `<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut">`;
+export const SIDE_TOGGLE = `<label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle>${ICON.menu}</label>`;
 
 // The sidebar (after Linear; a top bar on a narrow screen): the mark (home), the views, live a
 // search for projects by name, this project's settings, the projects and you; then help. The theme
-// is chosen in Profile settings (the rendered file, which has none, keeps its switch here).
+// is chosen in Account settings (the rendered file, which has none, keeps its switch here).
 function navHtml(live: RenderOptions["live"], views: [string, string][], home: string, stream: string, name = stream): string {
   const tabs = views.map(([t, label]) => `<label for="v-${t}">${label}</label>`).join("");
   const q = live?.query ?? "";

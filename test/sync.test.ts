@@ -413,21 +413,21 @@ async function serving(home: string, actor: string | null = "isha") {
   };
 }
 
-test("before setup: the board points to Project settings, and Profile settings opens on Setup; changes are recorded as the name tira serve was given", async () => {
+test("before setup: the board points to Project settings, and Account settings opens on Setup; changes are recorded as the name tira serve was given", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
     const board = (await s.http("GET", "/")).body;
-    // the sidebar's profile: your name on the button, and the menu straight to your Profile settings;
+    // the sidebar's profile: your name on the button, and the menu straight to your Account settings;
     // this project's settings are a link of their own
-    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Profile settings<small>/);
+    assert.match(board, /<div class="ws-menu me-menu" data-me-menu><a class="ws-item" href="\/settings" data-integrations-nav>Account settings<small>/);
     assert.match(board, /<a class="side-link" href="\/integrations" data-project-settings><svg[^]*?<\/svg>Project settings<\/a>/);
     assert.doesNotMatch(board, /Acting as|class="ws-head"/);
     assert.match(board, /<\/h1><div class="proj-links" data-workspace aria-label="Linked to"><a class="act primary" href="\/integrations" data-integrations><svg[^]*?<\/svg><svg[^]*?<\/svg>Connect GitHub and Jira<\/a><\/div><div class="title-acts">/); // on the name's line, only while nothing is linked
     assert.doesNotMatch(board, /data-sign-in|data-user[ >]|data-signout/); // no GitHub sign-in set up: nothing to sign in with
-    // Profile settings: yours, in every project (no project on it)
+    // Account settings: yours, in every project (no project on it)
     const page = (await s.http("GET", "/settings")).body;
-    assert.match(page, /<h1>Profile settings<\/h1><p>Yours, in every project on this tira\.<\/p>/);
+    assert.match(page, /<h1>Account settings<\/h1><p>Yours, in every project on this tira\.<\/p>/);
     assert.doesNotMatch(page, /class="set-proj"|data-int="(?:github|jira|sync|delete)"/);
     assert.match(page, /<span class="grp-k">Working as<\/span><span class="grp-v">isha<\/span>/);
     assert.match(page, /GitHub sign-in isn't set up\. Add it under Setup\./);
@@ -437,7 +437,7 @@ test("before setup: the board points to Project settings, and Profile settings o
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);
     assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "github", "jira", "sync", "delete"]);
-    assert.doesNotMatch(project, /data-int="(?:account|accounts|appearance|people|setup)"/);
+    assert.doesNotMatch(project, /data-int="(?:account|appearance|people|setup)"/);
     // without sign-in set up, tira serve's own name still acts
     assert.equal((await s.post("/integrations/link", { what: "repo", repo: "acme/app" })).status, 303);
     assert.deepEqual(workspaceOf(await s.state(), S), { version: 1, repo: "acme/app", by: "isha" });
@@ -510,7 +510,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.match(done.body, /^<div data-go="\/connect\?r=\d+"><\/div>$/); // no repo yet: connect one next
     const session = setCookie.split(";")[0] ?? "";
     s.signIn(session);
-    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
     // the store keeps a hash of the session, and the GitHub token, never on a page
     const file = readFileSync(join(home, "credentials.json"), "utf8");
     assert.doesNotMatch(file, new RegExp(session.split("=")[1] ?? "x"));
@@ -518,7 +518,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal((await s.http("GET", "/")).headers.location, "/connect");
     assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app" })), "Connected to acme/app. Here's your board.");
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Profile settings<small>[^]*?data-signout>Sign out<\/button>/);
+    assert.match(board, /<summary title="You: isha-gh" data-user><span class="av">I<\/span><span class="ws-name">isha-gh<\/span>[^]*?data-integrations-nav>Account settings<small>[^]*?data-signout>Sign out<\/button>/);
     assert.doesNotMatch(board, /gho-token/);
     // writes are now recorded as the GitHub login
     const at = String((await s.store.readStream(S)).at(-1)?.seq);
@@ -543,7 +543,7 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
   const s = await serving(home);
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", github_secret: "gh-secret" });
-    // the way in has no theme switch (that's Profile settings'); it follows the computer, or this browser's choice
+    // the way in has no theme switch (that's Account settings'); it follows the computer, or this browser's choice
     const landing = (await s.http("GET", "/welcome")).body;
     assert.doesNotMatch(landing, /data-theme-switch|class="land-top"/);
     assert.match(landing, /<input class="view-radio" type="radio" name="theme" id="th-system" checked[^]*?<script type="module" src="\/theme\.mjs"><\/script>/);
@@ -583,7 +583,7 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     const setCookie = String(back.headers["set-cookie"]);
     assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
     s.signIn(setCookie.split(";")[0] ?? "");
-    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
     // the same way back again: refused (a state works once)
     const session = s.cookie();
     s.signIn(`tira_signin=${state}`);
@@ -666,7 +666,7 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     // for it: tabs.mjs), or I'll sign in later, which puts Jira away and leaves Open Board
     assert.match(page, /<input class="view-radio" type="checkbox" id="jira-later" aria-label="Sign in to Jira later"><div class="land-jira" data-jira-ask><a class="land-btn" href="\/integrations\/jira\/connect\?back=\/connect&#38;tab=1" target="_blank" rel="noopener" data-connect-jira><svg[^]*?<\/svg><span>Sign in to Jira<\/span><\/a><label class="land-quiet" for="jira-later" data-jira-later>I'll sign in later<\/label><\/div>/);
     assert.match(page, /#jira-later:checked~\.land-jira\{display:none\}#jira-later:checked~\.land-jira-later\{display:block\}/);
-    assert.match(page, /<p class="land-jira-later">No Jira for now: sign in any time in Profile settings\. <label class="land-quiet" for="jira-later">Sign in now<\/label><\/p>/);
+    assert.match(page, /<p class="land-jira-later">No Jira for now: sign in any time in Account settings\. <label class="land-quiet" for="jira-later">Sign in now<\/label><\/p>/);
     assert.match(page, /<script type="module" src="\/tabs\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/integrations/jira/connect?back=/connect")).status, 302);
     const back = await s.http("GET", `/integrations/jira/callback?code=good-code&state=${s.atlassian.states.at(-1) ?? ""}`);
@@ -713,7 +713,7 @@ test("access: the first person to sign in is the admin; after that only people t
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" });
     // the first in becomes the admin, and sets how people reach them
-    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Profile settings.");
+    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
     assert.equal(access(s.env).admin, "isha-gh");
     let page = (await s.http("GET", "/settings")).body;
     assert.match(page, /<div class="grp-list" data-people><div class="grp-row"><span class="grp-k">isha-gh<\/span><span class="pill">Admin<\/span><\/div><form [^>]*data-add-person>/);
@@ -762,8 +762,8 @@ test("access: the first person to sign in is the admin; after that only people t
     // the admin can't be removed
     s.githubAuthApi.login = "isha-gh";
     await s.signInWithGitHub();
-    // only you unlink your GitHub: Profile settings' Disconnect GitHub forgets the token and signs you out
-    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/github\/disconnect" class="grp-row" data-disconnect-github>[^]*?Disconnect GitHub<\/button>/);
+    // only you unlink your GitHub: Account settings' Disconnect GitHub forgets the token and signs you out
+    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/github\/disconnect" class="grp-row" data-disconnect-github><input type="hidden" name="token" value="k"><span class="grp-k">GitHub<\/span><span class="grp-v">@isha-gh<\/span><button class="how" type="submit">Disconnect<\/button><\/form>/);
     const unlinked = await s.post("/integrations/github/disconnect", {});
     assert.match(String(unlinked.headers.location), /^\/welcome\?r=\d+$/);
     assert.match(String(unlinked.headers["set-cookie"]), /^tira_session=; /);
@@ -797,7 +797,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.match(fresh, /<a class="act" href="\/integrations\/jira\/connect\?back=\/projects\/new&#38;tab=1" target="_blank" rel="noopener" data-connect-jira>Connect with Jira<\/a>/);
     assert.match(fresh, /<script type="module" src="\/tabs\.mjs"><\/script>/); // the page reloads when Jira says yes
     // Jira: off to Atlassian and back
-    assert.match(page, /<a class="act primary" href="\/integrations\/jira\/connect\?tab=1" target="_blank" rel="noopener" data-connect-jira>Connect Jira<\/a>/);
+    assert.match(page, /<a class="act primary" href="\/integrations\/jira\/connect\?tab=1" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira<\/a>/);
     const go = await s.http("GET", "/integrations/jira/connect");
     assert.equal(go.status, 302);
     assert.match(String(go.headers.location), new RegExp(`^https://auth\\.example/authorize\\?client_id=at-id&redirect_uri=${encodeURIComponent(`http://localhost:${s.port}/integrations/jira/callback`)}&state=[0-9a-f]{48}$`));
@@ -814,8 +814,8 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     // the project's name, as Jira shows it, saved with its key
     assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", jira_name: "Dogma", by: "isha-gh" });
     assert.doesNotMatch(page, /at-token|rt-token|SECRET-xyz|gho-token/);
-    // your Jira is yours, in every project: Profile settings show it, and disconnect it
-    assert.match((await s.http("GET", "/settings")).body, /<span class="grp-k">Jira<\/span><span class="grp-v">Connected: https:\/\/acme\.atlassian\.net<\/span><\/div><form method="post" action="\/integrations\/jira\/disconnect"[^]*?Disconnect Jira/);
+    // your Jira is yours, in every project: Account settings show it, and disconnect it
+    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/jira\/disconnect" class="grp-row" data-disconnect-jira><input type="hidden" name="token" value="k"><span class="grp-k">Jira<\/span><span class="grp-v">acme\.atlassian\.net<\/span><button class="how" type="submit">Disconnect<\/button><\/form>/);
     // a new project, once Jira is connected: pick its Jira project in the first step
     fresh = (await s.http("GET", "/projects/new")).body;
     assert.match(fresh, /<select name="jira_project" aria-label="Jira project" data-np-jira><option value="">None for now<\/option><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
@@ -914,7 +914,7 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.match(board, /<a class="new-project" href="\/projects\/new" data-new-project><svg[^]*?<\/svg>New project<\/a>/);
     assert.doesNotMatch(board, /<form[^>]*action="\/projects"/); // no form in the sidebar
     const newPage = (await s.http("GET", "/projects/new")).body;
-    assert.match(newPage, /<main class="settings-page np-page" data-new-project-page><nav class="set-nav" aria-label="New project"><a class="brand" href="\/" title="Home: the board" data-home>/); // the mark goes back
+    assert.match(newPage, /<main class="settings-page np-page" data-new-project-page><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="New project"><a class="brand" href="\/" title="Home: the board" data-home>/); // the mark goes back
     assert.match(newPage, /<form method="post" action="\/projects" class="grp-list np-form" data-new-project-form><input type="hidden" name="token" value="k"><label class="grp-row np-field"><span class="grp-k">Project name<small>[^<]+<\/small><\/span><input autofocus name="name" value="" required/);
     assert.match(newPage, /<span class="grp-k">GitHub repository<small>[^<]+<\/small><\/span><input name="repo" value="" required pattern="[^"]+" placeholder="owner\/name"/);
     assert.match(newPage, /<div class="grp-row np-acts"><a class="act" href="\/">Cancel<\/a><button class="act primary" type="submit">Create project<\/button><\/div><\/form>/);
@@ -1018,18 +1018,23 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
   assert.equal(carryQ(`<a href="/integrations">x</a>`, ""), `<a href="/integrations">x</a>`);
 });
 
-test("Settings, after GitHub's: Profile settings (yours) and Project settings (the project's), each with sections on the left, the page across the middle, the Help centre as a support chat on the right; the tira mark goes back to the board", async () => {
+test("Settings, after GitHub's: Account settings (yours) and Project settings (the project's), each with sections on the left, the page across the middle, the Help centre as a support chat on the right; the tira mark goes back to the board", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
     const page = (await s.http("GET", "/settings")).body;
     const project = (await s.http("GET", "/integrations")).body;
-    assert.match(page, /<main class="settings-page" data-settings><nav class="set-nav" aria-label="Profile settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
-    assert.match(project, /<main class="settings-page" data-settings><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut"><main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Account settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
+    assert.match(project, /<main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
     const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    assert.deepEqual(nav(page), [["account", "Profile"], ["accounts", "Accounts"], ["appearance", "Appearance"], ["people", "People"], ["setup", "Setup"]]);
+    // yours: you and your accounts in one list, then Setup and People, Appearance last, on the page
+    // in that order; each page a readable column (Apple's settings), never stretched across the window
+    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]]);
+    const at = (id: string) => page.indexOf(`data-int="${id}"`);
+    assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
+    assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
     assert.deepEqual(nav(project), [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "accounts", "appearance", "people", "setup"]], [project, ["general", "github", "jira", "sync", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "github", "jira", "sync", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);

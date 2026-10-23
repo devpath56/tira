@@ -78,7 +78,7 @@ type Flash = { ok: boolean; text: string } | undefined;
 const flashHtml = (f: Flash) => (f ? `<p class="land-flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</p>` : "");
 const hiddenToken = (token: string) => `<input type="hidden" name="token" value="${esc(token)}">`;
 
-// A page on the way in: no theme switch (that's Profile settings'); it follows the computer, or the
+// A page on the way in: no theme switch (that's Account settings'); it follows the computer, or the
 // choice this browser made there (theme.mjs).
 function page(title: string, card: string, script = ""): string {
   return `<!doctype html>
@@ -186,12 +186,12 @@ export function connectPage(o: ConnectOpts): string {
     jira = row("Jira", `<a class="land-link" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
   } else if (j.state === "disconnected") {
     // a choice, as at sign-in: Sign in to Jira (Atlassian opens in a tab of its own, and this page
-    // waits for it: tabs.mjs), or put it off: the step goes on without Jira, and Profile settings offer
+    // waits for it: tabs.mjs), or put it off: the step goes on without Jira, and Account settings offer
     // it again. A checkbox and its labels, so it works with no script.
     jira = `<input class="view-radio" type="checkbox" id="jira-later" aria-label="Sign in to Jira later">`
       + `<div class="land-jira" data-jira-ask><a class="land-btn" href="${esc("/integrations/jira/connect?back=/connect&tab=1")}" target="_blank" rel="noopener" data-connect-jira>${JIRA_MARK}<span>Sign in to Jira</span></a>`
       + `<label class="land-quiet" for="jira-later" data-jira-later>I'll sign in later</label></div>`
-      + `<p class="land-jira-later">No Jira for now: sign in any time in Profile settings. <label class="land-quiet" for="jira-later">Sign in now</label></p>`;
+      + `<p class="land-jira-later">No Jira for now: sign in any time in Account settings. <label class="land-quiet" for="jira-later">Sign in now</label></p>`;
   } else {
     const siteRow = j.sites.length > 1
       ? `<div class="grp-row"><span class="grp-k">Site</span><select name="site" form="jira-site" aria-label="Jira site">${j.sites.map((s) => `<option value="${esc(s.id)}"${s.id === j.cloudId ? " selected" : ""}>${esc(s.name)}</option>`).join("")}</select><button class="act" type="submit" form="jira-site">Use</button></div>`

@@ -19,7 +19,7 @@ sidebar, keeps the projects whose names (or the names they were made with) hold 
 (`command-palette.md`). Under the views, **Project settings** opens this project's settings: its
 GitHub repo, its Jira project, Sync, and **Delete** (`integrations-page.md`). On a narrow screen the sidebar is a
 top bar and Projects is a dropdown (Esc or a click outside closes it). At the foot, **you**: your name,
-and a menu to your Profile settings (and Sign out, signed in with GitHub). The project the server started on (`--stream`) opens at
+and a menu to your Account settings (and Sign out, signed in with GitHub). The project the server started on (`--stream`) opens at
 `/`, any other at `/?w=<name>`; every link and form the server makes carries that on, so a page,
 its decisions and their writes stay in the project they were opened in, and an action's result
 comes back to it. **+ New project** opens a page of its own (`/projects/new`, after Jira's and Vercel's): the steps

@@ -35,7 +35,7 @@ import type { Dispatcher } from "../write/dispatcher.ts";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { esc } from "../render/escape.ts";
-import { brand, CSS, projectMark, THEME_RADIOS } from "../render/html.ts";
+import { brand, CSS, projectMark, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from "../render/html.ts";
 import { quote } from "./command.ts";
 import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
 
@@ -257,7 +257,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     await saveSession(session, me.login, env);
     const cookie = `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`;
     const key = c.flash({ ok: true, text: first
-      ? `Signed in as ${me.login}: you're this tira's admin. Add the people who may sign in in Profile settings.`
+      ? `Signed in as ${me.login}: you're this tira's admin. Add the people who may sign in in Account settings.`
       : `Signed in as ${me.login}. tira records your changes as ${me.login}.` });
     const go = `${await nextStep(me.login)}?r=${key}`;
     if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
@@ -304,7 +304,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   // ---------- the settings pages ----------
   // GitHub's settings: a section per subject (a title, a line on what it's for, then rows of label
   // and control, a footnote at most), reached from the nav on the left. Each choice's command is one
-  // click away, under "Show the command". Profile settings are yours, in every project; Project
+  // click away, under "Show the command". Account settings are yours, in every project; Project
   // settings are the project's own.
   const hidden = () => `<input type="hidden" name="token" value="${esc(c.token)}">`;
   const cmd = (text: string) => `<details class="int-cmd"><summary>Show the command</summary><code>${esc(text)}</code></details>`;
@@ -318,7 +318,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const scripts = `<script type="module" src="/tabs.mjs"></script><script type="module" src="/help.mjs"></script>`;
   const signedOut = (res: ServerResponse, url: URL) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/welcome${url.search}` }); // a result goes along
 
-  // Profile settings (GET /settings): who you are, your GitHub and Jira, how tira looks, who may
+  // Account settings (GET /settings): who you are, your GitHub and Jira, how tira looks, who may
   // sign in, and tira's own apps.
   const profile = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const me = who(req);
@@ -334,31 +334,35 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const chosen = displayName(me.actor, env);
     const shown = chosen ?? (me.login ? ghAuth?.name ?? me.login : me.actor);
     const nameRow = `<form method="post" action="/integrations/profile" class="grp-row" data-display-name>${t}<span class="grp-k">Display name</span><input type="text" name="name" value="${esc(chosen ?? "")}" maxlength="60" autocomplete="off" placeholder="${esc(me.login ? ghAuth?.name ?? me.login : me.actor)}" aria-label="Display name"><button class="act" type="submit">Save</button></form>`;
-    const account = me.login
-      ? group("account", "Profile", `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>@${esc(me.login)} · signed in with GitHub</span></span><span class="pill">${role}</span>`
-        + `<form method="post" action="/signout" class="pf-out">${t}<button class="act" type="submit">Sign out</button></form></div>` + nameRow, "Changes are recorded under your GitHub login; this is only how you're shown.")
-      : group("account", "Profile", `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>the name tira serve was started with</span></span></div>`
-        + row("Working as", `<span class="grp-v">${esc(me.actor)}</span>`) + nameRow, "GitHub sign-in isn't set up. Add it under Setup.");
-
-    // your accounts: GitHub (who you're signed in as) and Jira (connect, pick a site, disconnect)
+    // you and your accounts, in one list (as Apple's settings put them): who you are, the name you're
+    // shown by, then GitHub (who you're signed in as) and Jira (sign in, pick a site, disconnect),
+    // each with its action on its own row
+    const card = me.login
+      ? `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>@${esc(me.login)} · signed in with GitHub</span></span><span class="pill">${role}</span>`
+        + `<form method="post" action="/signout" class="pf-out">${t}<button class="act" type="submit">Sign out</button></form></div>`
+      : `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>the name tira serve was started with</span></span></div>`
+        + row("Working as", `<span class="grp-v">${esc(me.actor)}</span>`);
     let jira: string;
     if (!me.login) jira = row("Jira", `<span class="grp-v">${keys.atlassian ? "Sign in with GitHub first" : "Not set up: add tira's Atlassian app under Setup"}</span>`);
     else {
       const j = await acc.jira(me.login, host, "/settings");
       if (j.state === "unset") jira = row("Jira", `<span class="grp-v">Not set up: add tira's Atlassian app under Setup</span>`);
       else if (j.state === "elsewhere") jira = row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
-      else if (j.state === "disconnected") jira = row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?back=/settings&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Connect Jira</a>`);
+      else if (j.state === "disconnected") jira = row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?back=/settings&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`);
       else {
-        jira = (j.sites.length > 1
+        const off = `<button class="how" type="submit">Disconnect</button></form>`;
+        jira = j.sites.length > 1
           ? `<form method="post" action="/integrations/jira/site" class="grp-row">${t}<input type="hidden" name="back" value="/settings"><span class="grp-k">Jira site</span><select name="site" aria-label="Jira site">${j.sites.map((x) => `<option value="${esc(x.id)}"${x.id === j.cloudId ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><button class="act" type="submit">Use</button></form>`
-          : row("Jira", `<span class="grp-v">Connected${j.site ? `: ${esc(j.site)}` : ""}</span>`))
-          + `<form method="post" action="/integrations/jira/disconnect" class="grp-row">${t}<span class="grp-k"></span><button class="how" type="submit">Disconnect Jira</button></form>`;
+            + `<form method="post" action="/integrations/jira/disconnect" class="grp-row" data-disconnect-jira>${t}<span class="grp-k">Jira</span>${off}`
+          : `<form method="post" action="/integrations/jira/disconnect" class="grp-row" data-disconnect-jira>${t}<span class="grp-k">Jira</span><span class="grp-v">${j.site ? esc(j.site.replace(/^https:\/\//, "")) : "Connected"}</span>${off}`;
       }
     }
     const github = me.login
-      ? row("GitHub", `<span class="grp-v">Signed in as @${esc(me.login)}</span>`) + `<form method="post" action="/integrations/github/disconnect" class="grp-row" data-disconnect-github>${t}<span class="grp-k"></span><button class="how" type="submit">Disconnect GitHub</button></form>`
+      ? `<form method="post" action="/integrations/github/disconnect" class="grp-row" data-disconnect-github>${t}<span class="grp-k">GitHub</span><span class="grp-v">@${esc(me.login)}</span><button class="how" type="submit">Disconnect</button></form>`
       : row("GitHub", `<span class="grp-v">${keys.github ? "Not signed in" : "Not set up: add tira's GitHub app under Setup"}</span>`);
-    const accountsCard = group("accounts", "Accounts", github + jira, "Your links stay until you unlink them here; an admin removing you only stops you signing in.");
+    const account = group("account", "Account", card + nameRow + github + jira, me.login
+      ? "Your changes are recorded under your GitHub login; the display name is only how you're shown. GitHub and Jira stay linked until you disconnect them here."
+      : "GitHub sign-in isn't set up. Add it under Setup.");
 
     // how tira looks, in this browser (the theme's radios are at the top of every page)
     const looks: [string, string, string][] = [["system", "System", "Follows your computer"], ["light", "Light", "Always light"], ["dark", "Dark", "Always dark"]];
@@ -392,8 +396,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       + `<div class="grp-row"><span class="grp-k"></span><button class="act primary" type="submit">Save</button></div></form>`
       + `<div class="grp-foot">Kept privately, sealed. A secret is never shown again. How to make these apps: ask the Help centre.</div></details>`;
 
-    const body = `<header class="int-head"><h1>Profile settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + accountsCard + appearance + people + setup;
-    c.send(res, 200, html, settingsPage({ title: "Profile settings", label: "Profile settings", sections: [["account", "Profile"], ["accounts", "Accounts"], ["appearance", "Appearance"], ["people", "People"], ["setup", "Setup"]] }, body, helpPanel(portOf(host), shown), scripts));
+    const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + setup + people + appearance;
+    c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections: [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]] }, body, helpPanel(portOf(host), shown), scripts));
   };
 
   // Project settings (GET /integrations): this project's name, its GitHub repo, its Jira project,
@@ -411,19 +415,19 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const repoOptions = [...new Set([...(ws?.repo ? [ws.repo] : []), ...got.repos])];
     const github = group("github", "GitHub",
       problem(got.problem ?? "")
-        + (repoOptions.length === 0 ? row("Repository", `<span class="grp-v">${keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Profile settings first"}</span>`)
+        + (repoOptions.length === 0 ? row("Repository", `<span class="grp-v">${keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Account settings first"}</span>`)
           : `<form method="post" action="/integrations/link" class="grp-row" data-link-repo-form>${t}<input type="hidden" name="what" value="repo"><span class="grp-k">Repository</span><select name="repo" aria-label="Repository">${repoOptions.map((x) => `<option value="${esc(x)}"${x === ws?.repo ? " selected" : ""}>${esc(x)}</option>`).join("")}</select><button class="act primary" type="submit">${ws?.repo ? "Change" : "Link"}</button>${ws?.repo ? `<button class="how" type="submit" name="repo" value="">Unlink</button>` : ""}</form>`),
       repoOptions.length > 0 ? cmd(`tira link --repo ${quote(ws?.repo ?? repoOptions[0] ?? "OWNER/NAME")}`) : "");
 
-    // Jira: pick a project from your connected site (connecting is yours: Profile settings)
+    // Jira: pick a project from your connected site (connecting is yours: Account settings)
     let jira: string;
-    if (!keys.atlassian) jira = group("jira", "Jira", row("Jira", `<span class="grp-v">Not set up</span>`), `Add tira's Atlassian app in <a class="how" href="/settings#setup">Profile settings</a>.`);
+    if (!keys.atlassian) jira = group("jira", "Jira", row("Jira", `<span class="grp-v">Not set up</span>`), `Add tira's Atlassian app in <a class="how" href="/settings#setup">Account settings</a>.`);
     else if (!me.login) jira = group("jira", "Jira", row("Jira", `<span class="grp-v">Sign in with GitHub first</span>`));
     else {
       const j = await acc.jira(me.login, host, "/integrations", ws);
       if (j.state === "elsewhere") jira = group("jira", "Jira", row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`));
-      else if (j.state !== "connected") jira = group("jira", "Jira", row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?tab=1")}" target="_blank" rel="noopener" data-connect-jira>Connect Jira</a>`), "Connects your Atlassian account, for every project (Profile settings).");
-      else if (!j.cloudId) jira = group("jira", "Jira", row("Jira", `<a class="how" href="/settings#accounts">Pick your Jira site in Profile settings</a>`));
+      else if (j.state !== "connected") jira = group("jira", "Jira", row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`), "Connects your Atlassian account, for every project (Account settings).");
+      else if (!j.cloudId) jira = group("jira", "Jira", row("Jira", `<a class="how" href="/settings#account">Pick your Jira site in Account settings</a>`));
       else jira = group("jira", "Jira",
         row("Site", `<span class="grp-v">${esc(j.site ?? "")}</span>`)
           + problem(j.problem ?? "")
@@ -675,7 +679,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     try {
       const jira = jiraOf(me.login, ws);
       const rep = await sync({ store: c.store, registry: c.registry, stream: c.stream, by: me.actor, ...(jira ? { jira } : {}), ...(ws?.repo ? { github: githubOf(me.login) } : {}) });
-      if (ws?.jira_project && !jira) rep.problems.push("Jira isn't connected: connect it in Profile settings");
+      if (ws?.jira_project && !jira) rep.problems.push("Jira isn't connected: connect it in Account settings");
       back(res, to, { ok: rep.problems.length === 0, text: `Sync: ${reportLines(rep).join("; ")}.` });
     } catch (err) {
       back(res, to, { ok: false, text: `Sync: not finished (${(err as Error).message}).` });
@@ -710,8 +714,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 // What each settings section is for, in a line (GitHub's settings say it under the title).
 const DESC = {
   general: "What everyone sees this project called, everywhere in tira.",
-  account: "Who tira writes your changes as.",
-  accounts: "The GitHub and Jira accounts tira uses for you, in every project.",
+  account: "Who you are here, and the GitHub and Jira accounts tira uses for you, in every project.",
   appearance: "How tira looks in this browser: it follows your computer unless you pick one.",
   people: "Who can sign in to this tira. The first person to sign in is its admin.",
   github: "This project's repository. A pull request that names a task links to it; a merged one is its proof.",
@@ -724,7 +727,7 @@ const DESC = {
 const descOf = (id: string): string | undefined => (DESC as Record<string, string | undefined>)[id];
 
 // A settings page, after GitHub's: the sections on the left (the tira mark goes back to the board),
-// the page across the middle, help on the right. Profile settings are yours; Project settings name
+// the page across the middle, help on the right; ☰ hides the sections, as on the board. Account settings are yours; Project settings name
 // their project.
 interface SettingsOf { title: string; label: string; project?: { stream: string; name: string }; sections: [string, string][] }
 function settingsPage(o: SettingsOf, body: string, help: string, script = ""): string {
@@ -732,7 +735,7 @@ function settingsPage(o: SettingsOf, body: string, help: string, script = ""): s
     + (o.project === undefined ? "" : `<p class="set-proj">${projectMark(o.project.stream, o.project.name)}<span>${esc(o.project.name)}</span></p>`)
     + o.sections.map(([id, label]) => `<a class="set-link" href="#${id}">${label}</a>`).join("") + `</nav>`;
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(o.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="settings-page" data-settings>${nav}<div class="set-main">`
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(o.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}${SIDE_SHUT}<main class="settings-page" data-settings>${SIDE_TOGGLE}${nav}<div class="set-main">`
     + body + `</div>${help}</main><script type="module" src="/theme.mjs"></script>${script}</body></html>\n`;
 }
 

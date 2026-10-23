@@ -1,5 +1,5 @@
 // The theme (System / Light / Dark) is CSS only: radio inputs every page carries, picked in
-// Profile settings' Appearance (the rendered file keeps its own switch). Under `tira serve` this
+// Account settings' Appearance (the rendered file keeps its own switch). Under `tira serve` this
 // remembers the choice per browser, so it survives reloads and carries to every page. Loaded by
 // each served page directly and by app.mjs on the live page.
 const KEY = "tira-theme";

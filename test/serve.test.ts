@@ -160,7 +160,7 @@ test("every decision has two views: the work in a nutshell with tira's recommend
     // a refusal says what to do instead
     assert.match(unblock.body, /<p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p>/);
     // the theme, and the script that remembers the choice
-    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/); // the theme you picked (in Profile settings) carries here
+    assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/); // the theme you picked (in Account settings) carries here
     assert.doesNotMatch(unblock.body, /data-theme-switch/); // and is picked there, not here
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(complete.status, 200);
@@ -719,6 +719,12 @@ test("☰ hides the sidebar and brings it back: a checkbox before the page, its 
       // shut: the sidebar goes and the board takes its room; ☰ stays, top left. Only where there is a
       // sidebar: a narrow screen has the top bar, with no ☰
       assert.match(page, /:root:has\(#side-shut:checked\)\{--side:28px\}\n#side-shut:checked~main\[data-stream\]>\.top\{display:none\}\n#side-shut:checked~main\[data-stream\]>\.side-toggle\{left:14px\}\n\}\n\.side-toggle\{display:none;position:fixed;/);
+    }
+    // the same ☰ on the settings pages and the New project page, remembered as one choice for every page
+    for (const path of ["/settings", "/integrations", "/projects/new"]) {
+      const page = (await s.http("GET", path)).body;
+      assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut"><main class="settings-page[^"]*"[^>]*><label class="side-toggle" for="side-shut"/, path);
+      assert.match(page, /#side-shut:checked~\.settings-page>\.set-nav\{display:none\}/, path);
     }
     const theme = readFileSync(new URL("../src/serve/theme.mjs", import.meta.url), "utf8");
     assert.match(theme, /for \(const c of document\.querySelectorAll\("input\[type=checkbox\]\[data-remember\]"\)\) \{[^]*?if \(was !== null\) c\.checked = was === "1";[^]*?localStorage\.setItem\(c\.dataset\.remember, c\.checked \? "1" : "0"\);/);

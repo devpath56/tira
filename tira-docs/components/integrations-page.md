@@ -1,8 +1,8 @@
-# Settings: Profile settings and Project settings
+# Settings: Account settings and Project settings
 
 **JTBD:** 1 — Track a branching build depth-first (and 2 — Prove a task is done).
 
-**What / why.** Two pages, after GitHub's settings (Isha, 2026-10-22): **Profile settings** are
+**What / why.** Two pages, after GitHub's settings (Isha, 2026-10-22): **Account settings** are
 yours, the same in every project (`/settings`, from your profile at the foot of the sidebar), and
 **Project settings** are the project's own (`/integrations`, from the sidebar's Project settings
 and the board's Linked bar). The first time, the way in links the first project in one step
@@ -22,7 +22,7 @@ questions not asked yet under it. What you type is matched to those answers on t
 word counts for more) and never leaves it; when nothing fits, tira says so and offers every
 question again. With no script, each suggestion opens on its answer.
 
-Profile settings (no project on them):
+Account settings (no project on them):
 - **Profile**: who is signed in, as GitHub and Jira show it (the initial as a picture, the name,
   @login, Admin or Member), and **Sign out**; a **Display name** to be shown by (the sidebar, this
   card, the Help centre's greeting), empty for GitHub's name. Changes are still recorded under your
@@ -62,10 +62,10 @@ only. The store keeps a hash of each session (it lasts 30 days), so it can't sig
 
 ## Devtool hook
 
-- `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Profile settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
+- `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Account settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
 - `[data-people]` on the admin's list; `[data-add-person]` on Add; `[data-admin-contact]` on how people reach the admin.
 - `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
-- `[data-integrations-nav]` on the profile menu's Profile settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).
+- `[data-integrations-nav]` on the profile menu's Account settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).
 
 Assertion: no token, key or secret appears on any page; a Jira sign-in that didn't start here is
 refused (`test/sync.test.ts`).
