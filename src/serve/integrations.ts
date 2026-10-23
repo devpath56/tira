@@ -27,7 +27,7 @@ import { workspaceOf, type WorkspaceLink } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { reportLines, sync } from "../sync/sync.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
-import { JiraCloud, type JiraClient } from "../sync/jira.ts";
+import { JiraCloud, projectName, type JiraClient } from "../sync/jira.ts";
 import { access, appKeys, atlassianAuth, displayName, dropSession, forgetGithub, githubAuth, isAdmin, saveDisplayName, signOutEverywhere, jiraLogin, mayEnter, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, type Access, type AtlassianAuth, type JiraLogin } from "../sync/credentials.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
@@ -494,6 +494,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return back(res, "/integrations", { ok: false, text: "Pick a Jira project from your connected site." });
       link.jira_project = key || undefined;
       link.jira_site = key ? site : undefined;
+      link.jira_name = key && site ? await projectName(jiraOf(me.login, { version: 0, jira_site: site }), key) : undefined;
     } else return back(res, "/integrations", { ok: false, text: "Nothing to link." });
     back(res, "/integrations", await writeLink(me.actor, ws, link));
   };
@@ -547,9 +548,11 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       link.jira_site = key ? site : undefined;
     }
     const same = link.repo === ws?.repo && link.jira_project === ws?.jira_project && link.jira_site === ws?.jira_site;
+    if (!same && link.jira_project && link.jira_site) link.jira_name = await projectName(jiraOf(me.login, { version: 0, jira_site: link.jira_site }), link.jira_project);
     const f = same ? { ok: true, text: "" } : await writeLink(me.login, ws, link);
     if (!f.ok) return back(res, "/connect", f);
-    back(res, "/", { ok: true, text: `Connected to ${repo}${link.jira_project ? ` and Jira ${link.jira_project}` : ""}. Here's your board.` });
+    const jiraShown = link.jira_name ?? (link.jira_project === ws?.jira_project ? ws?.jira_name : undefined) ?? link.jira_project;
+    back(res, "/", { ok: true, text: `Connected to ${repo}${link.jira_project ? ` and Jira ${jiraShown}` : ""}. Here's your board.` });
   };
 
   // ---------- Atlassian's round trip ----------
@@ -618,7 +621,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const ws = workspaceOf(r, c.stream);
     try {
       const jira = jiraOf(me.login, ws);
-      const rep = await sync({ store: c.store, registry: c.registry, stream: c.stream, ...(jira ? { jira } : {}), ...(ws?.repo ? { github: githubOf(me.login) } : {}) });
+      const rep = await sync({ store: c.store, registry: c.registry, stream: c.stream, by: me.actor, ...(jira ? { jira } : {}), ...(ws?.repo ? { github: githubOf(me.login) } : {}) });
       if (ws?.jira_project && !jira) rep.problems.push("Jira isn't connected: connect it in Profile settings");
       back(res, to, { ok: rep.problems.length === 0, text: `Sync: ${reportLines(rep).join("; ")}.` });
     } catch (err) {

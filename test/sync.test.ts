@@ -585,8 +585,8 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.doesNotMatch(deniedInTab.body, /data-jira-done/);
     page = (await s.http("GET", "/connect")).body;
     assert.match(page, /<select name="jira_project" form="connect" aria-label="Jira project" data-jira-pick><option value="">None<\/option><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
-    assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app", jira_project: "DOG" })), "Connected to acme/app and Jira DOG. Here's your board.");
-    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", by: "isha-gh" });
+    assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app", jira_project: "DOG" })), "Connected to acme/app and Jira Dogma. Here's your board.");
+    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", jira_name: "Dogma", by: "isha-gh" });
     await s.post("/connect", { repo: "acme/app", jira_project: "DOG" }); // nothing changed: no new version
     await s.post("/connect", { repo: "acme/app" }); // no Jira picker on the form: Jira stays as it is
     assert.equal(workspaceOf(await s.state(), S)?.version, 2);
@@ -712,7 +712,8 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     page = (await s.http("GET", "/integrations")).body;
     assert.match(page, /<select name="jira_project" aria-label="Jira project"><option value="DOG">Dogma \(DOG\)<\/option><option value="WEB">Website \(WEB\)<\/option><\/select>/);
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "jira", jira_project: "DOG" })), "Linked (version 2).");
-    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", by: "isha-gh" });
+    // the project's name, as Jira shows it, saved with its key
+    assert.deepEqual(workspaceOf(await s.state(), S), { version: 2, repo: "acme/app", jira_site: "https://acme.atlassian.net", jira_project: "DOG", jira_name: "Dogma", by: "isha-gh" });
     assert.doesNotMatch(page, /at-token|rt-token|SECRET-xyz|gho-token/);
     // your Jira is yours, in every project: Profile settings show it, and disconnect it
     assert.match((await s.http("GET", "/settings")).body, /<span class="grp-k">Jira<\/span><span class="grp-v">Connected: https:\/\/acme\.atlassian\.net<\/span><\/div><form method="post" action="\/integrations\/jira\/disconnect"[^]*?Disconnect Jira/);
@@ -723,14 +724,14 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.equal(wrongKey.status, 400);
     assert.match(wrongKey.body, /data-np-problem>Pick a Jira project from your connected site, or none for now\.<\/div>/);
     const site = await s.post("/projects", { name: "site", repo: "acme/web", jira_project: "WEB" });
-    assert.equal(await s.flash(site), "Created site, linked to GitHub acme/web and Jira WEB. Sync from here.");
-    assert.deepEqual(workspaceOf(fold(await s.store.readAll(), s.registry), "site"), { version: 1, repo: "acme/web", jira_site: "https://acme.atlassian.net", jira_project: "WEB", by: "isha-gh" });
+    assert.equal(await s.flash(site), "Created site, linked to GitHub acme/web and Jira Website. Sync from here.");
+    assert.deepEqual(workspaceOf(fold(await s.store.readAll(), s.registry), "site"), { version: 1, repo: "acme/web", jira_site: "https://acme.atlassian.net", jira_project: "WEB", jira_name: "Website", by: "isha-gh" });
     // sync, from the board's own button
     s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z" });
     const synced = await s.post("/sync", {});
     assert.match(await s.flash(synced), /^Sync: synced with GitHub acme\/app and Jira DOG; acme\/app#7 linked to table; acme\/app#7 merged \(table\); dashboard: made Jira DOG-1; table: made Jira DOG-2; filters: made Jira DOG-3\.$/);
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /data-link-jira><svg[^]*?<\/svg><span>DOG<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
+    assert.match(board, /title="Jira: Dogma \(DOG\)" data-link-jira><svg[^]*?<\/svg><span>Dogma<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
     assert.doesNotMatch(board, /Connect GitHub and Jira|data-add-jira|data-add-repo/);
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
     assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
@@ -782,6 +783,9 @@ test("the CLI: tira link keeps what it isn't told and clears what's empty; tira 
     assert.match((await tira("link", "--jira", "DOG")).err, /a Jira project needs its site/);
     assert.match((await tira("link", "--jira-site", "https://acme.atlassian.net/", "--jira", "DOG")).out, /\(version 2\): GitHub acme\/app · Jira DOG on https:\/\/acme\.atlassian\.net$/);
     assert.match((await tira("link", "--repo", "")).out, /\(version 3\): Jira DOG on https:\/\/acme\.atlassian\.net$/);
+    // the project's name as Jira shows it; it sticks while the same project stays linked
+    assert.match((await tira("link", "--jira-name", "")).err, /--jira-name is the project's name as Jira shows it, 1 to 80 characters, got ""/);
+    assert.match((await tira("link", "--jira-name", "Dogs")).out, /\(version 4\): Jira Dogs \(DOG\) on https:\/\/acme\.atlassian\.net$/);
     assert.match((await tira("sync")).out, /tira isn't signed in to Jira https:\/\/acme\.atlassian\.net: run tira connect-jira/);
     const connected = await tira("connect-jira", "--email", "isha@example.com");
     assert.equal(connected.code, 0);
@@ -791,7 +795,8 @@ test("the CLI: tira link keeps what it isn't told and clears what's empty; tira 
     assert.deepEqual(jiraLogin("https://acme.atlassian.net", { TIRA_HOME: dir }), { email: "isha@example.com", token: "tok-cli" });
     const synced = await tira("sync");
     assert.equal(synced.code, 0);
-    assert.equal(synced.out, "synced with Jira DOG\ndashboard: made Jira DOG-1");
+    // Jira calls it Dogma, not Dogs: the sync saves Jira's name, as whoever ran it
+    assert.equal(synced.out, "synced with Jira DOG\nJira calls DOG \"Dogma\": the link shows that name now\ndashboard: made Jira DOG-1");
     assert.deepEqual(JSON.parse((await tira("sync", "--json")).out).created, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -982,4 +987,52 @@ test("a project's link may mark it deleted, linked or not; deleted is true or ab
   assert.equal(ok({ title: "Mobile App" }), true); // a rename of a project never linked
   assert.equal(ok({ repo: "acme/app", title: " padded" }), false);
   assert.equal(ok({ repo: "acme/app", title: "x".repeat(81) }), false);
+});
+
+test("a Jira project shows by its name, as Jira shows it: saved with its key, sticking while that project stays linked, and caught up by a sync, as the person syncing", async () => {
+  const ok = (payload: Record<string, unknown>) => LINK_GUARDS.workspaceWellFormed?.({ actor: "isha", payload } as never) === true;
+  assert.equal(ok({ ...linked, jira_name: "Dogma" }), true);
+  assert.equal(ok({ repo: "acme/app", jira_name: "Dogma" }), false); // a name needs its project
+  for (const bad of ["", " padded", "bell\u0007", "x".repeat(81), 7]) assert.equal(ok({ ...linked, jira_name: bad }), false, JSON.stringify(bad));
+
+  const w = await world();
+  // the header's Jira chip: its tooltip | what it says
+  const chip = async () => {
+    const events = await w.store.readStream(S);
+    const m = /<a class="pl jira"[^>]*title="([^"]*)" data-link-jira><svg[^]*?<\/svg><span>([^<]*)<\/span>/.exec(renderHtml(fold(events, w.registry), S, "h", events));
+    return `${m?.[1]} | ${m?.[2]}`;
+  };
+  await w.link(linked); // linked before tira kept names: shown by its key
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, undefined);
+  assert.equal(await chip(), "Jira: DOG | DOG");
+  // a sync with no one named (a test, a script) only reads: the link stays as it is
+  const quiet = await w.run();
+  assert.equal(quiet.jiraName, undefined);
+  assert.deepEqual(quiet.problems, []);
+  assert.equal(workspaceOf(await w.state(), S)?.version, 1);
+  // a person's sync saves Jira's name, as them, and says so
+  const sync1 = await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" });
+  assert.equal(sync1.jiraName, "Dogma");
+  assert.ok(reportLines(sync1).includes(`Jira calls DOG "Dogma": the link shows that name now`));
+  assert.deepEqual(workspaceOf(await w.state(), S), { version: 2, ...linked, jira_name: "Dogma", by: "isha" });
+  assert.equal(await chip(), "Jira: Dogma (DOG) | Dogma");
+  // the same name again: nothing written
+  assert.equal((await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" })).jiraName, undefined);
+  assert.equal(workspaceOf(await w.state(), S)?.version, 2);
+  // a change that doesn't mention the name keeps it, while the same project stays linked
+  await w.link({ ...linked, repo: "acme/web" }, 3);
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, "Dogma");
+  // renamed in Jira: the next sync follows
+  w.jira.names.set("DOG", "Dog Days");
+  assert.equal((await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "devansh" })).jiraName, "Dog Days");
+  assert.deepEqual(workspaceOf(await w.state(), S), { version: 4, ...linked, repo: "acme/web", jira_name: "Dog Days", by: "devansh" });
+  // another project linked: the old name goes with the old project
+  await w.link({ ...linked, jira_project: "WEB" }, 5);
+  assert.equal(workspaceOf(await w.state(), S)?.jira_name, undefined);
+  assert.equal(await chip(), "Jira: WEB | WEB");
+  // a name Jira gives that can't be saved (too long) is left out; the sync carries on
+  w.jira.names.set("WEB", "w".repeat(81));
+  const long = await sync({ store: w.store, registry: w.registry, stream: S, jira: w.jira, by: "isha" });
+  assert.equal(long.jiraName, undefined);
+  assert.deepEqual(long.problems, []);
 });

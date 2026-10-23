@@ -909,7 +909,11 @@ function taskLinksHtml(ext: Ext, task: string): string {
 function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): string {
   const ws = ext.ws;
   const repo = ws?.repo ? `<a class="pl" href="https://github.com/${esc(ws.repo)}" rel="noopener noreferrer" title="GitHub: ${esc(ws.repo)}" data-link-repo>${ICON.github}<span>${esc(ws.repo)}</span></a>` : "";
-  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" rel="noopener noreferrer" title="Jira: ${esc(ws.jira_project)}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_project)}</span></a>` : "";
+  // the Jira project by its name, as Jira shows it ("Tira Board"), its key ("KAN") in the tooltip;
+  // by its key alone when no name was saved (linked before tira kept names: until the project is
+  // picked again in Project settings, or someone syncs)
+  const jiraTitle = ws?.jira_name ? `${ws.jira_name} (${ws.jira_project})` : ws?.jira_project;
+  const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(`${ws.jira_site}/browse/${ws.jira_project}`)}" rel="noopener noreferrer" title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
   const box = (inner: string) => `<div class="proj-links" data-workspace aria-label="Linked to">${inner}</div>`;
   if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>`) : "";
   if (!live) return box(repo + jira);

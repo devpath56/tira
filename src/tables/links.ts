@@ -9,6 +9,10 @@
 //               address and its history keep the name it was made with), and {deleted: true} takes
 //               it out of tira's lists and closes its board; tira never erases, so its history
 //               stays. Both stick: a later version that doesn't mention them keeps them.
+//               2026-10-23 (Isha): {jira_name}, the Jira project's name as Jira shows it ("Tira
+//               Board" for KAN), saved with the key when it's picked, and again, as the person
+//               syncing, when a sync finds Jira calls it something else. It sticks while the same
+//               project stays linked.
 //   jira-issue  one per task (id = the task's id): the Jira issue tira made for it, {task, key}.
 //               PUSHED records the status category tira last set, so the next sync can tell a
 //               person's move in Jira from its own.
@@ -43,11 +47,12 @@ const optional = (v: unknown, test: RegExp) => v === undefined || (typeof v === 
 export const TITLE = /^(?! )[^\u0000-\u001f\u007f]{1,80}(?<! )$/;
 
 export const LINK_GUARDS: Record<string, GuardFn> = {
-  // a person links a workspace; a Jira project needs its site
+  // a person links a workspace; a Jira project needs its site, and its name needs its key
   workspaceWellFormed: ({ actor, payload }) =>
     s(actor) && actor !== SYNC
     && optional(payload.repo, REPO) && optional(payload.jira_site, JIRA_SITE) && optional(payload.jira_project, JIRA_PROJECT)
     && (payload.jira_project === undefined || payload.jira_site !== undefined)
+    && optional(payload.jira_name, TITLE) && (payload.jira_name === undefined || payload.jira_project !== undefined)
     && (payload.deleted === undefined || payload.deleted === true) && optional(payload.title, TITLE)
     && ([payload.repo, payload.jira_site, payload.jira_project, payload.title].some((v) => v !== undefined) || payload.deleted === true),
   jiraIssueLinked: ({ actor, payload }) => actor === SYNC && s(payload.task) && typeof payload.key === "string" && JIRA_KEY.test(payload.key),
