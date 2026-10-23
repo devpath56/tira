@@ -106,7 +106,7 @@ export function wireDrag(act) {
     if (e.pointerType === "touch") pick.timer = setTimeout(() => { if (pick && !pick.ghost) lift(); }, HOLD_MS);
   });
   document.addEventListener("pointermove", (e) => {
-    if (!pick || e.pointerId !== pick.id) return;
+    if (pick?.id !== e.pointerId) return;
     if (!pick.ghost) {
       const far = Math.hypot(e.clientX - pick.x, e.clientY - pick.y) > MOUSE_SLOP;
       if (!far) return;
@@ -116,7 +116,7 @@ export function wireDrag(act) {
     follow(e.clientX, e.clientY);
   });
   document.addEventListener("pointerup", (e) => {
-    if (!pick || e.pointerId !== pick.id) return;
+    if (pick?.id !== e.pointerId) return;
     if (pick.ghost) drop(e.clientX, e.clientY);
     else end(); // a plain click: the card's dialog opens as always
   });

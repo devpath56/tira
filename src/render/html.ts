@@ -1108,7 +1108,8 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
         + `<div class="row">${parent}${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     });
     const colAttr = moves ? ` data-col="${s}"` : "";
-    return `<div class="col"${colAttr}><div class="ch"><span class="dot${s === "in_progress" && here.length > 0 ? " pulse" : ""}" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${capped(s, cards) || `<p class="empty">Nothing here</p>`}</div>`;
+    const shown = capped(s, cards) || `<p class="empty">Nothing here</p>`;
+    return `<div class="col"${colAttr}><div class="ch"><span class="dot${s === "in_progress" && here.length > 0 ? " pulse" : ""}" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${shown}</div>`;
   }).join("");
   const drag = moves === undefined ? "" : ` data-moves="${esc(JSON.stringify(moves))}"`;
   return `<div class="cols"${drag}>${ideasColumn(ghosts, trail, changed)}${cols}</div>`;
