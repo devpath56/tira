@@ -44,6 +44,10 @@ jobs:
       # Canonical JSON must equal a fresh extraction from the charts (no hand edits).
       - run: node charts/extract-tables.mjs && git diff --exit-code charts/*.json
       - run: npm run check
+      # Spec A leg 1 (D-Q1): the Postgres-gated tests must execute, not merely
+      # not fail — a green run with them skipped is a leg-1 FAIL.
+      - name: pg-gated executed count (Spec A leg 1)
+        run: node scripts/check-pg-gated.mjs
       # Regions proposal: overlap + guard scans at pack time, in WARN mode first
       # (graduation rule: deny only after the bar proves non-nuisance; the operator signs).
       - name: region-scan (warn mode)
