@@ -58,6 +58,8 @@ background:var(--fg);color:var(--bg);font:600 15px var(--sans);cursor:pointer;te
 .land-body{display:grid;gap:18px;padding:22px 24px 26px}
 .land-body>header{text-align:center}.land-body>header h1{margin:0}.land-body>header p{margin:4px 0 0;color:var(--mut);font-size:13px}
 .land-body .grp{margin:0}.land-body .grp-list{background:var(--panel-2);box-shadow:none}.land-body .grp-row select,.land-body .grp-row input{background:var(--panel)}
+.land-jira{display:grid;justify-items:center;gap:10px;padding:16px}.land-jira-later{display:none;margin:0;padding:12px 14px;font-size:13px;color:var(--mut)}
+#jira-later:checked~.land-jira{display:none}#jira-later:checked~.land-jira-later{display:block}#jira-later:focus-visible~.land-jira [data-jira-later]{outline:2px solid var(--accent);outline-offset:2px}
 .land-who{display:flex;justify-content:center;align-items:center;gap:10px;font-size:13px;color:var(--mut)}.land-who form{display:inline}
 @media (max-width:720px){.land-card{grid-template-columns:1fr}.land-brand{padding:22px 22px 4px;gap:8px;background:none}
 .land-brand h2{font-size:19px}.land-flow{display:none}.land-form{padding:24px 22px 32px}.land-body{padding:18px}}
@@ -183,7 +185,13 @@ export function connectPage(o: ConnectOpts): string {
   } else if (j.state === "elsewhere") {
     jira = row("Jira", `<a class="land-link" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
   } else if (j.state === "disconnected") {
-    jira = row(`${JIRA_MARK.replace("<svg ", `<svg width="18" height="18" `)} Jira`, `<a class="act" href="${esc("/integrations/jira/connect?back=/connect&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Connect</a>`);
+    // a choice, as at sign-in: Sign in to Jira (Atlassian opens in a tab of its own, and this page
+    // waits for it: tabs.mjs), or put it off: the step goes on without Jira, and Profile settings offer
+    // it again. A checkbox and its labels, so it works with no script.
+    jira = `<input class="view-radio" type="checkbox" id="jira-later" aria-label="Sign in to Jira later">`
+      + `<div class="land-jira" data-jira-ask><a class="land-btn" href="${esc("/integrations/jira/connect?back=/connect&tab=1")}" target="_blank" rel="noopener" data-connect-jira>${JIRA_MARK}<span>Sign in to Jira</span></a>`
+      + `<label class="land-quiet" for="jira-later" data-jira-later>I'll sign in later</label></div>`
+      + `<p class="land-jira-later">No Jira for now: sign in any time in Profile settings. <label class="land-quiet" for="jira-later">Sign in now</label></p>`;
   } else {
     const siteRow = j.sites.length > 1
       ? `<div class="grp-row"><span class="grp-k">Site</span><select name="site" form="jira-site" aria-label="Jira site">${j.sites.map((s) => `<option value="${esc(s.id)}"${s.id === j.cloudId ? " selected" : ""}>${esc(s.name)}</option>`).join("")}</select><button class="act" type="submit" form="jira-site">Use</button></div>`

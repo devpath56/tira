@@ -662,8 +662,11 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.equal(await s.flash(await s.post("/integrations/setup", { atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz", back: "/connect" })), "Saved.");
     assert.match((await s.http("GET", "/connect", undefined, `127.0.0.1:${s.port}`)).body, /<a class="land-link" href="http:\/\/localhost:\d+\/connect">Open tira at localhost to connect<\/a>/);
     page = (await s.http("GET", "/connect")).body;
-    // Atlassian opens in a tab of its own; the page waits for it (tabs.mjs)
-    assert.match(page, /<a class="act" href="\/integrations\/jira\/connect\?back=\/connect&#38;tab=1" target="_blank" rel="noopener" data-connect-jira>Connect<\/a>/);
+    // a choice, as at sign-in: Sign in to Jira (Atlassian opens in a tab of its own; the page waits
+    // for it: tabs.mjs), or I'll sign in later, which puts Jira away and leaves Open Board
+    assert.match(page, /<input class="view-radio" type="checkbox" id="jira-later" aria-label="Sign in to Jira later"><div class="land-jira" data-jira-ask><a class="land-btn" href="\/integrations\/jira\/connect\?back=\/connect&#38;tab=1" target="_blank" rel="noopener" data-connect-jira><svg[^]*?<\/svg><span>Sign in to Jira<\/span><\/a><label class="land-quiet" for="jira-later" data-jira-later>I'll sign in later<\/label><\/div>/);
+    assert.match(page, /#jira-later:checked~\.land-jira\{display:none\}#jira-later:checked~\.land-jira-later\{display:block\}/);
+    assert.match(page, /<p class="land-jira-later">No Jira for now: sign in any time in Profile settings\. <label class="land-quiet" for="jira-later">Sign in now<\/label><\/p>/);
     assert.match(page, /<script type="module" src="\/tabs\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/integrations/jira/connect?back=/connect")).status, 302);
     const back = await s.http("GET", `/integrations/jira/callback?code=good-code&state=${s.atlassian.states.at(-1) ?? ""}`);

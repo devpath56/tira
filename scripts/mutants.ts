@@ -781,6 +781,8 @@ const MUTANTS: Mutant[] = [
   { name: "access: the direct sign-in away from localhost", file: "src/serve/integrations.ts", find: "if (secret && /^localhost(:\\d+)?$/.test(host)) {", replace: "if (secret) {" },
   { name: "access: no direct sign-in even with a secret", file: "src/serve/integrations.ts", find: "    const secret = appKeys(env).github?.secret;\n", replace: "    const secret = undefined;\n" },
   { name: "setup: saving the Client ID drops the GitHub secret", file: "src/serve/integrations.ts", find: "const keptSecret = ghSecret || now.github?.secret;", replace: "const keptSecret = ghSecret;" },
+  { name: "ui: no way to put Jira off", file: "src/serve/welcome.ts", find: "#jira-later:checked~.land-jira{display:none}", replace: "" },
+  { name: "ui: the step after sign-in says Connect, not Sign in to Jira", file: "src/serve/welcome.ts", find: "<span>Sign in to Jira</span>", replace: "<span>Connect</span>" },
   { name: "ui: the way in has a theme switch", file: "src/serve/welcome.ts", find: "<main class=\"land-wrap\">${card}</main>", replace: "<main class=\"land-wrap\"><span data-theme-switch></span>${card}</main>" },
   { name: "accounts: the GitHub secret kept in the clear", file: "src/sync/accounts-pg.ts", find: "keys.github?.secret ? this.key.seal(keys.github.secret, \"apps:github_secret\") : null],", replace: "keys.github?.secret ?? null],", needs: "postgres" },
   { name: "accounts: older tables never get the secret's column", file: "src/sync/accounts-pg.ts", find: " || secret.rowCount === 0", replace: "", needs: "postgres" },
