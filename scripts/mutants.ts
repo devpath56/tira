@@ -234,6 +234,7 @@ const MUTANTS: Mutant[] = [
   { name: "render: the active node isn't marked", file: "src/render/html.ts", find: "r.active ? \"is-active\" : \"\", changed ? \"changed\" : \"\",", replace: "\"\", changed ? \"changed\" : \"\"," },
   { name: "render: long names keep their underscores on the graph", file: "src/render/html.ts", find: "${esc(spaced(r.id))}</span></span>`", replace: "${esc(r.id)}</span></span>`" },
   { name: "render: a closed child's line never turns green", file: "src/render/html.ts", find: "CLOSED.has(n.row.state) ? \"e done\" : \"e\"", replace: "\"e\"" },
+  { name: "render: a parent with nothing left says 0 left", file: "src/render/html.ts", find: "const progress = left > 0 ? `${left} left` : word(r.state);", replace: "const progress = ks.length > 0 ? `${left} left` : word(r.state);" },
   { name: "render: parent nodes count what's left wrong", file: "src/render/html.ts", find: "  const left = ks.length - closed;", replace: "  const left = ks.length;" },
   { name: "fx: the canvas formats its own numbers", file: "src/serve/graph.mjs", find: "    b.style.left = `${fx(p.x)}px`;", replace: "    b.style.left = `${p.x.toFixed(2)}px`;" },
   { name: "fx: the page's graph formats its own numbers", file: "src/render/html.ts", find: "style=\"left:${fx(p.x)}px;", replace: "style=\"left:${p.x.toFixed(2)}px;" },

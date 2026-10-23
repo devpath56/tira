@@ -102,8 +102,8 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.deepEqual(green, ["node:metrics_card", "node:improve_visual", "node:colors", "node:font", "node:tokens"]);
   assert.match(html, /data-key="node:table"[^>]*><span class="here">◆ now<\/span>/);
   // each parent node: closed / total and what's left
-  assert.match(html, /aria-label="dashboard, [a-z ]+, 1 of 3 subtasks closed"[^>]*>[^]*?<span class="gm">1\/3 closed · 2 left<\/span>/);
-  assert.match(html, /aria-label="improve_visual, done, 3 of 3 subtasks closed"[^>]*>[^]*?<span class="gm"><span class="tira-mark"[^]*?<\/span>3\/3 closed<\/span>/);
+  assert.match(html, /aria-label="dashboard, [a-z ]+, 1 of 3 subtasks closed"[^>]*>[^]*?<span class="gm">2 left<\/span>/); // only what's left
+  assert.match(html, /aria-label="improve_visual, done, 3 of 3 subtasks closed"[^>]*>[^]*?<span class="gm"><span class="tira-mark"[^]*?<\/span>done<\/span>/); // none left: its state
   // tokens was found while working on colors, its sibling: a dotted line joins them, and its node says so
   assert.deepEqual([...html.matchAll(/<path class="e found" data-from="node:colors" data-found="([^"]+)"/g)].map((m) => m[1]), ["node:tokens"]);
   assert.match(html, /data-key="node:tokens"[^>]*>[^]*?<span class="gm">done · ✦ found<\/span>/);

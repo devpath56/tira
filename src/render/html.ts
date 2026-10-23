@@ -631,8 +631,8 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const tiraMark = r.closedByTira ? `<span class="tira-mark" title="closed by tira">${ICON.auto}</span>` : "";
   const waitRing = r.awaitingClose ? `<span class="wait-ring" title="tira closes it when you move on"></span>` : "";
   const marks = tiraMark + waitRing;
-  const leftText = left === 0 ? "" : " · " + left + " left";
-  const progress = ks.length === 0 ? word(r.state) : `${closed}/${ks.length} closed` + leftText;
+  // a parent says how many of its subtasks are left; with none left, or none at all, its state
+  const progress = left > 0 ? `${left} left` : word(r.state);
   const meta = progress + (r.discoveredDuring ? " · ✦ found" : "");
   const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
   const pinWord = r.active ? "now" : "next";
