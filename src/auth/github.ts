@@ -59,7 +59,8 @@ export class GitHubDevice implements GitHubAuthApi {
   async exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string> {
     const r = await this.post("/login/oauth/access_token", { client_id: clientId, client_secret: secret, code, redirect_uri: redirectUri });
     if (typeof r.access_token === "string") return r.access_token;
-    throw new Error(FAILED[String(r.error)] ?? `GitHub said ${String(r.error ?? "no")}`);
+    const error = typeof r.error === "string" ? r.error : "no";
+    throw new Error(FAILED[error] ?? `GitHub said ${error}`);
   }
 
   async start(clientId: string): Promise<DeviceStart> {

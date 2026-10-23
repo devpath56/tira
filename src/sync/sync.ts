@@ -34,11 +34,11 @@ import type { EntityState } from "../fold/types.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import type { WriteResult } from "../write/write-path.ts";
 import { JIRA_ISSUE, PR, WORKSPACE, WORKSPACE_ID, type Category } from "../tables/links.ts";
-import { linksOf, tasksNamed, workspaceOf } from "../fold/workspace.ts";
+import { linksOf, tasksNamed, workspaceOf, type WorkspaceLink } from "../fold/workspace.ts";
 
 export { linksOf, tasksNamed, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
 import { projectName, TIRA_LABEL, type JiraClient, type JiraIssue } from "./jira.ts";
-import type { GitHubClient, Pull } from "./github.ts";
+import type { GitHubClient } from "./github.ts";
 
 const TASK = "node";
 
@@ -92,6 +92,19 @@ export interface SyncOptions {
 }
 
 const said = (r: WriteResult) => (r.status === "appended" || r.status === "duplicate" ? "" : r.status === "rejected" || r.status === "refused" ? `${r.code}: ${r.detail}` : r.status);
+
+// 1b, for sync(): when the link names its Jira project by another name than Jira's (or none, linked
+// before tira kept names), the link follows, written as the person syncing (a person links a
+// workspace). With no one named, nothing is written.
+async function followJiraName(o: SyncOptions, d: Dispatcher, ws: WorkspaceLink, jira: JiraClient, report: SyncReport): Promise<void> {
+  if (!o.by || !ws.jira_site || !ws.jira_project) return;
+  const name = await projectName(jira, ws.jira_project);
+  if (name === undefined || name === ws.jira_name) return;
+  const payload = { ...(ws.repo ? { repo: ws.repo } : {}), jira_site: ws.jira_site, jira_project: ws.jira_project, jira_name: name };
+  const why = said((await d.submit({ stream: o.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: ws.version + 1 }, actor: o.by, payload })).result);
+  if (why) report.problems.push(`saving Jira's name for ${ws.jira_project}: ${why}`);
+  else report.jiraName = name;
+}
 
 export async function sync(o: SyncOptions): Promise<SyncReport> {
   const d = new Dispatcher(o.store, o.registry);
@@ -153,17 +166,8 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
   const jira = o.jira;
   const project = ws.jira_project;
 
-  // 1b. the project's name, as Jira shows it now: when the link has another (or none, linked before
-  // tira kept names), the link follows, written as the person syncing (a person links a workspace)
-  if (o.by && ws.jira_site) {
-    const name = await projectName(jira, project);
-    if (name !== undefined && name !== ws.jira_name) {
-      const payload = { ...(ws.repo ? { repo: ws.repo } : {}), jira_site: ws.jira_site, jira_project: project, jira_name: name };
-      const why = said((await d.submit({ stream: o.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: ws.version + 1 }, actor: o.by, payload })).result);
-      if (why) report.problems.push(`saving Jira's name for ${project}: ${why}`);
-      else report.jiraName = name;
-    }
-  }
+  // 1b. the project's name, as Jira shows it now (followJiraName)
+  await followJiraName(o, d, ws, jira, report);
 
   // 2. issues people made in Jira, as tasks
   const site = ws.jira_site ?? "";

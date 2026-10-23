@@ -429,10 +429,11 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 
     // GitHub: pick one of your repos
     const got = await acc.repos(me.login);
+    const noRepos = keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Account settings first";
     const repoOptions = [...new Set([...(ws?.repo ? [ws.repo] : []), ...got.repos])];
     const github = group("github", "GitHub",
       problem(got.problem ?? "")
-        + (repoOptions.length === 0 ? row("Repository", `<span class="grp-v">${keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Account settings first"}</span>`)
+        + (repoOptions.length === 0 ? row("Repository", `<span class="grp-v">${noRepos}</span>`)
           : `<form method="post" action="/integrations/link" class="grp-row" data-link-repo-form>${t}<input type="hidden" name="what" value="repo"><span class="grp-k">Repository</span><select name="repo" aria-label="Repository">${repoOptions.map((x) => `<option value="${esc(x)}"${x === ws?.repo ? " selected" : ""}>${esc(x)}</option>`).join("")}</select><button class="act primary" type="submit">${ws?.repo ? "Change" : "Link"}</button>${ws?.repo ? `<button class="how" type="submit" name="repo" value="">Unlink</button>` : ""}</form>`),
       repoOptions.length > 0 ? cmd(`tira link --repo ${quote(ws?.repo ?? repoOptions[0] ?? "OWNER/NAME")}`) : "");
 
@@ -582,10 +583,16 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return back(res, "/integrations", { ok: false, text: "Pick a Jira project from your connected site." });
       link.jira_project = key || undefined;
       link.jira_site = key ? site : undefined;
-      link.jira_name = key && site ? await projectName(jiraOf(me.login, { version: 0, jira_site: site }), key) : undefined;
+      link.jira_name = await nameOfPicked(me.login, link);
     } else return back(res, "/integrations", { ok: false, text: "Nothing to link." });
     back(res, "/integrations", await writeLink(me.actor, ws, link));
   };
+
+  // Jira's name for the project a link names now (for a link that changed), and the name to say it by
+  const nameOfPicked = (login: string | undefined, link: Record<string, string | undefined>) =>
+    link.jira_project && link.jira_site ? projectName(jiraOf(login, { version: 0, jira_site: link.jira_site }), link.jira_project) : Promise.resolve(undefined);
+  const jiraShown = (link: Record<string, string | undefined>, ws: WorkspaceLink | undefined) =>
+    link.jira_name ?? (link.jira_project === ws?.jira_project ? ws?.jira_name : undefined) ?? link.jira_project;
 
   // the workspace's next link, as `actor`: a new version, in the history
   const writeLink = async (actor: string, ws: WorkspaceLink | undefined, link: Record<string, string | undefined>): Promise<Flash> => {
@@ -636,11 +643,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       link.jira_site = key ? site : undefined;
     }
     const same = link.repo === ws?.repo && link.jira_project === ws?.jira_project && link.jira_site === ws?.jira_site;
-    if (!same && link.jira_project && link.jira_site) link.jira_name = await projectName(jiraOf(me.login, { version: 0, jira_site: link.jira_site }), link.jira_project);
+    if (!same) link.jira_name = await nameOfPicked(me.login, link);
     const f = same ? { ok: true, text: "" } : await writeLink(me.login, ws, link);
     if (!f.ok) return back(res, "/connect", f);
-    const jiraShown = link.jira_name ?? (link.jira_project === ws?.jira_project ? ws?.jira_name : undefined) ?? link.jira_project;
-    back(res, "/", { ok: true, text: `Connected to ${repo}${link.jira_project ? ` and Jira ${jiraShown}` : ""}. Here's your board.` });
+    back(res, "/", { ok: true, text: `Connected to ${repo}${link.jira_project ? ` and Jira ${jiraShown(link, ws)}` : ""}. Here's your board.` });
   };
 
   // ---------- Atlassian's round trip ----------
@@ -734,7 +740,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/jira/site": jiraSite,
     "POST /integrations/jira/disconnect": jiraDisconnect,
     "POST /signin/start": signinStart,
-    "GET /signin/start": async (_req: IncomingMessage, res: ServerResponse) => back(res, "/welcome"), // a reload of the button's address
+    "GET /signin/start": (_req: IncomingMessage, res: ServerResponse) => Promise.resolve(back(res, "/welcome")), // a reload of the button's address
     "GET /signin/code": signinCode,
     "GET /signin/github/callback": signinBack,
     "POST /signin/poll": signinPoll,

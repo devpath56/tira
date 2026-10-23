@@ -21,6 +21,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
 
 export interface AppKeys { github?: { clientId: string; secret?: string }; atlassian?: { clientId: string; secret: string } }
 export interface GitHubAuth { token: string; name?: string }
+type AppsRow = { github_client_id: string | null; github_secret: string | null; atlassian_client_id: string | null; atlassian_secret: string | null };
 export interface AtlassianAuth {
   access: string;
   refresh?: string;
@@ -164,13 +165,8 @@ export class PostgresAccounts {
       this.pool.query(`SELECT id_hash, login, at FROM ${s}.account_sessions WHERE at > now() - make_interval(days => ${SESSION_DAYS})`),
     ]);
     const out: Accounts = {};
-    const a = apps.rows[0] as { github_client_id: string | null; github_secret: string | null; atlassian_client_id: string | null; atlassian_secret: string | null } | undefined;
-    if (a) {
-      out.apps = {
-        ...(a.github_client_id ? { github: { clientId: a.github_client_id, ...(a.github_secret ? { secret: this.key.open(a.github_secret, "apps:github_secret") } : {}) } } : {}),
-        ...(a.atlassian_client_id && a.atlassian_secret ? { atlassian: { clientId: a.atlassian_client_id, secret: this.key.open(a.atlassian_secret, "apps:atlassian_secret") } } : {}),
-      };
-    }
+    const a = apps.rows[0] as AppsRow | undefined;
+    if (a) out.apps = this.appsOf(a);
     const x = acc.rows[0] as { admin: string | null; members: string[]; contact_name: string | null; contact_email: string | null } | undefined;
     if (x) {
       const contact = { ...(x.contact_name ? { name: x.contact_name } : {}), ...(x.contact_email ? { email: x.contact_email } : {}) };
@@ -181,6 +177,17 @@ export class PostgresAccounts {
     out.names = Object.fromEntries((names.rows as { login: string; name: string }[]).map((r) => [r.login, r.name]));
     out.sessions = Object.fromEntries((sessions.rows as { id_hash: string; login: string; at: Date }[]).map((r) => [r.id_hash, { login: r.login, at: r.at.toISOString() }]));
     this.now = out;
+  }
+
+  // tira's own apps, from their row: each secret opened from its seal
+  private appsOf(a: AppsRow): AppKeys {
+    const keys: AppKeys = {};
+    if (a.github_client_id) {
+      keys.github = { clientId: a.github_client_id };
+      if (a.github_secret) keys.github.secret = this.key.open(a.github_secret, "apps:github_secret");
+    }
+    if (a.atlassian_client_id && a.atlassian_secret) keys.atlassian = { clientId: a.atlassian_client_id, secret: this.key.open(a.atlassian_secret, "apps:atlassian_secret") };
+    return keys;
   }
 
   // ---------- writes: the database first, then this snapshot again ----------

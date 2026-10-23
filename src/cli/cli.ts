@@ -353,8 +353,13 @@ async function link(store: ClosableStore, registry: Registry, stream: string, va
   return exitOf(r);
 }
 
-const linkWords = (l: Record<string, unknown>) =>
-  [l.repo ? `GitHub ${String(l.repo)}` : "", l.jira_project ? `Jira ${l.jira_name ? `${String(l.jira_name)} (${String(l.jira_project)})` : String(l.jira_project)} on ${String(l.jira_site)}` : l.jira_site ? `Jira site ${String(l.jira_site)}` : ""].filter(Boolean).join(" · ");
+const linkWords = (l: Record<string, string | undefined>) => {
+  const words = l.repo ? [`GitHub ${l.repo}`] : [];
+  const named = `${l.jira_name} (${l.jira_project})`;
+  if (l.jira_project) words.push(`Jira ${l.jira_name ? named : l.jira_project} on ${l.jira_site}`);
+  else if (l.jira_site) words.push(`Jira site ${l.jira_site}`);
+  return words.join(" · ");
+};
 
 // The Jira login: asked for here, checked against the site, kept outside the log.
 async function connectJira(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
