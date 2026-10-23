@@ -40,6 +40,10 @@ import { quote } from "./command.ts";
 import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
 
 export const SESSION_COOKIE = "tira_session";
+// Setup's buttons: copy (a tick once copied), and show / hide, as SF Symbols draw them
+const COPY = `<svg class="i-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.3a1.7 1.7 0 0 0-1.7-1.7H4.2a1.7 1.7 0 0 0-1.7 1.7v4.6a1.7 1.7 0 0 0 1.7 1.7h.3"/></svg><svg class="i-done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>`;
+const EYE = `<svg class="i-show" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><svg class="i-hide" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 3.7A6.6 6.6 0 0 1 8 3.5c4.1 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.7 2.2M4 5.1C2.4 6.3 1.5 8 1.5 8S3.9 12.5 8 12.5c1.2 0 2.2-.4 3.1-.9M6.6 6.6a2 2 0 0 0 2.8 2.8M2 2l12 12"/></svg>`;
+
 // a direct GitHub sign-in under way, in the browser that started it (integrations.ts: signinStart)
 const SIGNIN_COOKIE = "tira_signin";
 
@@ -168,6 +172,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const redirectUri = (host: string) => `http://${host}/integrations/jira/callback`;
   const githubBack = (host: string) => `http://${host}/signin/github/callback`;
 
+
+  // who may see and change tira's own apps: its admin, once GitHub sign-in is on; before that,
+  // whoever runs this tira (there is no one else to ask)
+  const mayChangeApps = (login: string | undefined) => (appKeys(env).github ? !!login && isAdmin(access(env), login) : true);
 
   // the step after signing in: connect a repo while the workspace has none, else the board
   const nextStep = async (login: string | undefined): Promise<string> => (login && !workspaceOf((await c.now()).r, c.stream)?.repo ? "/connect" : "/");
@@ -315,7 +323,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const f = c.takeFlash(url.searchParams.get("r") ?? "");
     return f ? `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>` : "";
   };
-  const scripts = `<script type="module" src="/tabs.mjs"></script><script type="module" src="/help.mjs"></script>`;
+  const scripts = `<script type="module" src="/tabs.mjs"></script><script type="module" src="/help.mjs"></script><script type="module" src="/secrets.mjs"></script>`;
   const signedOut = (res: ServerResponse, url: URL) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/welcome${url.search}` }); // a result goes along
 
   // Account settings (GET /settings): who you are, your GitHub and Jira, how tira looks, who may
@@ -386,15 +394,24 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         + `<div class="grp-row"><span class="grp-k"></span><button class="act" type="submit">Save</button></div></form><div class="grp-foot">Shown to people who can't sign in yet.</div></section>`;
     }
 
-    // setup: tira's own apps (open while one is missing)
+    // setup: tira's own apps, as Render shows environment secrets: each value as dots, and for the
+    // admin (or, before GitHub sign-in is on, whoever runs this tira) an eye to show it and a copy
+    // button, each fetching that one value when pressed (secrets.mjs), so no key is ever in the page.
+    // Edit swaps the list for the form (a checkbox, so it works with no script), where an empty field
+    // keeps what's saved. Open while one is missing; straight to the form while nothing is set.
+    const mayKeys = mayChangeApps(me.login);
+    const envKeys: [string, string, string | undefined][] = [["github_client_id", "GitHub Client ID", keys.github?.clientId], ["github_secret", "GitHub Secret", keys.github?.secret], ["atlassian_client_id", "Atlassian Client ID", keys.atlassian?.clientId], ["atlassian_secret", "Atlassian Secret", keys.atlassian?.secret]];
+    const envRow = ([k, label, v]: [string, string, string | undefined]) => `<div class="grp-row env-row" data-env="${k}"><span class="grp-k">${label}</span>`
+      + (v ? `<span class="env-v" data-env-value>${"•".repeat(12)}</span>`
+        + (mayKeys ? `<button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy ${label}">${COPY}</button><button type="button" class="env-btn" data-env-show title="Show" aria-label="Show ${label}" aria-pressed="false">${EYE}</button>` : "")
+        : `<span class="env-v none">Not set</span>`) + `</div>`;
+    const envField = ([k, label, v]: [string, string, string | undefined]) => `<label class="grp-row"><span class="grp-k">${label}</span><input type="${k.endsWith("secret") ? "password" : "text"}" name="${k}" value="" autocomplete="off" spellcheck="false" placeholder="${v ? "Saved: leave empty to keep" : k === "github_secret" ? "Optional: sign in in one click" : "Not set"}"></label>`;
     const setup = `<details class="grp" data-int="setup" id="setup"${keys.github && keys.atlassian ? "" : " open"}><summary class="grp-h">Setup</summary><p class="grp-desc">${esc(DESC.setup)}</p>`
-      + `<form method="post" action="/integrations/setup" class="grp-list">${t}<input type="hidden" name="back" value="/settings">`
-      + `<label class="grp-row"><span class="grp-k">GitHub Client ID</span><input type="text" name="github_client_id" value="${esc(keys.github?.clientId ?? "")}" autocomplete="off" spellcheck="false"></label>`
-      + `<label class="grp-row"><span class="grp-k">GitHub Secret</span><input type="password" name="github_secret" value="" autocomplete="off" placeholder="${keys.github?.secret ? "Saved" : "Optional: sign in in one click"}"></label>`
-      + `<label class="grp-row"><span class="grp-k">Atlassian Client ID</span><input type="text" name="atlassian_client_id" value="${esc(keys.atlassian?.clientId ?? "")}" autocomplete="off" spellcheck="false"></label>`
-      + `<label class="grp-row"><span class="grp-k">Atlassian Secret</span><input type="password" name="atlassian_secret" value="" autocomplete="off"${keys.atlassian ? ` placeholder="Saved"` : ""}></label>`
-      + `<div class="grp-row"><span class="grp-k"></span><button class="act primary" type="submit">Save</button></div></form>`
-      + `<div class="grp-foot">Kept privately, sealed. A secret is never shown again. How to make these apps: ask the Help centre.</div></details>`;
+      + (mayKeys ? `<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps"${!keys.github && !keys.atlassian ? " checked" : ""}>` : "")
+      + `<div class="grp-list env-list" data-env-list><div class="grp-row env-head"><span class="grp-k">Key</span><span class="env-v">Value</span>${mayKeys ? `<label class="act" for="setup-edit" data-env-edit>Edit</label>` : ""}</div>${envKeys.map(envRow).join("")}</div>`
+      + (mayKeys ? `<form method="post" action="/integrations/setup" class="grp-list env-edit" data-setup-form>${t}<input type="hidden" name="back" value="/settings">${envKeys.map(envField).join("")}`
+        + `<div class="grp-row env-acts"><label class="how" for="setup-edit">Cancel</label><button class="act primary" type="submit">Save</button></div></form>` : "")
+      + `<div class="grp-foot">${mayKeys ? "Kept privately and sealed, never in the page: Show and Copy fetch one value when you press them. How to make these apps: ask the Help centre." : "Only this tira's admin can see or change these."}</div></details>`;
 
     const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + setup + people + appearance;
     c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections: [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]] }, body, helpPanel(portOf(host), shown), scripts));
@@ -517,12 +534,14 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (form === undefined) return;
     const to = backOf(form.get("back"));
     const now = appKeys(env);
-    // once GitHub sign-in is on, only someone signed in may change tira's apps
-    if (now.github && !who(req).login) return back(res, to, { ok: false, text: "Sign in with GitHub to change tira's apps." });
-    const ghId = (form.get("github_client_id") ?? "").trim();
+    // once GitHub sign-in is on, only its admin may change tira's apps
+    const login = who(req).login;
+    if (!mayChangeApps(login)) return back(res, to, { ok: false, text: login ? "Only this tira's admin can change its apps." : "Sign in with GitHub to change tira's apps." });
     const ghSecret = (form.get("github_secret") ?? "").trim();
-    const aId = (form.get("atlassian_client_id") ?? "").trim();
     const aSecret = (form.get("atlassian_secret") ?? "").trim();
+    // an empty field keeps what's saved: a new secret alone goes with the Client ID already there
+    const ghId = (form.get("github_client_id") ?? "").trim() || (ghSecret ? now.github?.clientId ?? "" : "");
+    const aId = (form.get("atlassian_client_id") ?? "").trim() || (aSecret ? now.atlassian?.clientId ?? "" : "");
     const next: Parameters<typeof saveAppKeys>[0] = {};
     // a secret left empty keeps the one saved (the direct sign-in; without one, GitHub's code)
     const keptSecret = ghSecret || now.github?.secret;
@@ -531,6 +550,18 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (aId && !aSecret && !now.atlassian?.secret) return back(res, to, { ok: false, text: "Add the Atlassian app's secret too." });
     await saveAppKeys(next, env);
     back(res, to, { ok: true, text: to === "/welcome" ? "Saved. Now sign in." : "Saved." });
+  };
+
+  // One of tira's own keys, for Show or Copy in Setup (secrets.mjs): to whoever may change them,
+  // one at a time (never cached: every tira response says no-store); the page only ever holds dots.
+  const revealPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await c.formOf(req, res, host);
+    if (form === undefined) return;
+    if (!mayChangeApps(who(req).login)) return c.send(res, 403, "text/plain; charset=utf-8", "Only this tira's admin can see its keys.");
+    const keys = appKeys(env);
+    const value = ({ github_client_id: keys.github?.clientId, github_secret: keys.github?.secret, atlassian_client_id: keys.atlassian?.clientId, atlassian_secret: keys.atlassian?.secret } as Record<string, string | undefined>)[form.get("key") ?? ""];
+    if (value === undefined) return c.send(res, 404, "text/plain; charset=utf-8", "Not set.");
+    c.send(res, 200, "text/plain; charset=utf-8", value);
   };
 
   const linkPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
@@ -693,6 +724,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "GET /integrations": page,
     "GET /settings": profile,
     "POST /integrations/setup": setupPost,
+    "POST /integrations/setup/reveal": revealPost,
     "POST /integrations/link": linkPost,
     "POST /integrations/people": peoplePost,
     "POST /integrations/profile": profilePost,
@@ -750,7 +782,7 @@ function helpPanel(port: string, name?: string): string {
   const qa: [string, string, string][] = [
     ["How do I make tira's GitHub app?", `On GitHub: Settings → Developer settings → OAuth Apps → New. Homepage <code>http://localhost:${esc(port)}</code>, callback <code>http://localhost:${esc(port)}/</code>. Tick Enable Device Flow, then paste its Client ID under Setup. For sign-in in one click (straight to GitHub and back, no code), generate a client secret there too and paste it beside the Client ID.`, "github app oauth client id secret device flow setup create sign in code direct"],
     ["How do I make the Atlassian app for Jira?", `In Atlassian's developer console: Create → OAuth 2.0. Jira scopes <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code>. Callback <code>http://localhost:${esc(port)}/integrations/jira/callback</code>. Paste its Client ID and secret under Setup.`, "atlassian jira app oauth scopes console client secret create"],
-    ["Where are my keys and tokens kept?", "Only on this machine, in tira's private store. The Atlassian secret is never shown again, and nothing goes into the project's log.", "keys tokens secret stored kept saved private safe credentials password"],
+    ["Where are my keys and tokens kept?", "In tira's private store, sealed, and never in the project's log. tira's own app keys show as dots in Setup; only the admin can show or copy them, one at a time.", "keys tokens secret stored kept saved private safe credentials password"],
     ["What does Sync do?", "It links pull requests that name a task, makes a Jira issue for each task, and brings moves made in Jira back as commands, which tira's rules may refuse. A merged pull request counts as proof of work.", "sync syncing pull request pr issue mirror update proof merge"],
     ["Who can sign in?", "The first person to sign in becomes the admin. After that, only the people the admin adds by GitHub username.", "sign signin login admin people access invite add user member team"],
     ["Why does Jira need localhost?", `Atlassian sends you back to tira's callback on localhost. Open tira at <code>http://localhost:${esc(port)}</code> to connect Jira.`, "localhost callback redirect connect address url port"],

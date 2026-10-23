@@ -64,6 +64,7 @@ const ASSETS: Record<string, string> = {
   "/tabs.mjs": readFileSync(new URL("./tabs.mjs", import.meta.url), "utf8"),
   "/new-project.mjs": readFileSync(new URL("./new-project.mjs", import.meta.url), "utf8"),
   "/help.mjs": readFileSync(new URL("./help.mjs", import.meta.url), "utf8"),
+  "/secrets.mjs": readFileSync(new URL("./secrets.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {

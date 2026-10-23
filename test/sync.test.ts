@@ -450,23 +450,65 @@ test("before setup: the board points to Project settings, and Account settings o
   }
 });
 
-test("Setup keeps tira's app keys privately; the Atlassian secret is never shown again", async () => {
+test("Setup shows tira's app keys as Render shows secrets: dots, with Show and Copy for the admin only, one value at a time and never in the page; Edit to change them", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
+    // the first run, before GitHub sign-in is on: whoever runs this tira sets them
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "" })), "Add the Atlassian app's secret too.");
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz" })), "Saved.");
     assert.deepEqual(appKeys(s.env), { github: { clientId: "Iv1.gh" }, atlassian: { clientId: "at-id", secret: "SECRET-xyz" } });
-    await s.signInWithGitHub();
+    await s.signInWithGitHub(); // the first one in: the admin
     const page = (await s.http("GET", "/settings")).body;
-    assert.doesNotMatch(page, /SECRET-xyz/);
-    assert.match(page, /<input type="password" name="atlassian_secret" value="" autocomplete="off" placeholder="Saved">/);
+    // each value as dots, with Copy and Show; a key not set says so; the page never holds a key
+    assert.match(page, /<div class="grp-row env-row" data-env="atlassian_secret"><span class="grp-k">Atlassian Secret<\/span><span class="env-v" data-env-value>••••••••••••<\/span><button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy Atlassian Secret">[^]*?<button type="button" class="env-btn" data-env-show title="Show" aria-label="Show Atlassian Secret" aria-pressed="false">/);
+    assert.match(page, /<div class="grp-row env-row" data-env="github_secret"><span class="grp-k">GitHub Secret<\/span><span class="env-v none">Not set<\/span><\/div>/);
+    assert.doesNotMatch(page, /SECRET-xyz|value="Iv1\.gh"|value="at-id"/);
+    // Edit swaps in the form, where an empty field keeps what's saved
+    assert.match(page, /<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira&#39;s apps">|<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps">/);
+    assert.match(page, /<label class="act" for="setup-edit" data-env-edit>Edit<\/label>/);
+    assert.match(page, /<input type="password" name="atlassian_secret" value="" autocomplete="off" spellcheck="false" placeholder="Saved: leave empty to keep">/);
     assert.match(page, /<details class="grp" data-int="setup" id="setup">/); // both set: folded away
+    assert.match(page, /<script type="module" src="\/secrets\.mjs"><\/script>/);
+    // the list or the form, never both: the form's own rule outweighs every list's display:block
+    assert.match(page, /\.grp-list\.env-edit,#setup-edit:checked~\.env-list\{display:none\}#setup-edit:checked~\.env-edit\{display:block\}/);
+    // Show and Copy: one value, to the admin, never cached
+    const shown = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
+    assert.equal(shown.status, 200);
+    assert.equal(shown.body, "SECRET-xyz");
+    assert.equal(shown.headers["cache-control"], "no-store");
+    assert.equal((await s.post("/integrations/setup/reveal", { key: "github_secret" })).status, 404); // not set
+    assert.equal((await s.post("/integrations/setup/reveal", { key: "nope" })).status, 404);
+    const noToken = await s.http("POST", "/integrations/setup/reveal", "key=atlassian_secret");
+    assert.equal(noToken.status, 403);
+    assert.doesNotMatch(noToken.body, /SECRET-xyz/);
+    // a new secret alone keeps its Client ID
+    assert.equal(await s.flash(await s.post("/integrations/setup", { atlassian_secret: "SECRET-2" })), "Saved.");
+    assert.deepEqual(appKeys(s.env).atlassian, { clientId: "at-id", secret: "SECRET-2" });
     assert.equal(statSync(join(home, "credentials.json")).mode & 0o777, 0o600);
-    // once sign-in is on, only someone signed in may change them
+    // someone else signed in, not the admin: dots only, and no Show, Copy or change
+    await s.post("/integrations/people", { do: "add", login: "octo" });
+    s.githubAuthApi.login = "octo";
+    s.signOut();
+    await s.signInWithGitHub();
+    const theirs = (await s.http("GET", "/settings")).body;
+    assert.doesNotMatch(theirs, /data-env-copy|data-env-show|data-setup-form|id="setup-edit"/);
+    assert.match(theirs, /<div class="grp-foot">Only this tira's admin can see or change these\.<\/div>/);
+    const refused = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
+    assert.equal(refused.status, 403);
+    assert.doesNotMatch(refused.body, /SECRET/);
+    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Only this tira's admin can change its apps.");
+    assert.equal(appKeys(s.env).github?.clientId, "Iv1.gh");
+    // signed out: no one changes them
     s.signOut();
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Sign in with GitHub to change tira's apps.");
     assert.equal(appKeys(s.env).github?.clientId, "Iv1.gh");
+    // in the browser: a shown value hides again by itself; Copy says so with a tick, falls back to the
+    // older copy command where a browser refuses the clipboard, and else shows the value selected for ⌘C
+    const script = readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8");
+    assert.match(script, /show\.title = "Hide";\n\s+timer = setTimeout\(hide, 30_000\);/);
+    assert.match(script, /await navigator\.clipboard\.writeText\(text\);\n\s+return true;\n\s+\} catch \{[^]*?done = document\.execCommand\("copy"\);/);
+    assert.match(script, /if \(await copyText\(value\)\) \{\n\s+copy\.dataset\.done = "";[^]*?getSelection\(\)\?\.selectAllChildren\(out\);\n\s+copy\.title = "Press ⌘C to copy";/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });
@@ -594,7 +636,7 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     s.signIn(session);
     // the secret is kept and never shown; saving the Client ID alone keeps it
     const settings = (await s.http("GET", "/settings")).body;
-    assert.match(settings, /<input type="password" name="github_secret" value="" autocomplete="off" placeholder="Saved">/);
+    assert.match(settings, /<input type="password" name="github_secret" value="" autocomplete="off" spellcheck="false" placeholder="Saved: leave empty to keep">/);
     assert.doesNotMatch(settings, /gh-secret/);
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh" })), "Saved.");
     assert.equal(appKeys(s.env).github?.secret, "gh-secret");

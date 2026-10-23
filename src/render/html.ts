@@ -298,6 +298,11 @@ form.inline{display:inline}.who-chip{font-size:13px;font-weight:600;color:var(--
 .hc-send:disabled{opacity:.35;cursor:default}.hc-send:not(:disabled):active{transform:scale(.92)}.hc-foot{margin:6px 0 0;text-align:center;font-size:11px;color:var(--dim)}
 .profile{display:flex;align-items:center;gap:14px;padding:14px 16px}.av.av-lg{width:52px;height:52px;font-size:20px}.pf-who{display:grid;gap:2px;min-width:0}.pf-who b{font-size:17px}.pf-who span{color:var(--mut);font-size:13px}.pf-out{margin-left:auto}
 .grp-desc{margin:8px 0 12px;color:var(--mut);font-size:13px}
+.env-row .grp-k,.env-head .grp-k{flex:0 0 170px}.env-v{flex:1;min-width:0;font:13px/1.4 var(--mono);letter-spacing:.14em;color:var(--mut);overflow-wrap:anywhere}.env-v.shown{letter-spacing:0;color:var(--fg);user-select:all}.env-v.none{font-family:var(--sans);letter-spacing:0;color:var(--dim)}
+.env-head{min-height:36px}.env-head .grp-k,.env-head .env-v{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.env-btn{flex:none;display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--mut);cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease)}.env-btn:hover{background:var(--hover);color:var(--fg)}.env-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}.env-btn svg{width:15px;height:15px}
+.env-btn .i-hide,.env-btn .i-done{display:none}.env-btn[aria-pressed=true] .i-show{display:none}.env-btn[aria-pressed=true] .i-hide{display:block}.env-btn[data-done] .i-copy{display:none}.env-btn[data-done] .i-done{display:block;color:var(--done)}
+.grp-list.env-edit,#setup-edit:checked~.env-list{display:none}#setup-edit:checked~.env-edit{display:block}.env-acts{justify-content:flex-end;gap:12px}#setup-edit:focus-visible~.env-list [data-env-edit]{outline:2px solid var(--accent);outline-offset:2px}
 .appear{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .look{display:grid;gap:2px;padding:10px 10px 12px;background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-lg);cursor:pointer;transition:border-color .18s var(--ease),box-shadow .18s var(--ease),transform .1s var(--ease)}.look:hover{border-color:var(--line-2)}.look:active{transform:scale(.98)}
 .look b{font-size:14px}.look small{font-size:12px;color:var(--mut)}
