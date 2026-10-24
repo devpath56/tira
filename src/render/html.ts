@@ -765,8 +765,9 @@ function describe(p: Record<string, unknown>): string {
     .join(" · ");
 }
 
-// One entry per event that touched a node, oldest first (incl. rejected commands).
-function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<string, TrailEntry[]>; all: TrailEntry[] } {
+// One entry per event that touched a node, oldest first (incl. rejected commands). Also what
+// tira mcp's get_task shows as a task's history.
+export function trails(events: readonly StoredEvent[], stream: string): { byKey: Map<string, TrailEntry[]>; all: TrailEntry[] } {
   const byKey = new Map<string, TrailEntry[]>();
   const all: TrailEntry[] = [];
   const add = (entry: TrailEntry) => {

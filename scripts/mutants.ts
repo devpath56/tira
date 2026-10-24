@@ -834,6 +834,14 @@ const MUTANTS: Mutant[] = [
   { name: "mcp: tira's own names accepted", file: "src/mcp/server.ts", find: "  if (isReservedActor(name)) return", replace: "  if (false) return" },
   { name: "mcp: any shape of name accepted", file: "src/mcp/server.ts", find: "  if (!NAME.test(name)) return", replace: "  if (false) return" },
   { name: "mcp: no name needed", file: "src/mcp/server.ts", find: "  if (name === undefined || name.trim() === \"\") return", replace: "  if (name === undefined) return" },
+  { name: "mcp: the task list shows closed tasks by default", file: "src/mcp/tasks.ts", find: "  if (wanted === \"open\") return !CLOSED.has(state);", replace: "  if (wanted === \"open\") return true;" },
+  { name: "mcp: the task list ignores the state asked", file: "src/mcp/tasks.ts", find: ".filter((t) => fits(t.state, wanted));", replace: ".filter((t) => fits(t.state, \"open\"));" },
+  { name: "mcp: what's next hides the task in progress", file: "src/mcp/tasks.ts", find: "  for (const row of rows.filter((x) => x.active)) {", replace: "  for (const row of rows.filter((x) => false)) {" },
+  { name: "mcp: what's next repeats the task in progress", file: "src/mcp/tasks.ts", find: "  else if (!view.active.includes(next.key)) lines.push(", replace: "  else lines.push(" },
+  { name: "mcp: a task forgets why it's blocked", file: "src/mcp/tasks.ts", find: "  if (since?.reason) lines.push(`Blocked: ${since.reason}`);\n", replace: "" },
+  { name: "mcp: a task forgets its proof", file: "src/mcp/tasks.ts", find: "  if (proof) lines.push(`Proof: ${proof.ref} (from ${proof.actor}, seq ${proof.seq})`);\n", replace: "" },
+  { name: "mcp: an unknown task reads as found", file: "src/mcp/tasks.ts", find: "if (!row || !t) return { ok: false,", replace: "if (!row || !t) return { ok: true," },
+  { name: "mcp: a reading tool says it writes", file: "src/mcp/server.ts", find: "const READS = { readOnlyHint: true, openWorldHint: false };", replace: "const READS = { readOnlyHint: false, openWorldHint: false };" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.

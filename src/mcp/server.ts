@@ -4,10 +4,12 @@
 // network. Every tool reads or writes through tira's own rules, so an agent can do nothing a
 // person couldn't, and the history says which agent did it.
 import { McpServer } from "@modelcontextprotocol/server";
+import * as z from "zod/v4";
 import { AGENT } from "../render/html.ts";
 import { isReservedActor } from "../write/write-path.ts";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
+import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
 
 // What every tool works in: the project's stream, and the agent it acts as.
 export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string }
@@ -25,7 +27,30 @@ export function agentNameProblem(name: string | undefined): string | undefined {
   return undefined;
 }
 
-// The server for one connection (serveStdio builds one per client).
+// A tool's answer as MCP carries it: its text, marked an error when it didn't do what was asked.
+const answer = (t: ToolText) => ({ content: [{ type: "text" as const, text: t.text }], ...(t.ok ? {} : { isError: true }) });
+const READS = { readOnlyHint: true, openWorldHint: false };
+
+// The server for one connection (serveStdio builds one per client): the tools, each reading the
+// project's log as it is when called.
 export function tiraMcpServer(ctx: AgentContext): McpServer {
-  return new McpServer({ name: "tira", version: "1.0.0", description: `tira tasks for the project ${ctx.stream}, as ${ctx.actor}` }, { capabilities: { tools: {} } });
+  const server = new McpServer({ name: "tira", version: "1.0.0", description: `tira tasks for the project ${ctx.stream}, as ${ctx.actor}` }, { capabilities: { tools: {} } });
+  server.registerTool("next_task", {
+    title: "What's next",
+    description: "The task being worked on in this project, the next one to pick up (in tira's order), and how many are blocked. Start here.",
+    annotations: READS,
+  }, async () => answer(await nextTask(ctx)));
+  server.registerTool("list_tasks", {
+    title: "List tasks",
+    description: "The project's tasks in the board's order: id, state (to do, in progress, blocked, done, dropped) and where each sits in the tree; ◆ marks the next one. Open tasks unless a state is given.",
+    inputSchema: z.object({ state: z.enum(LIST_STATES).optional().describe("open (the default), all, or one state: unstarted, in_progress, blocked, done, cancelled") }),
+    annotations: READS,
+  }, async ({ state }) => answer(await listTasks(ctx, state)));
+  server.registerTool("get_task", {
+    title: "Show a task",
+    description: "One task: its state and place in the tree, its subtasks, why it's blocked and what it waits on, its proof of work, and its full history (who did what, refusals included).",
+    inputSchema: z.object({ id: z.string().min(1).describe("the task's id, as list_tasks shows it") }),
+    annotations: READS,
+  }, async ({ id }) => answer(await getTask(ctx, id)));
+  return server;
 }
