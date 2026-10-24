@@ -256,7 +256,7 @@ test("canonical-array-order: every canonical surface keeps array order: canonica
   // structure: one canonical form and one state hash; the CLI's own sha256 takes file bytes only
   const src = srcCode();
   // (the private store hashes session ids so its file can't sign anyone in: not a state hash)
-  assert.deepEqual(filesMatching(src, /createHash\(/), ["src/cli/cli.ts", "src/fold/fold.ts", "src/sync/credentials.ts", "src/write/fxkey.ts"]);
+  assert.deepEqual(filesMatching(src, /createHash\(/), ["src/cli/cli.ts", "src/fold/fold.ts", "src/mcp/tokens.ts", "src/sync/credentials.ts", "src/write/fxkey.ts"]); // tokens.ts: agents' tokens, not state
   assert.equal((src.get("src/fold/fold.ts")?.match(/createHash\("sha256"\)\.update\(canonicalJson\(r\)\)/g) ?? []).length, 1);
   assert.match(src.get("src/cli/cli.ts") ?? "", /const sha256 = \(bytes: Buffer\)/);
   assert.deepEqual(filesMatching(src, /\bfingerprint\(r\)/), ["src/cli/cli.ts", "src/serve/server.ts"]);

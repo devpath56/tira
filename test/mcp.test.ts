@@ -13,13 +13,14 @@ import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { run } from "../src/cli/cli.ts";
-import { agentNameProblem, tiraMcpServer } from "../src/mcp/server.ts";
+import { agentNameProblem, DISCONNECTED, tiraMcpServer } from "../src/mcp/server.ts";
+import { agentTokensFor, tokenHash, freeName, MemoryAgentTokens } from "../src/mcp/tokens.ts";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { freshPgDb, needsPg } from "./test-stores.ts";
 import { openStore } from "../src/store/open.ts";
-import { connectWords, databaseCheck, serverName, TIRA_SCRIPT } from "../src/mcp/connect.ts";
+import { APPS, appSetup, databaseCheck, serverName, TIRA_SCRIPT, TOKEN_HERE } from "../src/mcp/connect.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
 
@@ -40,9 +41,9 @@ async function world() {
 }
 
 // tira mcp's server for the project, with the official MCP client on the other end of a pipe
-async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code") {
+async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor }).connect(serverSide);
+  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}) }).connect(serverSide);
   const client = new Client({ name: "tira-tests", version: "1.0.0" });
   await client.connect(clientSide);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -52,21 +53,30 @@ async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-c
   return { client, call };
 }
 
-test("tira mcp acts only under an agent's own name: never a person's, never tira's own writers', and says why before it starts", async () => {
-  for (const ok of ["claude-code", "claude", "codex-review", "factory-s3", "research-agent", "triage-bot"]) assert.equal(agentNameProblem(ok), undefined, ok);
-  assert.match(agentNameProblem(undefined) ?? "", /^tira mcp needs --actor NAME \(or TIRA_ACTOR\): the agent's own name/);
-  assert.match(agentNameProblem("  ") ?? "", /needs --actor NAME/);
+test("an agent's name: its own, never a person's nor tira's own writers'; tira mcp starts only with a valid token, and says why on stderr before it opens anything", async () => {
+  for (const ok of ["claude-code", "claude", "codex-review", "factory-s3", "research-agent", "triage-bot", "cursor-agent", "vscode-agent", "claude-desktop"]) assert.equal(agentNameProblem(ok), undefined, ok);
+  for (const blank of [undefined, "  "]) assert.equal(agentNameProblem(blank), "Give the agent a name of its own, e.g. claude-code.");
   assert.match(agentNameProblem("isha") ?? "", /^"isha" reads as a person's name: an agent acts under an agent's name/);
   for (const reserved of ["tira", "dispatcher", "sync"]) assert.match(agentNameProblem(reserved) ?? "", /is reserved for tira's, the dispatcher's and the sync's own writes/, reserved);
   for (const odd of ["claude code", "claude-code x", "claude/../x"]) assert.match(agentNameProblem(odd) ?? "", /can't be an agent's name: letters, digits/, odd);
-  // the command says so on stderr, writes nothing to stdout (the protocol's), and opens no store
-  for (const argv of [["mcp", "--actor", "isha"], ["mcp"]]) {
+  // the command: no token, an unknown or revoked one, another project's; nothing on stdout (the protocol's), no store opened
+  const tokens = new MemoryAgentTokens();
+  const { token } = await tokens.create("demo", "claude-code", "isha");
+  const gone = (await tokens.create("demo", "old-agent", "isha")).token;
+  await tokens.revoke((await tokens.find(gone))?.id ?? "");
+  const cases: [string[], Record<string, string>, RegExp][] = [
+    [["mcp"], {}, /^tira: tira mcp needs its agent's token \(TIRA_AGENT_TOKEN\): connect the agent in Project settings → Connect agents/],
+    [["mcp"], { TIRA_AGENT_TOKEN: "tira_nope_x" }, /^tira: that agent token isn't valid: it was revoked, or wasn't made on this tira\./],
+    [["mcp"], { TIRA_AGENT_TOKEN: gone }, /^tira: that agent token isn't valid/],
+    [["--stream", "other", "mcp"], { TIRA_AGENT_TOKEN: token }, /^tira: this agent's token is for demo, not other$/],
+  ];
+  for (const [argv, env, why] of cases) {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env: {}, openStore: () => { throw new Error("no store should open"); } });
+    const code = await run(argv, { out: (l) => out.push(l), err: (l) => err.push(l), env, agentTokens: tokens, openStore: () => { throw new Error("no store should open"); } });
     assert.equal(code, 1, argv.join(" "));
     assert.deepEqual(out, []);
-    assert.match(err.join("\n"), /tira: (?:"isha" reads as a person's name|tira mcp needs --actor NAME)/);
+    assert.match(err.join("\n"), why);
   }
 });
 
@@ -150,59 +160,125 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
   }
 });
 
-test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, for the project and as the agent named; it says so on stderr only, and stops when its client does", { skip: needsPg }, async () => {
+test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, with the agent's token (the project and the agent come from it); it says so on stderr only, a revoked agent's next call is refused, and it stops when its client does", { skip: needsPg }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tira-mcp-"));
   const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
   const db = freshPgDb();
-  const env: Record<string, string> = { ...(process.env as Record<string, string>), TIRA_DATABASE_URL: db, TIRA_HOME: join(dir, "home"), TIRA_FACTORY: "" };
-  const tira = (...argv: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "e2e", ...argv, "--actor", "isha"], { encoding: "utf8", env });
+  const base: Record<string, string> = { ...(process.env as Record<string, string>), TIRA_DATABASE_URL: db, TIRA_HOME: join(dir, "home"), TIRA_FACTORY: "" };
+  const tira = (...argv: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "e2e", ...argv, "--actor", "isha"], { encoding: "utf8", env: base });
   tira("create", "node", "site");
   tira("create", "node", "header", "--parent", "site");
-  const transport = new StdioClientTransport({ command: process.execPath, args: ["--disable-warning=ExperimentalWarning", script, "--stream", "e2e", "mcp", "--actor", "claude-code"], env, stderr: "pipe" });
+  const tokens = agentTokensFor(base);
+  assert.ok(tokens);
+  const made = await tokens.create("e2e", "claude-code", "isha");
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["--disable-warning=ExperimentalWarning", script, "mcp"], env: { ...base, TIRA_AGENT_TOKEN: made.token }, stderr: "pipe" });
   let said = "";
   transport.stderr?.on("data", (d: Buffer) => { said += d.toString(); });
   const client = new Client({ name: "tira-e2e", version: "1.0.0" });
-  const text = async (name: string, args: Record<string, unknown> = {}) => ((await client.callTool({ name, arguments: args })).content as { text: string }[]).map((c) => c.text).join("\n");
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await client.callTool({ name, arguments: args });
+    return { error: r.isError === true, text: (r.content as { text: string }[]).map((c) => c.text).join("\n") };
+  };
   try {
     await client.connect(transport);
     assert.equal((await client.listTools()).tools.length, 8);
-    assert.equal(await text("next_task"), "In progress: nothing.\nNext: header (under site)");
-    assert.match(await text("start_task", { id: "header" }), /^Start header: done \(seq 3\)\.$/);
+    assert.deepEqual(await call("next_task"), { error: false, text: "In progress: nothing.\nNext: header (under site)" });
+    assert.match((await call("start_task", { id: "header" })).text, /^Start header: done \(seq 3\)\.$/);
     assert.match(said, /^tira: MCP server for e2e, acting as claude-code \(on stdio; it stops when its client does\)$/m);
+    assert.ok((await tokens.list("e2e"))[0]?.lastUsedAt, "it says when the agent was last used");
+    // revoked in Project settings: its next call is refused, and nothing more is written
+    assert.equal(await tokens.revoke(made.row.id), true);
+    assert.deepEqual(await call("next_task"), { error: true, text: DISCONNECTED });
     const t = performance.now();
     await client.close();
     assert.ok(performance.now() - t < 5000, "tira mcp stops promptly when its client does");
-    // the write is in the project's log, as the agent
     const store = openStore(db);
     try {
       const last = (await store.readStream("e2e")).at(-1);
-      assert.deepEqual([last?.type, last?.metadata.actor], ["node.start", "claude-code"]);
+      assert.deepEqual([last?.type, last?.metadata.actor], ["node.start", "claude-code"]); // as the agent
     } finally {
       await store.close();
     }
   } finally {
     await client.close().catch(() => undefined);
+    await tokens.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("connecting an agent: the command for Claude Code (all projects or one folder) or Claude Desktop's entry, with this tira's Node and script, quoted for a shell; and how to undo it", () => {
+test("agents' tokens on Postgres: one per agent and project, kept as a tokenHash; listed with who and when; revoked, it's gone", { skip: needsPg }, async () => {
+  const tokens = agentTokensFor({ TIRA_DATABASE_URL: freshPgDb() });
+  assert.ok(tokens);
+  try {
+    const a = await tokens.create("p", "claude-code", "isha");
+    await tokens.create("q", "claude-code", "isha"); // another project: its own
+    assert.match(a.token, /^tira_[0-9a-f]{8}_[0-9a-f]{48}$/);
+    assert.deepEqual((await tokens.find(a.token))?.agent, "claude-code");
+    assert.deepEqual((await tokens.list("p")).map((x) => [x.agent, x.createdBy]), [["claude-code", "isha"]]);
+    await assert.rejects(tokens.create("p", "claude-code", "isha")); // the same name, still connected
+    assert.equal(await tokens.revoke(a.row.id), true);
+    assert.equal(await tokens.find(a.token), undefined);
+    assert.deepEqual(await tokens.list("p"), []);
+    assert.equal(await tokens.revoke(a.row.id), false);
+  } finally {
+    await tokens.close();
+  }
+});
+
+test("connecting an agent: each app's setup with the agent's token and this tira's Node and script; Cursor's and VS Code's install links; quoted for a shell; how to remove it", () => {
   assert.equal(serverName("factory-ui"), "tira-factory-ui");
   assert.equal(serverName("Isha Portfolio"), "tira-isha-portfolio");
   assert.equal(serverName("***"), "tira-project");
-  const words = (project: string, where: "user" | "local" | "desktop", agent = "claude-code") => connectWords("/n/node", "/t/scripts/tira.ts", { project, agent, where });
-  assert.deepEqual(words("factory-ui", "user"), {
-    add: "claude mcp add --scope user tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp --stream factory-ui --actor claude-code",
-    remove: "claude mcp remove tira-factory-ui -s user",
-  });
-  assert.deepEqual(words("factory-ui", "local", "claude-research"), {
-    add: "claude mcp add --scope local tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp --stream factory-ui --actor claude-research",
-    remove: "claude mcp remove tira-factory-ui -s local",
-  });
-  assert.match(words("Isha's site", "user").add, / --stream 'Isha'\\''s site' --actor claude-code$/);
-  const desktop = words("factory-ui", "desktop");
-  assert.deepEqual(JSON.parse(desktop.add), { mcpServers: { "tira-factory-ui": { command: "/n/node", args: ["--disable-warning=ExperimentalWarning", "/t/scripts/tira.ts", "mcp", "--stream", "factory-ui", "--actor", "claude-code"] } } });
-  assert.match(desktop.remove, /^Delete "tira-factory-ui" from mcpServers in Claude Desktop's settings file/);
+  const l = { node: "/n/node", script: "/t/scripts/tira.ts" };
+  const server = { command: "/n/node", args: ["--disable-warning=ExperimentalWarning", "/t/scripts/tira.ts", "mcp"], env: { TIRA_AGENT_TOKEN: "tira_ab12cd34_x" } };
+  const code = appSetup("claude-code", "factory-ui", l, "tira_ab12cd34_x");
+  assert.equal(code.code, "claude mcp add --scope user --env TIRA_AGENT_TOKEN=tira_ab12cd34_x --transport stdio tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp");
+  assert.equal(code.remove, "claude mcp remove tira-factory-ui -s user");
+  assert.equal(code.install, undefined);
+  assert.match(appSetup("claude-code", "factory-ui", l, TOKEN_HERE).code, /--env TIRA_AGENT_TOKEN='<your token>' --transport stdio/);
+  const cursor = appSetup("cursor", "factory-ui", l, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(cursor.code), { mcpServers: { "tira-factory-ui": server } });
+  const link = new URL(cursor.install ?? "");
+  assert.equal(link.protocol + "//" + link.host + link.pathname, "cursor://anysphere.cursor-deeplink/mcp/install");
+  assert.equal(link.searchParams.get("name"), "tira-factory-ui");
+  assert.deepEqual(JSON.parse(Buffer.from(link.searchParams.get("config") ?? "", "base64").toString()), server);
+  const vscode = appSetup("vscode", "factory-ui", l, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(vscode.code), { servers: { "tira-factory-ui": { type: "stdio", ...server } } });
+  const vlink = new URL(vscode.install ?? "");
+  assert.equal(vlink.origin + vlink.pathname, "https://insiders.vscode.dev/redirect/mcp/install");
+  assert.deepEqual(JSON.parse(vlink.searchParams.get("config") ?? ""), { type: "stdio", ...server });
+  const desktop = appSetup("claude-desktop", "factory-ui", l, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(desktop.code), { mcpServers: { "tira-factory-ui": server } });
+  assert.equal(desktop.install, undefined);
+  assert.deepEqual(desktop.steps, ["In Claude Desktop: Settings → Developer → Edit Config.", "Add the entry below under mcpServers and save.", "Restart Claude Desktop."]);
+});
+
+test("agents' tokens: random, kept as a tokenHash, found until revoked; a new agent's name is free in its project", async () => {
+  const tokens = new MemoryAgentTokens();
+  const a = await tokens.create("demo", "claude-code", "isha");
+  assert.match(a.token, /^tira_[0-9a-f]{8}_[0-9a-f]{48}$/);
+  assert.notEqual(tokenHash(a.token), a.token);
+  assert.equal((await tokens.find(a.token))?.agent, "claude-code");
+  await tokens.used(a.row.id);
+  assert.ok((await tokens.list("demo"))[0]?.lastUsedAt);
+  assert.equal(await tokens.revoke(a.row.id), true);
+  assert.equal(await tokens.find(a.token), undefined);
+  assert.equal(freeName("claude-code", []), "claude-code");
+  assert.equal(freeName("claude-code", ["claude-code", "claude-code-2"]), "claude-code-3");
+});
+
+test("a revoked agent's next call is refused, whatever the tool", async () => {
+  const w = await world();
+  let connectedNow = true;
+  const { client, call } = await connected(w, "claude-code", () => Promise.resolve(connectedNow));
+  try {
+    assert.equal((await call("next_task")).error, false);
+    connectedNow = false;
+    for (const [name, args] of [["next_task", {}], ["start_task", { id: "footer" }]] as const) assert.deepEqual(await call(name, args), { error: true, text: DISCONNECTED });
+    assert.equal((await w.store.readStream(S)).filter((e) => e.metadata.actor === "claude-code").length, 0); // nothing written
+  } finally {
+    await client.close();
+  }
 });
 
 test("connecting an agent: whether it would reach this tira's database, from tira's own .env, its values compared and never shown", () => {
@@ -222,56 +298,90 @@ test("connecting an agent: whether it would reach this tira's database, from tir
   }
 });
 
-test("Account settings → Agents, right after Account: pick the project, the agent's name and where, copy the command; a person's name is caught there; it says whether agents would reach this tira's database; nothing runs from the page", async () => {
+test("Project settings → Connect agents, after Forge's Connect IDE: one click makes the agent its token and installs it; or by hand, name it and copy the app's setup; connected agents listed with Revoke; the tools; the database check", async () => {
   const w = await world();
-  await new WritePath(w.store, w.registry).submit({ stream: "other", kind: "create", entity: { type: "node", id: "x" }, actor: "isha", payload: {} });
   const dir = mkdtempSync(join(tmpdir(), "tira-agents-"));
   const envFile = join(dir, ".env");
-  const server = tiraServer({ store: w.store, registry: w.registry, stream: S, actor: "isha", token: "k", links: { env: { TIRA_HOME: dir }, envFile } });
+  const tokens = new MemoryAgentTokens();
+  const server = tiraServer({ store: w.store, registry: w.registry, stream: S, actor: "isha", token: "k", links: { env: { TIRA_HOME: dir }, envFile, agentTokens: tokens } });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as AddressInfo).port;
-  const get = (path: string) => new Promise<string>((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, method: "GET", path, headers: { host: `localhost:${port}` } }, (res) => {
+  const http = (method: string, path: string, body?: string) => new Promise<{ status: number; body: string; location?: string }>((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, method, path, headers: { host: `localhost:${port}`, origin: `http://localhost:${port}`, ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}) } }, (res) => {
       let b = "";
       res.on("data", (c) => (b += c));
-      res.on("end", () => resolve(b));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body: b, ...(typeof res.headers.location === "string" ? { location: res.headers.location } : {}) }));
     });
     req.on("error", reject);
-    req.end();
+    req.end(body);
   });
   const section = (page: string) => /<section class="grp" id="agents"[^]*?<\/section>/.exec(page)?.[0] ?? "";
-  const command = (project: string, where: string, agent = "claude-code") => esc(connectWords(process.execPath, TIRA_SCRIPT, { project, agent, where: where as "user" }).add);
+  const settings = async (path = "/integrations") => section((await http("GET", path)).body);
   try {
-    const page = await get("/settings");
-    assert.ok(page.indexOf('id="account"') < page.indexOf('id="agents"') && page.indexOf('id="agents"') < page.indexOf('id="setup"'), "right after Account");
-    const agents = section(page);
-    assert.match(agents, /<p class="grp-desc">Connect an AI agent \(Claude Code, Claude Desktop\) to a project through tira(?:'|&#39;)s MCP server\./);
-    assert.match(agents, /<form method="get" action="\/settings#agents" class="grp-list" data-agents-form>/);
-    assert.match(agents, /<option value="demo" selected>demo<\/option><option value="other">other<\/option>/); // the project you're in, first picked
-    assert.match(agents, /<input type="text" name="agent" value="claude-code"/);
-    assert.ok(agents.includes(`<pre class="agent-code" id="agent-add">${command("demo", "user")}</pre>`), "Claude Code, all projects, by default");
-    assert.match(agents, /<code class="agent-undo">claude mcp remove tira-demo -s user<\/code>/);
-    assert.match(agents, /<button type="button" class="env-btn" data-copy-target="agent-add" title="Copy" aria-label="Copy it">/);
-    assert.match(agents, /Nothing runs from this page: you run the command, and remove it the same way\./);
-    // the choices, kept on the page
-    const local = section(await get("/settings?project=other&agent=claude-research&where=local"));
-    assert.ok(local.includes(`id="agent-add">${command("other", "local", "claude-research")}</pre>`));
-    assert.match(local, /<option value="other" selected>other<\/option>/);
-    assert.match(local, /<input type="text" name="agent" value="claude-research"/);
-    assert.match(local, /<option value="local" selected>Claude Code, one folder \(run it there\)<\/option>/);
-    assert.ok(section(await get("/settings?where=desktop")).includes(`id="agent-add">${command("demo", "desktop")}</pre>`));
-    assert.ok(section(await get("/settings?project=nope")).includes(`id="agent-add">${command("demo", "user")}</pre>`), "an unknown project: the one you're in");
-    // a person's name: why not, and no command
-    const person = section(await get("/settings?agent=isha"));
-    assert.match(person, /<div class="grp-list" data-agent-problem><div class="grp-row"><span class="grp-k no">&#34;isha&#34; reads as a person(?:'|&#39;)s name/);
-    assert.doesNotMatch(person, /data-agent-command/);
-    // the database: none in tira's .env yet, then this tira's
-    assert.match(agents, /<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s .env names no database, so an agent couldn(?:'|&#39;)t reach your board\. Add TIRA_DATABASE_URL/);
-    assert.ok(agents.includes(`<code>${esc(envFile)}</code>`), "names the file");
+    const page = (await http("GET", "/integrations")).body;
+    assert.match(page, /<a class="set-link" href="#sync">Sync<\/a><a class="set-link" href="#agents">Connect agents<\/a><a class="set-link" href="#delete">Delete<\/a>/);
+    assert.doesNotMatch((await http("GET", "/settings")).body, /id="agents"|data-agent/); // not in Account settings any more
+    let agents = section(page);
+    assert.match(agents, /<h2 class="grp-h">Connect agents<\/h2><p class="grp-desc">Connect your AI agents \(Claude Code, Cursor, VS Code, Claude Desktop\) to this project/);
+    // quick setup: one Connect, four apps
+    assert.match(agents, /<div class="agent-quick" data-agent-quick>[^]*?<details class="agent-menu"><summary class="act primary">Connect<\/summary>/);
+    assert.deepEqual([...agents.matchAll(/<input type="hidden" name="app" value="([a-z-]+)">/g)].map((m) => m[1]), [...APPS]);
+    // by hand: name it, the apps' setups with the token's place, the check, the tools
+    assert.match(agents, /<p class="agent-or">or set up manually<\/p>/);
+    assert.match(agents, /<form method="post" action="\/integrations\/agents\/connect" class="agent-name-form" data-agent-name>/);
+    assert.match(agents, /<p class="agent-none">No agents connected yet\.<\/p>/);
+    assert.ok(agents.includes(esc(appSetup("claude-code", S, { node: process.execPath, script: TIRA_SCRIPT }, TOKEN_HERE).code)), "Claude Code's command, its token's place marked");
+    assert.equal((agents.match(/data-agent-app="/g) ?? []).length, 4); // each app's setup, once: no agent just made
+    assert.doesNotMatch(agents, /data-agent-install/); // no install link without a real token in it
+    assert.match(agents, /<p class="agent-db no" data-agent-database="missing">/);
+    assert.match(agents, /<li><code>complete_task<\/code> done, with proof of work<\/li>/);
+    assert.match(agents, /Cancelling, reopening and unblocking stay with people\./);
+    // one click, Cursor: the agent's token made, and the app's install link to open (here, and for the script)
+    const quick = await http("POST", "/integrations/agents/connect", "token=k&app=cursor&fragment=1");
+    const go = /data-go="([^"]+)"/.exec(quick.body)?.[1]?.replaceAll("&#38;", "&") ?? "";
+    const open = /data-open="([^"]+)"/.exec(quick.body)?.[1]?.replaceAll("&#38;", "&") ?? "";
+    assert.match(go, /^\/integrations\?made=[0-9a-f]{24}&from=agents#agents$/);
+    assert.match(open, /^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=tira-demo&config=/);
+    const [cursorAgent] = await tokens.list(S);
+    assert.deepEqual([cursorAgent?.agent, cursorAgent?.createdBy], ["cursor-agent", "isha"]);
+    const made = await settings(go.replace("#agents", ""));
+    const shownToken = /<pre class="agent-code" id="agent-token">(tira_[0-9a-f_]+)<\/pre>/.exec(made)?.[1] ?? "";
+    assert.equal((await tokens.find(shownToken))?.agent, "cursor-agent", "the token, shown once");
+    assert.match(made, /<div class="agent-ready" data-agent-ready><p><b>cursor-agent<\/b> is connected to this project\./);
+    assert.match(made, /<a class="act primary" href="cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=tira-demo&#38;config=[^"]+" data-agent-install>Add to Cursor<\/a>/);
+    assert.doesNotMatch(await settings(go.replace("#agents", "")), /data-agent-ready/); // once
+    // by hand: a person's name is caught; an agent's makes its token, with every app's setup filled in
+    const person = await http("POST", "/integrations/agents/connect", "token=k&name=isha");
+    assert.match(await settings(person.location ?? ""), /&#34;isha&#34; reads as a person(?:'|&#39;)s name/);
+    const named = await http("POST", "/integrations/agents/connect", "token=k&name=research-agent");
+    const filled = await settings(named.location ?? "");
+    const token2 = /id="agent-token">(tira_[0-9a-f_]+)</.exec(filled)?.[1] ?? "";
+    assert.equal((await tokens.find(token2))?.agent, "research-agent");
+    assert.ok(filled.includes(esc(appSetup("vscode", S, { node: process.execPath, script: TIRA_SCRIPT }, token2).code)), "VS Code's config, its token in it");
+    assert.match((await settings((await http("POST", "/integrations/agents/connect", "token=k&name=research-agent")).location ?? "")), /research-agent is already connected to this project: revoke it first/);
+    // a second one-click Claude Code: numbered if taken
+    await http("POST", "/integrations/agents/connect", "token=k&app=claude-code");
+    await http("POST", "/integrations/agents/connect", "token=k&app=claude-code");
+    agents = await settings();
+    assert.deepEqual([...agents.matchAll(/<div class="agent-row" data-agent="([^"]+)">/g)].map((m) => m[1]), ["cursor-agent", "research-agent", "claude-code", "claude-code-2"]);
+    assert.match(agents, /<small>tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · not used yet<\/small>/);
+    // revoke: gone from the list, its token no longer found
+    const revoked = await http("POST", "/integrations/agents/revoke", `token=k&id=${encodeURIComponent(cursorAgent?.id ?? "")}`);
+    assert.match(await settings(revoked.location ?? ""), /Revoked cursor-agent: its next call is refused\./);
+    assert.equal(await tokens.find(shownToken), undefined);
+    assert.doesNotMatch(await settings(), /data-agent="cursor-agent"/);
+    // the database: ready once tira's .env names this tira's
     writeFileSync(envFile, "TIRA_DATABASE_URL=postgres://u@h/db\n");
-    assert.match(section(await get("/settings")), /<p class="agent-db" data-agent-database="ready">Agents will work on this tira(?:'|&#39;)s database/);
-    // Copy, on the page's own script
+    assert.match(await settings(), /<p class="agent-db" data-agent-database="ready">Agents will work on this tira(?:'|&#39;)s database/);
+    // the page's script: Connect makes the token from the page, then opens the app's link while the click still counts
+    const script = readFileSync(new URL("../src/serve/agents.mjs", import.meta.url), "utf8");
+    assert.match(script, /for \(const form of document\.querySelectorAll\("form\[data-agent-connect\]"\)\)/);
+    assert.match(script, /if \(open\?\.startsWith\("https:\/\/"\)\) window\.open\(open, "_blank", "noopener"\);/);
+    assert.match(script, /else if \(open\) \{\n        const a = document\.createElement\("a"\);/); // an app's own link: opened by a click on it
+    assert.match(page, /<script type="module" src="\/agents\.mjs"><\/script>/);
+    // Copy, on the settings pages' own script (Setup's): any button with data-copy-target
     assert.match(readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8"), /for \(const b of document\.querySelectorAll\("button\[data-copy-target\]"\)\) \{\n  const target = document\.getElementById\(b\.dataset\.copyTarget \?\? ""\);/);
+    assert.equal((await http("GET", "/agents.mjs")).status, 200);
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
     rmSync(dir, { recursive: true, force: true });

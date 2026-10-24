@@ -20,7 +20,8 @@ import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { agentNameProblem, tiraMcpServer } from "../mcp/server.ts";
+import { tiraMcpServer } from "../mcp/server.ts";
+import { agentTokensFor, type AgentTokens } from "../mcp/tokens.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
@@ -47,6 +48,8 @@ export interface Io {
   env: Record<string, string | undefined>;
   // asks for a secret without showing it as it's typed (a Jira API token); absent: no terminal
   secret?(prompt: string): Promise<string>;
+  // agents' tokens (tira mcp); absent: tira's Postgres database's
+  agentTokens?: AgentTokens;
   // stand-ins for tests; absent: the real Jira Cloud and the GitHub CLI
   jira?(site: string, login: JiraLogin): JiraClient;
   github?: GitHubClient;
@@ -105,10 +108,11 @@ Usage:
                                                   first (a landing page, then connect a repo and, optionally,
                                                   a Jira project); the divergence section is recomputed on every
                                                   page load. Ctrl-C stops it
-  tira mcp --actor NAME                           tira for agents: an MCP server on stdio, for Claude Code or
-                                                  Claude Desktop to start, for this project (--stream), acting
-                                                  as the agent's own name (claude-code, …-agent, …-bot; never a
-                                                  person's). Tools: what's next, list tasks, show a task,
+  tira mcp                                        tira for agents: an MCP server on stdio, for Claude Code,
+                                                  Cursor, VS Code or Claude Desktop to start, with the agent's
+                                                  own token in TIRA_AGENT_TOKEN (Project settings → Connect
+                                                  agents): it names the project and the agent, and a revoked
+                                                  one is refused. Tools: what's next, list tasks, show a task,
                                                   start, complete (with proof), block, add a subtask, file an
                                                   idea. It stops when the program that started it does
   tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
@@ -871,19 +875,33 @@ async function serve(open: () => ClosableStore, registry: Registry, stream: stri
   }
 }
 
-// tira for agents (src/mcp): an MCP server on stdio for one project, under one agent's own name,
-// for Claude Code or Claude Desktop to start. It runs until the program that started it closes its
-// end, or Ctrl-C; the store closes on the way out. Nothing goes to stdout: that's the protocol's.
-async function mcp(open: () => ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
-  const actor = values.actor ?? io.env.TIRA_ACTOR;
-  const problem = agentNameProblem(actor);
-  if (problem !== undefined || actor === undefined) throw new UsageError(problem ?? "");
+// tira for agents (src/mcp): an MCP server on stdio for Claude Code, Cursor, VS Code or Claude
+// Desktop to start, with the agent's own token (TIRA_AGENT_TOKEN, from Project settings → Connect
+// agents): the token names the project and the agent it acts as, and a revoked one is refused, at
+// the start and at every call. It runs until the program that started it closes its end, or
+// Ctrl-C; the store closes on the way out. Nothing goes to stdout: that's the protocol's.
+const CONNECT_AGAIN = "connect the agent in Project settings → Connect agents, which gives you the command or config with its token";
+async function mcp(open: () => ClosableStore, registry: Registry, values: Values, io: Io): Promise<number> {
+  const token = io.env.TIRA_AGENT_TOKEN?.trim();
+  if (!token) throw new UsageError(`tira mcp needs its agent's token (TIRA_AGENT_TOKEN): ${CONNECT_AGAIN}`);
+  const tokens = io.agentTokens ?? agentTokensFor(io.env);
+  if (!tokens) throw new UsageError("tira mcp needs tira's Postgres database (TIRA_DATABASE_URL), where agents' tokens are kept");
+  const agent = await tokens.find(token);
+  if (!agent) throw new UsageError(`that agent token isn't valid: it was revoked, or wasn't made on this tira. To use the agent again, ${CONNECT_AGAIN}`);
+  if (values.stream !== undefined && values.stream !== agent.project) throw new UsageError(`this agent's token is for ${agent.project}, not ${values.stream}`);
+  await tokens.used(agent.id);
+  const stillConnected = async () => {
+    const now = await tokens.find(token);
+    if (now) await tokens.used(now.id);
+    return now !== undefined;
+  };
+  const { project: stream, agent: actor } = agent;
   const store = open();
   try {
     io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
     await new Promise<void>((resolve) => {
       const handle = serveStdio(() => {
-        const server = tiraMcpServer({ store, registry, stream, actor });
+        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected });
         server.server.onclose = () => resolve();
         return server;
       });
@@ -938,7 +956,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === "import") return await importCmd(args, values, registry, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     if (cmd === "serve") return await serve(open, registry, stream, values, io);
-    if (cmd === "mcp") return await mcp(open, registry, stream, values, io);
+    if (cmd === "mcp") return await mcp(open, registry, values, io);
     store = open();
     switch (cmd) {
       case "create":

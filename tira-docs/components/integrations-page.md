@@ -32,14 +32,6 @@ Account settings (no project on them):
   you out) and your Jira: **Connect Jira** goes to Atlassian and back (open tira at `localhost`:
   that's where Atlassian sends you), then a site picker if you have more than one; **Disconnect
   Jira** drops your Atlassian sign-in. Your links stay until you unlink them (Isha, 2026-10-22).
-- **Agents**, right after your account: connect an AI agent (Claude Code, Claude Desktop) to a
-  project through tira's MCP server (`tira mcp`). Pick the project (the one you came from first),
-  the agent's name (`claude-code` first; a person's name is caught here, with why) and where it
-  runs (Claude Code for all your projects, Claude Code in one folder, Claude Desktop); the section
-  shows the command to copy (or Claude Desktop's entry), with this tira's own Node and script, and
-  how to remove it. Nothing runs from the page: you run it. A line says whether agents would reach
-  this tira's database (tira's own `.env`, which `tira mcp` reads), naming the file when it
-  doesn't; values are compared, never shown (Isha, 2026-10-24).
 - **Appearance**: System, Light or Dark, each a card with a small picture (`theme-switch.md`).
 - **People**: who may sign in. The admin (the first person who signed in) sees the list, adds
   someone by GitHub username, removes someone (signed out at once and can't sign in; their GitHub
@@ -57,6 +49,17 @@ Project settings (the project's mark and name at the top):
 - **Jira**: a picker of your Jira site's projects (**Link this project**, **Unlink**); before
   you've connected Jira, **Connect Jira** (it connects your account, for every project).
 - **Sync**: **Sync now**, the same as `tira sync`.
+- **Connect agents** (Isha, 2026-10-24, after Forge's Connect IDE): connect an AI agent to this
+  project through tira's MCP server (`tira mcp`), each with its own token and name. Quick setup:
+  **Connect ▾** → Claude Code, Cursor, VS Code or Claude Desktop; one click makes the agent its
+  token (named `claude-code`, `cursor-agent`, `vscode-agent` or `claude-desktop`, numbered if
+  taken) and, for Cursor and VS Code, opens the app's install link (the app shows the server and
+  asks first); the section then shows the token, once, with the app's setup. Or by hand: (1) name
+  the agent (a person's name is caught, with why) and make its token, with the connected agents
+  listed (connected by whom, when, last used; **Revoke** for whoever connected it, or the admin);
+  (2) each app's steps and config, its token where it says `<your token>`; (3) whether agents would
+  reach this tira's database (tira's own `.env`, compared, never shown). Then what agents can do.
+  Only each token's fingerprint is kept; a revoked agent's next call is refused.
 - **Delete project**: type the project's name to confirm, then **Delete this project**. It leaves
   the project list and its board closes, for everyone; tira never erases, so its history stays in
   the log (a new version of its link, marked deleted). The project tira serve was started with
@@ -71,7 +74,7 @@ only. The store keeps a hash of each session (it lasts 30 days), so it can't sig
 ## Devtool hook
 
 - `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Account settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
-- `[data-agents-form]` on the Agents choices; `[data-agent-command]` on the command to copy (where it runs as its value), with `[data-copy-target]` on its Copy; `[data-agent-database]` on the database line (`ready`, `missing` or `different`).
+- `[data-agent-quick]` on Connect agents' quick setup, its choices `[data-agent-connect]`; `[data-agent-name]` on naming an agent; `[data-agents]` on the connected agents; `[data-agent-app]` on each app's setup (`[data-copy-target]` on its Copy; once an agent is made, its install link too); `[data-agent-database]` on the database line (`ready`, `missing` or `different`).
 - `[data-people]` on the admin's list; `[data-add-person]` on Add; `[data-admin-contact]` on how people reach the admin.
 - `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
 - `[data-integrations-nav]` on the profile menu's Account settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).

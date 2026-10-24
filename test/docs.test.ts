@@ -15,6 +15,7 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
+import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { sync } from "../src/sync/sync.ts";
 import { FakeGitHub, FakeJira } from "./sync-fakes.ts";
@@ -100,7 +101,7 @@ async function pages(): Promise<string> {
   const getSignedOut = await ask(signInServer);
   // signed in, on a workspace linked to a repo (so the board shows, not the connect step)
   await d.submit({ stream: "w", kind: "create", entity: { type: "workspace", id: "workspace", version: 1 }, actor: "isha", payload: { repo: "acme/app" } });
-  const signedInServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env } });
+  const signedInServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env, agentTokens: new MemoryAgentTokens() } });
   const getSignedIn = await ask(signedInServer, "tira_session=docs-session");
   const firstRunServer = tiraServer({ store, registry, stream: "t", token: "k", links: { githubAuth, env: { TIRA_HOME: firstHome } } });
   const getFirstRun = await ask(firstRunServer);

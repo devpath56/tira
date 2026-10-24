@@ -1,19 +1,23 @@
-// Connecting an agent to tira (Account settings → Agents): the command a person runs to add tira's
-// MCP server to Claude Code (for all their projects, or one folder), or the entry for Claude
-// Desktop's settings, pointing at this tira's own Node and entry script; and whether an agent
-// would reach the database this tira uses (tira mcp reads it from tira's own .env, as every tira
-// command does). Nothing here runs a command or writes a file: the page shows words to copy.
+// Connecting an agent to a project (Project settings → Connect agents): how each app adds tira's
+// MCP server, with the agent's own token: Claude Code's command, Cursor's and VS Code's install
+// links (each app shows the server and asks before it installs) and their config files, and Claude
+// Desktop's entry. Each names this tira's own Node and entry script (a plain `node` on the PATH may
+// be another version). Also whether an agent would reach the database this tira uses (tira mcp
+// reads it from tira's own .env, as every tira command does). Nothing here runs a command or
+// writes a file: the page shows words to copy and links to open.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 
-// Where the agent runs: Claude Code for all your projects, Claude Code in one folder, Claude Desktop.
-export const WHERE = ["user", "local", "desktop"] as const;
-export type Where = (typeof WHERE)[number];
-export interface Connection { project: string; agent: string; where: Where }
+export const APPS = ["claude-code", "cursor", "vscode", "claude-desktop"] as const;
+export type App = (typeof APPS)[number];
+export const APP_NAME: Record<App, string> = { "claude-code": "Claude Code", cursor: "Cursor", vscode: "VS Code", "claude-desktop": "Claude Desktop" };
+// the name a new agent gets when it's connected in one click (an agent's name, never a person's)
+export const APP_AGENT: Record<App, string> = { "claude-code": "claude-code", cursor: "cursor-agent", vscode: "vscode-agent", "claude-desktop": "claude-desktop" };
+// what the manual steps show where the token goes, until one is made
+export const TOKEN_HERE = "<your token>";
 
-// this tira's own entry script, and the .env it reads (a plain `node` on the PATH may be another
-// version, so the command names this tira's Node too)
+// this tira's own entry script, and the .env it reads
 export const TIRA_SCRIPT = fileURLToPath(new URL("../../scripts/tira.ts", import.meta.url));
 export const TIRA_ENV_FILE = fileURLToPath(new URL("../../.env", import.meta.url));
 
@@ -21,24 +25,51 @@ export const TIRA_ENV_FILE = fileURLToPath(new URL("../../.env", import.meta.url
 const PLAIN = /^[\w.:/@+=,-]+$/;
 const sh = (s: string) => (PLAIN.test(s) ? s : `'${s.replaceAll("'", String.raw`'\''`)}'`);
 
-// The server's name in Claude: one per project, so two projects can both be connected.
+// The server's name in the app: one per project, so two projects can both be connected.
 export function serverName(project: string): string {
   const slug = project.toLowerCase().replaceAll(/[^a-z0-9_-]+/g, "-").replaceAll(/(?:^-+)|(?:-+$)/g, "");
   return `tira-${slug || "project"}`;
 }
 
-const argsOf = (script: string, c: Connection) => ["--disable-warning=ExperimentalWarning", script, "mcp", "--stream", c.project, "--actor", c.agent];
+export interface Launch { node: string; script: string }
+const serverOf = (l: Launch, token: string) => ({ command: l.node, args: ["--disable-warning=ExperimentalWarning", l.script, "mcp"], env: { TIRA_AGENT_TOKEN: token } });
+const json = (value: unknown) => JSON.stringify(value, null, 2);
 
-// What to copy to connect, and how to undo it.
-export function connectWords(node: string, script: string, c: Connection): { add: string; remove: string } {
-  const name = serverName(c.project);
-  if (c.where === "desktop") {
+// How one app adds tira for this project's agent: the steps, the command or config to copy, the
+// app's install link where it has one, and how to remove it.
+export interface AppSetup { steps: string[]; code: string; install?: string; remove: string }
+export function appSetup(app: App, project: string, l: Launch, token: string): AppSetup {
+  const name = serverName(project);
+  const server = serverOf(l, token);
+  if (app === "claude-code") {
     return {
-      add: JSON.stringify({ mcpServers: { [name]: { command: node, args: argsOf(script, c) } } }, null, 2),
-      remove: `Delete "${name}" from mcpServers in Claude Desktop's settings file, then restart Claude Desktop.`,
+      steps: ["Open a terminal.", "Run the command below (it needs Claude Code's claude command)."],
+      code: `claude mcp add --scope user --env TIRA_AGENT_TOKEN=${sh(token)} --transport stdio ${name} -- ${[server.command, ...server.args].map(sh).join(" ")}`,
+      remove: `claude mcp remove ${name} -s user`,
     };
   }
-  return { add: `claude mcp add --scope ${c.where} ${name} -- ${[node, ...argsOf(script, c)].map(sh).join(" ")}`, remove: `claude mcp remove ${name} -s ${c.where}` };
+  if (app === "cursor") {
+    return {
+      steps: ["Open ~/.cursor/mcp.json (create it if it doesn't exist).", "Paste the configuration below and save.", "Restart Cursor, or reload its MCP servers."],
+      code: json({ mcpServers: { [name]: server } }),
+      install: `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(name)}&config=${encodeURIComponent(Buffer.from(JSON.stringify(server)).toString("base64"))}`,
+      remove: `Delete "${name}" from ~/.cursor/mcp.json.`,
+    };
+  }
+  if (app === "vscode") {
+    const entry = { type: "stdio", ...server };
+    return {
+      steps: ["Open .vscode/mcp.json in your workspace (create it if it doesn't exist).", "Paste the configuration below and save."],
+      code: json({ servers: { [name]: entry } }),
+      install: `https://insiders.vscode.dev/redirect/mcp/install?name=${encodeURIComponent(name)}&config=${encodeURIComponent(JSON.stringify(entry))}`,
+      remove: `Delete "${name}" from .vscode/mcp.json.`,
+    };
+  }
+  return {
+    steps: ["In Claude Desktop: Settings → Developer → Edit Config.", "Add the entry below under mcpServers and save.", "Restart Claude Desktop."],
+    code: json({ mcpServers: { [name]: server } }),
+    remove: `Delete "${name}" from mcpServers in Claude Desktop's config, then restart it.`,
+  };
 }
 
 // Would an agent reach this tira's database? ready: tira's .env names it (and its schema);

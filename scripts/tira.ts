@@ -23,6 +23,7 @@ try {
 
 const { run } = await import("../src/cli/cli.ts");
 const { closeAccounts } = await import("../src/sync/credentials.ts");
+const { closeAgentTokens } = await import("../src/mcp/tokens.ts");
 // A secret typed at the terminal (tira connect-jira's API token): nothing echoes. Piped in, the
 // first line is read.
 const secret = (prompt: string) =>
@@ -67,3 +68,4 @@ process.exitCode = await run(process.argv.slice(2), {
 // or the process waits out the pool's idle timeout, 10 seconds, before it exits (tira serve after
 // Ctrl-C, or any command that read an account).
 await closeAccounts();
+await closeAgentTokens(); // agents' tokens keep a pool of their own (src/mcp/tokens.ts): the same goes for it
