@@ -1106,7 +1106,9 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.match(help, /^<aside[^>]*><details class="hc" data-remember="tira-help-centre" open><summary class="help-head"[^>]*><span class="av tira">\?<\/span><span class="hc-t"><b>Help centre<\/b><small><i class="hc-on" aria-hidden="true"><\/i>Answers right away<\/small>/);
     assert.match(readFileSync(new URL("../src/serve/theme.mjs", import.meta.url), "utf8"), /for \(const d of document\.querySelectorAll\("details\[data-remember\]"\)\)[^]*?localStorage\.setItem\(d\.dataset\.remember, d\.open \? "1" : "0"\)/);
     assert.match(help, /<div class="hc-log" role="log" aria-live="polite" aria-label="Conversation" data-help-log><div class="msg from-tira"><span class="av tira" aria-hidden="true">t<\/span><div class="msg-b"><p class="bubble">Hi isha! I'm tira's help\./);
-    assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 6);
+    assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 7);
+    // agents: tira mcp, under each agent's own name
+    assert.match(help, /How do my agents use tira\?<\/summary><p class="bubble">Through tira(?:'|&#39;)s MCP server, under each agent(?:'|&#39;)s own name\. In a terminal: <code>claude mcp add tira -- node \/path\/to\/tira\/scripts\/tira\.ts mcp --stream PROJECT --actor claude-code<\/code>/);
     assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>/);
     assert.match(help, /<div class="hc-bottom" data-help-bottom hidden><form class="hc-compose" data-help-ask><input name="q" aria-label="Ask a question" placeholder="Ask a question…"[^>]*><button class="hc-send" type="submit" aria-label="Send" disabled>/);
     assert.match(page, /<script type="module" src="\/help\.mjs"><\/script>/);

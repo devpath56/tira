@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 763 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 764 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -643,6 +643,27 @@ Calls made here, for the PM:
   column. Aging and the overdue-idea alarm wait for the approval deadline to be ruled.
 - **A task born from an idea shows as hollow in the sweep** (no `definition` or
   `done_criteria`): the idea's file is a summary and a why, not those two fields.
+
+## Agents through MCP: `tira mcp`
+
+Claude Code, Claude Desktop or any MCP client can work a project's tasks directly. `tira mcp` is an MCP server on stdio, started by the client on the same computer, for one project (`--stream`) and under one agent's own name (`--actor`). It reads the database as every tira command does (tira's own `.env`, or `TIRA_DATABASE_URL`), so nothing secret goes in the client's settings:
+
+```bash
+claude mcp add --scope user tira -- node /path/to/tira/scripts/tira.ts mcp --stream factory-ui --actor claude-code
+```
+
+| Tool | What it does |
+|---|---|
+| `next_task` | The task in progress, the next one in tira's order, and how many are blocked |
+| `list_tasks` | The board's tasks in order: id, state, where each sits; open ones unless a state is asked for |
+| `get_task` | One task: state, place, subtasks, why it's blocked and on what, its proof, its history |
+| `start_task` | Moves a task to In progress (one at a time: tira says which to finish first) |
+| `complete_task` | Done, with proof of work anyone can re-check (required) |
+| `block_task` | Blocked, with a reason, waiting on an open task or on a new ticket made under it |
+| `add_subtask` | A new task under one, found while working on it when that one is under way |
+| `file_idea` | An idea for later: tira drafts it and proposes where it goes; a person approves |
+
+Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. A remote endpoint for cloud agents waits on the shared server.
 
 ## Workspaces linked to git and Jira
 

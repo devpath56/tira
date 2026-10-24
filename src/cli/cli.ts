@@ -108,7 +108,9 @@ Usage:
   tira mcp --actor NAME                           tira for agents: an MCP server on stdio, for Claude Code or
                                                   Claude Desktop to start, for this project (--stream), acting
                                                   as the agent's own name (claude-code, …-agent, …-bot; never a
-                                                  person's). It stops when the program that started it does
+                                                  person's). Tools: what's next, list tasks, show a task,
+                                                  start, complete (with proof), block, add a subtask, file an
+                                                  idea. It stops when the program that started it does
   tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
                                                   event as it was, into an empty schema; a re-run adds nothing.
                                                   Each stream's fingerprint must match before and after
