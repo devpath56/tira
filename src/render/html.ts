@@ -434,11 +434,11 @@ body:has(.drawer:target){overflow:hidden}
 .sub-ico{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line-2)}.sub-ico.s-unstarted{border-style:dashed}.sub-ico.s-in_progress{border-color:var(--accent);background:conic-gradient(var(--accent) 0 50%,transparent 50% 100%)}.sub-ico.s-done{border-color:var(--done);background:var(--done)}.sub-ico.s-blocked{border-color:var(--block);border-width:2px}.sub-ico.s-cancelled{background:linear-gradient(var(--line-2),var(--line-2)) center/8px 1.5px no-repeat}
 .who{display:grid;place-items:center;width:22px;height:22px;border-radius:999px;background:var(--accent-bg);color:var(--accent-text);font-size:11px;font-weight:700}.who svg{width:12px;height:12px}.who.none{background:var(--panel);color:var(--dim);border:1px dashed var(--line-2)}
 .tk-id{margin:0 0 4px;font:12px var(--mono);color:var(--dim)}.ticket{display:grid;gap:10px;margin-top:12px}.tk-desc p{margin:0 0 6px;font-size:14px;line-height:1.55}.tk-steps ol{margin:4px 0 0;padding-left:20px;font-size:14px;line-height:1.55}
+.tk-form{display:grid;gap:2px}.tk-h{margin:0}.tk-title-in,.tk-in,.prop-in{width:100%;font:inherit;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:var(--r);transition:border-color .15s var(--ease),background-color .15s var(--ease)}.tk-title-in{font-size:20px;font-weight:650;letter-spacing:-.01em;padding:2px 6px;margin-left:-7px}.tk-in{display:block;resize:none;font-size:14px;line-height:1.55;padding:4px 6px;margin-left:-7px;min-height:2.1em;field-sizing:content}.prop-in{font-size:13px;padding:3px 6px;margin-left:-7px}
+.tk-title-in:hover,.tk-in:hover,.prop-in:hover{border-color:var(--line)}.tk-title-in:focus,.tk-in:focus,.prop-in:focus{outline:none;border-color:var(--accent);background:var(--bg)}.tk-title-in::placeholder,.tk-in::placeholder,.prop-in::placeholder{color:var(--dim)}select.prop-in{background:var(--panel-2);color:var(--fg)}.tk-save{margin-top:6px}.tk-steps-h{margin:8px 0 0;font-size:12px;color:var(--mut)}.js .tk-form:not([data-dirty]) .tk-save{display:none}.prop small.dim{display:block;margin-top:2px;font-size:12px}
 .ticket .lk,.tk-steps .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-right:8px}.tk-facts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px}.tk-none{margin:0;font-size:13px;color:var(--mut)}.agent-chip{margin-left:6px}
-.tk-edit>summary{cursor:pointer;font-size:13px;color:var(--accent);width:max-content}.tk-form{display:grid;gap:10px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.tk-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.tk-field{display:grid;gap:4px;font-size:12px;font-weight:600;color:var(--mut)}.tk-field small{font-weight:400}.tk-field input,.tk-field textarea,.tk-field select,.cm-form textarea{font:inherit;font-size:14px;font-weight:400;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:7px 9px}.tk-form .act{justify-self:start}
 .comments{margin-top:16px}.comments h3{margin:0 0 8px;font-size:14px}.cm-list{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:8px}.cm{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.cm-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px}.cm-h .ev-seq{margin-left:auto}.cm p{margin:4px 0 0;font-size:14px;line-height:1.5}
-.cm-form{display:grid;gap:8px}.cm-form .act{justify-self:start}
+.cm-form{display:grid;gap:8px}.cm-form .act{justify-self:start}.cm-form textarea{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:7px 9px;resize:vertical}
 .commits{border:0;padding:0;margin:0 0 12px;min-width:0}.commits legend{padding:0;margin-bottom:6px}.commit{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 10px;margin:0 0 4px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2);font-weight:400;cursor:pointer}.commit:has(input:checked){border-color:var(--accent);background:var(--accent-bg)}.commit code{font:12px var(--mono);color:var(--accent)}.commit span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}.commit small{color:var(--dim)}
 .commits-status{margin:0 0 8px;font-size:12px;font-weight:400;color:var(--mut)}.commits .how{justify-self:start;margin-top:4px}
 .proof{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--done);border-radius:var(--r);background:var(--done-bg)}
@@ -980,8 +980,9 @@ function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): str
 }
 
 // ---------- the ticket: what the work is, and what people and agents say on it (tickets.ts) ----------
-// Its description, steps, estimate and assignee, under its title; live, Edit ticket opens its form.
-// Then its comments, oldest first; live, one to add. Each form comes back to this dialog.
+// Live, the ticket is edited where it shows: its title, description and steps here, its assignee and
+// estimate in its properties (the same form); Save shows once something changes. A rendered file
+// reads it. Then its comments, oldest first; live, one to add. Each form comes back to this dialog.
 const agentChip = (name: string) => (AGENT.test(name) ? `<span class="chip agent-chip">agent</span>` : "");
 const when = (iso: string) => {
   const d = new Date(iso);
@@ -990,34 +991,38 @@ const when = (iso: string) => {
 const hiddenOf = (fields: [string, string][]) => fields.map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
 const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
 const listItem = (x: string) => `<li>${esc(x)}</li>`;
+const formOf = (n: Placed) => `tk-${n.i}`; // the ticket form's id: its fields beside belong to it
 
-function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefined): string {
+function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefined, formId: string): string {
   const opt = (v: string) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(v)}</option>`;
   const people = [...new Set([...form.people, ...(current && !form.agents.includes(current) ? [current] : [])])];
   const group = (label: string, names: string[]) => (names.length === 0 ? "" : `<optgroup label="${label}">${names.map(opt).join("")}</optgroup>`);
-  return `<select name="assignee" aria-label="Assignee"><option value="">Nobody yet</option>${group("Team", people)}${group("Agents", form.agents)}</select>`;
+  return `<select name="assignee" form="${formId}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option>${group("Team", people)}${group("Agents", form.agents)}</select>`;
 }
 
-function ticketEditHtml(r: TreeRow, t: Ticket | undefined, form: NonNullable<Ext["form"]>, back: string, q: string): string {
-  const field = (label: string, input: string) => `<label class="tk-field"><span>${label}</span>${input}</label>`;
-  const title = `<input type="text" name="title" maxlength="120" value="${esc(t?.title ?? "")}" placeholder="${esc(r.id)}">`;
-  const description = `<textarea name="description" rows="4" maxlength="4000" placeholder="What the work is, and what done looks like">${esc(t?.description ?? "")}</textarea>`;
-  const steps = `<textarea name="steps" rows="4" placeholder="1. …">${esc((t?.steps ?? []).join("\n"))}</textarea>`;
-  const estimate = `<input type="text" name="estimate" maxlength="10" value="${esc(t?.estimate ?? "")}" placeholder="e.g. 2h, 1d">`;
-  const row = field("Time estimate", estimate) + field("Assignee", assigneeSelect(form, t?.assignee));
-  return `<details class="tk-edit" data-ticket-edit><summary>Edit ticket</summary><form method="post" action="${esc(withQ("/tickets", q))}" class="tk-form">`
-    + hiddenOf([["token", form.token], ["task", r.id], ["back", back]])
-    + field("Title", title) + field("Description", description) + field("Steps <small>one per line</small>", steps)
-    + `<div class="tk-row">${row}</div><button class="act primary" type="submit">Save ticket</button></form></details>`;
-}
-
-// the ticket's words: its description and steps (its estimate and assignee are properties, beside)
-function ticketHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
-  const t = ext.tickets.get(r.id);
+// the ticket's title and words, read
+function ticketReadHtml(r: TreeRow, t: Ticket | undefined): string {
+  const head = t?.title ? `<h2>${esc(t.title)}</h2><p class="tk-id">${esc(r.id)}</p>` : `<h2>${esc(r.id)}</h2>`;
   const desc = t?.description ? `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>` : "";
   const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><h3>Steps</h3><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
-  const none = desc + steps === "" ? `<p class="tk-none">No description or steps yet.</p>` : "";
-  return `<div class="ticket" data-ticket>${desc}${steps}${none}${ext.form ? ticketEditHtml(r, t, ext.form, back, q) : ""}</div>`;
+  return `<div class="ticket" data-ticket>${head}${desc}${steps}</div>`;
+}
+// the same, live: fields that look like the words until you edit them
+function ticketHtml(n: Placed, ext: Ext, back: string, q: string): string {
+  const r = n.row;
+  const t = ext.tickets.get(r.id);
+  if (!ext.form) return ticketReadHtml(r, t);
+  const title = `<h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="${esc(t?.title ?? "")}" placeholder="${esc(r.id)}" aria-label="Title" autocomplete="off"></h2>`;
+  const id = t?.title ? `<p class="tk-id">${esc(r.id)}</p>` : "";
+  const lines = (text: string) => Math.max(1, text.split("\n").length); // a box as tall as its words
+  const words = t?.description ?? "";
+  const list = (t?.steps ?? []).join("\n");
+  const desc = `<textarea name="description" class="tk-in tk-desc-in" rows="${lines(words) + 1}" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description>${esc(words)}</textarea>`;
+  const label = list === "" ? "" : `<h3 class="tk-steps-h">Steps</h3>`;
+  const steps = `${label}<textarea name="steps" class="tk-in tk-steps-in" rows="${lines(list)}" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>${esc(list)}</textarea>`;
+  return `<form method="post" action="${esc(withQ("/tickets", q))}" class="ticket tk-form" id="${formOf(n)}" data-ticket data-ticket-form>`
+    + hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])
+    + `${title}${id}${desc}${steps}<div class="tk-save"><button class="act primary" type="submit">Save</button></div></form>`;
 }
 
 // A time estimate in hours (a day is 8, a week 5 days), and back: 14 → "1d 6h".
@@ -1040,7 +1045,6 @@ const whoMark = (name: string | undefined) => {
   return `<span class="who" title="${esc(name)}" aria-label="Assigned to ${esc(name)}">${mark}</span>`;
 };
 const closedOf = (rows: readonly TreeRow[]) => rows.filter((c) => CLOSED.has(c.state)).length;
-const subtaskNoun = (n: number) => (n === 1 ? "subtask" : "subtasks");
 
 // Its subtasks, each a row: its state, its name (and id), its estimate, who it's assigned to, one
 // click to its own dialog; over them how many are closed; under them, live, Add subtask.
@@ -1053,9 +1057,8 @@ function subtaskRowHtml(c: TreeRow, ctx: DialogContext): string {
 function subtasksHtml(r: TreeRow, ctx: DialogContext): string {
   const add = ctx.live && TAKES_SUBTASKS.has(r.state) ? `<a class="act sub-add" href="${confirmHref(r, "ADD_SUBTASK", ctx.q)}" data-act="ADD_SUBTASK">+ Add subtask</a>` : "";
   const n = r.children.length;
-  const count = n > 0 ? `<span>${closedOf(r.children)} of ${n} ${subtaskNoun(n)} closed</span>` : "";
-  const head = `<div class="sub-head"><h3>Subtasks</h3>${count}</div>`;
-  if (n === 0) return `<div class="subtasks" data-subtasks>${head}<p class="tk-none">No subtasks yet.</p>${add}</div>`;
+  if (n === 0) return add === "" ? "" : `<div class="subtasks" data-subtasks>${add}</div>`;
+  const head = `<div class="sub-head"><h3>Subtasks</h3><span title="closed of all">${closedOf(r.children)}/${n}</span></div>`;
   const rows = r.children.map((c) => subtaskRowHtml(c, ctx)).join("");
   return `<div class="subtasks" data-subtasks>${head}${meter(r.children.map((c) => c.state))}<ul class="kids-list" aria-label="Subtasks">${rows}</ul>${add}</div>`;
 }
@@ -1078,32 +1081,35 @@ function crumbsHtml(n: Placed, ctx: DialogContext): string {
   return `<nav class="tk-crumbs" aria-label="Where it sits">${project}${links}<span aria-current="page">${esc(n.row.id)}</span>${siblingsHtml(n, ctx)}</nav>`;
 }
 
-// The ticket's properties, beside: its status (and what it allows), its progress, assignee,
-// estimate (and its subtasks' together), parent, what blocks it, its links out, its proof.
+// The ticket's properties, beside: its status (and what it allows), assignee, estimate (its
+// subtasks' added up under it), parent, what blocks it, its links out, its proof.
 const propHtml = (label: string, body: string, hook = "") => `<div class="prop"${hook}><span class="lk">${label}</span><div>${body}</div></div>`;
-function estimateHtml(r: TreeRow, ctx: DialogContext): string {
-  const own = ctx.ext.tickets.get(r.id)?.estimate;
-  const sum = r.children.reduce((h, c) => h + hoursOf(ctx.ext.tickets.get(c.id)?.estimate), 0);
-  const subtasks = sum > 0 ? ` <span class="dim">· subtasks ${hoursSaid(sum)}</span>` : "";
-  return (own ? esc(own) : `<span class="dim">None yet</span>`) + subtasks;
+function estimateHtml(n: Placed, ctx: DialogContext): string {
+  const own = ctx.ext.tickets.get(n.row.id)?.estimate;
+  const sum = n.row.children.reduce((h, c) => h + hoursOf(ctx.ext.tickets.get(c.id)?.estimate), 0);
+  const subtasks = sum > 0 ? `<small class="dim">${hoursSaid(sum)} in subtasks</small>` : "";
+  const read = own ? esc(own) : `<span class="dim">—</span>`;
+  const value = ctx.ext.form ? `<input type="text" name="estimate" form="${formOf(n)}" class="prop-in" maxlength="10" value="${esc(own ?? "")}" placeholder="2h, 1d…" aria-label="Estimate" autocomplete="off">` : read;
+  return value + subtasks;
+}
+function assigneeHtml(n: Placed, ctx: DialogContext): string {
+  const who = ctx.ext.tickets.get(n.row.id)?.assignee;
+  if (ctx.ext.form) return assigneeSelect(ctx.ext.form, who, formOf(n));
+  return who ? `${esc(who)}${agentChip(who)}` : `<span class="dim">—</span>`;
 }
 function parentHtml(n: Placed, ctx: DialogContext): string {
   const p = n.parent;
-  if (!p) return `<span class="dim">Top level</span>`;
-  const sibs = p.row.children;
-  return `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${meter(sibs.map((c) => c.state))}<span class="dim">${closedOf(sibs)} of ${sibs.length} closed</span>`;
+  if (!p) return `<span class="dim">—</span>`;
+  return `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${meter(p.row.children.map((c) => c.state))}`;
 }
 function propertiesHtml(n: Placed, ctx: DialogContext): string {
   const r = n.row;
-  const who = ctx.ext.tickets.get(r.id)?.assignee;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
   const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
-  const kids = r.children.length;
   return `<aside class="tk-side" aria-label="Properties">`
     + propHtml("Status", `<div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>${acts}`)
-    + (kids > 0 ? propHtml("Subtasks closed", `${closedOf(r.children)} of ${kids}`) : "")
-    + propHtml("Assignee", who ? `${esc(who)}${agentChip(who)}` : `<span class="dim">Nobody yet</span>`, " data-ticket-assignee")
-    + propHtml("Estimate", estimateHtml(r, ctx), " data-ticket-estimate")
+    + propHtml("Assignee", assigneeHtml(n, ctx), " data-ticket-assignee")
+    + propHtml("Estimate", estimateHtml(n, ctx), " data-ticket-estimate")
     + propHtml("Parent", parentHtml(n, ctx), " data-parent")
     + linksHtml(r, ctx) + taskLinksHtml(ctx.ext, r.id) + proofHtml(r, ctx) + locate(r.key, ctx.live)
     + `</aside>`;
@@ -1111,27 +1117,25 @@ function propertiesHtml(n: Placed, ctx: DialogContext): string {
 
 function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
   const list = ext.comments.get(r.id) ?? [];
-  const item = (c: Comment) => `<li class="cm" data-comment><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))} · seq ${c.seq}</span></div>${paragraphs(c.text)}</li>`;
-  const shown = list.length === 0 ? `<p class="tk-none">No comments yet.</p>` : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
+  const item = (c: Comment) => `<li class="cm" data-comment><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))}</span></div>${paragraphs(c.text)}</li>`;
+  const shown = list.length === 0 ? "" : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
   const form = ext.form
     ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}`
-      + `<textarea name="text" rows="3" maxlength="2000" required placeholder="Feedback for whoever works on it: its agent reads it too" aria-label="Add a comment"></textarea><button class="act" type="submit">Comment</button></form>`
+      + `<textarea name="text" rows="2" maxlength="2000" required placeholder="Add a comment…" aria-label="Add a comment"></textarea><button class="act" type="submit">Comment</button></form>`
     : "";
-  return `<div class="comments" data-comments><h3>Comments <span class="ev-seq">${list.length}</span></h3>${shown}${form}</div>`;
+  if (shown + form === "") return "";
+  const count = list.length > 0 ? ` <span class="ev-seq">${list.length}</span>` : "";
+  return `<div class="comments" data-comments><h3>Comments${count}</h3>${shown}${form}</div>`;
 }
 
-// A ticket's dialog: where it sits, then two columns. The work: (for a subtask, its parent first)
-// its title and id, its description and steps, its subtasks, its comments and its history. Beside:
-// its properties (on a phone, first: the status and what it allows lead).
+// A ticket's dialog: where it sits, then two columns. The work: its title and id, its description
+// and steps, its subtasks, its comments and its history (folded). Beside: its properties (on a
+// phone, first: the status and what it allows lead).
 function drawerHtml(n: Placed, lines: TrailEntry[], ctx: DialogContext): string {
   const r = n.row;
-  const title = ctx.ext.tickets.get(r.id)?.title;
-  const head = title ? `<h2>${esc(title)}</h2><p class="tk-id">${esc(r.id)}</p>` : `<h2>${esc(r.id)}</h2>`;
   const back = `#t${n.i}`;
-  const p = n.parent;
-  const of = p ? `<p class="tk-of" data-subtask-of>Subtask of <a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a> · ${closedOf(p.row.children)} of ${p.row.children.length} closed</p>` : "";
-  const history = `<details class="trail" open><summary>History (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details>`;
-  const main = `<div class="tk-main">${of}${head}${ticketHtml(r, ctx.ext, back, ctx.q)}${subtasksHtml(r, ctx)}${commentsHtml(r, ctx.ext, back, ctx.q)}${history}</div>`;
+  const history = `<details class="trail"><summary>History <span class="ev-seq">${lines.length}</span></summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details>`;
+  const main = `<div class="tk-main">${ticketHtml(n, ctx.ext, back, ctx.q)}${subtasksHtml(r, ctx)}${commentsHtml(r, ctx.ext, back, ctx.q)}${history}</div>`;
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
     + `<div class="tk-view">${crumbsHtml(n, ctx)}<div class="tk-cols">${main}${propertiesHtml(n, ctx)}</div></div></div></section>`;
 }

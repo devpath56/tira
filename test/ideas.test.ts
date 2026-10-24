@@ -307,7 +307,7 @@ test("approving an idea goes through the decision dialog: the work in a nutshell
     assert.match(place, /<b>Decision:<\/b> [^<]* tira proposes it under table: its text names table\. Approving makes it a task under the parent you name, to do\./);
     assert.match(place, /<b>Recommendation:<\/b> Approve it under table if that&#39;s where it fits; change parent_id to put it elsewhere\./);
     assert.match(place, /data-nutshell>[^]*?<p class="verdict ok">[^]*?<b>Recommendation:<\/b>[^]*?<details class="why" data-why><summary>Why: tradeoffs, best practice, kind<\/summary>/); // the nutshell first, the rest folded
-    assert.match(place, /<label class="field" data-field="parent_id"><span>Goes under<\/span><input type="text" name="parent_id" value="table" placeholder="the task it becomes a subtask of"/); // tira's proposal, to change
+    assert.match(place, /<label class="field" data-field="parent_id"><span>Goes under<\/span><input type="text" name="parent_id" value="table" placeholder="Parent task…"/); // tira's proposal, to change
     assert.doesNotMatch(place, /data-fill="parent_id"/);
     const born = await s.run("pagination", "APPROVE_NODE", 'tira send idea pagination APPROVE_NODE parent_id="table"');
     assert.equal(await s.flash(born), "Approve placement pagination: done (seq 13). It's a task now: pagination, under table.");

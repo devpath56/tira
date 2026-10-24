@@ -7,18 +7,17 @@ fires by surprise. Redesigned 2026-10-24 (Isha): it's about the work, not a comm
 views side by side (stacked on a phone):
 
 1. **The ticket** (read-only): what the work is, from its ticket (`node-drawer.md`): its
-   title, description, steps, time estimate and assignee, or that none is written yet. Above
-   it, only when it matters: tira's word when it would refuse (or when nothing would change),
-   with **what to do** instead, and the finished parents tira will close first.
+   title, description, steps, time estimate and assignee. Above it, only when it matters, one
+   line: what to do instead when tira would refuse (the rule's own words when it has no plainer
+   ones), that nothing would change, or the finished parents it closes too.
 2. **Your part**: what the move needs, as plain fields, and a **comment** (optional) that goes
    on the ticket, where its agent reads it. No command: the page writes the move from these
    fields (the same move `tira send` writes in a terminal).
    - **Complete**: the proof of work is one of the task's commits, picked from a list, the
-     newest first and picked. It opens at once on the commits tira has, saying it's looking on
-     GitHub for newer ones (only that task's: its pull requests, and a branch named after it with
-     none yet, about two seconds; no Jira, no whole sync); what comes back goes in place, and
-     what you typed stays. **Look on GitHub again** asks again. With none yet, it says how to
-     get one there (a branch named after the task, or "tira: <task>" in its pull request).
+     newest first and picked. It opens at once on the commits tira has ("Checking GitHub…" while
+     it looks for newer ones: only that task's pull requests, and a branch named after it with
+     none yet, about two seconds; no Jira, no whole sync); what comes back goes in place, and what
+     you typed stays. **Refresh** looks again. With none yet: "Push to a branch named <task>".
    - **Block**: "Blocked by", a new ticket by name or an open task (live, the open tasks are
      chips), and a reason (optional: it waits on that ticket, if left empty).
    - **Add subtask**: its name; under work already under way it's marked as found, and

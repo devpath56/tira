@@ -944,17 +944,17 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     await s.send("table", "START");
     s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["table done"], shas: ["7".repeat(40)] });
     const opened = (await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body;
-    assert.match(opened, /<p class="commits-status" data-commits-status data-commits-fetch="\/commits" role="status" aria-live="polite">Looking on GitHub for table(?:'|&#39;)s newest commits: the proof of work is one of them\.<\/p>/);
-    assert.match(opened, /data-no-commits[^]*?<button type="submit" class="how" formaction="\/commits" formnovalidate data-commits-again>Look on GitHub again<\/button>/);
+    assert.match(opened, /<p class="commits-status" data-commits-status data-commits-fetch="\/commits" role="status" aria-live="polite">Checking GitHub…<\/p>/);
+    assert.match(opened, /data-no-commits[^]*?<button type="submit" class="how" formaction="\/commits" formnovalidate data-commits-again>Refresh<\/button>/);
     const seen = /name="seen" value="(\d+)"/.exec(opened)?.[1] ?? "";
     const looked = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", seen, dialog: "1", fragment: "1" })).body;
     assert.match(looked, new RegExp(`<input type="radio" name="evidenceRef" value="${"7".repeat(40)}" checked><code>7777777</code><span>table done</span><small>#7</small>`));
-    assert.match(looked, /<p class="commits-status" data-commits-status role="status">Found 1 commit for table on GitHub just now \(1 new\)\.<\/p>/);
+    assert.match(looked, /<p class="commits-status" data-commits-status role="status">1 commit on GitHub \(1 new\)\.<\/p>/);
     assert.notEqual(/name="seen" value="(\d+)"/.exec(looked)?.[1], seen, "keeping the commit moved the log: the form's seq with it");
-    assert.match((await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body, /Found 1 commit for table on GitHub just now\.<\/p>/); // kept once
+    assert.match((await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body, />1 commit on GitHub\.<\/p>/); // kept once
     s.github.fail = "rate limited";
     const failed = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body;
-    assert.match(failed, /data-commits-status role="status">Couldn(?:'|&#39;)t reach GitHub just now \(rate limited\): these are the commits tira already has\.<\/p>[^]*?value="7{40}" checked/);
+    assert.match(failed, /data-commits-status role="status">Couldn(?:'|&#39;)t reach GitHub \(rate limited\)\.<\/p>[^]*?value="7{40}" checked/);
     s.github.fail = undefined;
     // the page's script: the look runs when the dialog opens, and what comes back goes in place with the form's seq
     const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");

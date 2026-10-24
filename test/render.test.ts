@@ -107,8 +107,8 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   // tokens was found while working on colors, its sibling: a dotted line joins them, and its node says so
   assert.deepEqual([...html.matchAll(/<path class="e found" data-from="node:colors" data-found="([^"]+)"/g)].map((m) => m[1]), ["node:tokens"]);
   assert.match(html, /data-key="node:tokens"[^>]*>[^]*?<span class="gm">done · ✦ found<\/span>/);
-  assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?3 of 3 subtasks closed/);
-  assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?1 of 3 subtasks closed/);
+  assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?<span title="closed of all">3\/3<\/span>/);
+  assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?<span title="closed of all">1\/3<\/span>/);
   // Kanban holds the work (leaves), with the cursor's card marked next; no strip of parents above
   // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards;
   // the open idea waits in Ideas, first; Done is newest first (tira closed metrics_card last)
@@ -605,13 +605,12 @@ test("a task's dialog lists its subtasks as rows (state, name, estimate, assigne
   const kids = [...parent.matchAll(/<li><a class="sub-row" href="#(t\d+)" data-subtask="node:[^"]+"><span class="sub-ico s-([a-z_]+)" aria-hidden="true"><\/span><span class="sub-name">([^<]+)<\/span><span class="sub-est"><\/span><span class="who none"[^>]*>–<\/span><span class="state s-\2">/g)].map((m) => [m[3], m[2]]);
   assert.deepEqual(kids, [["colors", "done"], ["font", "cancelled"], ["tokens", "done"]]);
   for (const [, href] of parent.matchAll(/<a class="sub-row" href="#(t\d+)"/g)) assert.match(html, new RegExp(`<section class="drawer" id="${href}"`));
-  assert.match(parent, /<div class="sub-head"><h3>Subtasks<\/h3><span>3 of 3 subtasks closed<\/span><\/div>/);
+  assert.match(parent, /<div class="sub-head"><h3>Subtasks<\/h3><span title="closed of all">3\/3<\/span><\/div>/);
   // where it sits: the tickets above it, and its place among its sister subtasks
   const colors = dialog("colors");
   assert.match(colors, /<nav class="tk-crumbs" aria-label="Where it sits"><a href="#t\d+">dashboard<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+">metrics_card<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+">improve_visual<\/a><span class="sep" aria-hidden="true">›<\/span><span aria-current="page">colors<\/span><span class="tk-sibs" data-siblings><span class="off" aria-hidden="true">↑<\/span><span>1 of 3<\/span><a href="#t\d+" aria-label="The subtask after">↓<\/a><\/span><\/nav>/);
-  assert.match(colors, /<p class="tk-of" data-subtask-of>Subtask of <a href="#t\d+">improve_visual<\/a> · 3 of 3 closed<\/p>/);
   assert.match(colors, /<div class="prop" data-parent><span class="lk">Parent<\/span><div><a href="#t\d+">improve_visual<\/a><span class="meter"/);
-  assert.match(dialog("dashboard"), /<div class="prop" data-parent><span class="lk">Parent<\/span><div><span class="dim">Top level<\/span><\/div><\/div>/);
+  assert.match(dialog("dashboard"), /<div class="prop" data-parent><span class="lk">Parent<\/span><div><span class="dim">—<\/span><\/div><\/div>/);
   // proof: the evidence on the completion, for a done task; none for open work
   assert.match(dialog("colors"), /<div class="proof" data-proof><span class="proof-k">Proof of work<\/span><span class="proof-v">[^<]+<\/span><span class="ev-seq">isha · seq \d+<\/span><\/div>/);
   assert.doesNotMatch(dialog("table"), /data-proof/);

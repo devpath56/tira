@@ -123,6 +123,20 @@ document.addEventListener("keydown", (e) => {
 // Running it posts from here: a value missing or a moved log comes back into the dialog;
 // otherwise the page comes back with the result. Esc or a click outside closes it. If the
 // packet can't be fetched, the confirm page opens instead.
+// A ticket is edited where it shows: its Save appears once something in it changes (a field beside it,
+// its assignee or estimate, counts too: it belongs to the same form). Cmd/Ctrl+Enter in a ticket's or
+// a comment's text sends it.
+document.documentElement.classList.add("js");
+document.addEventListener("input", (e) => {
+  const form = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ? e.target.form : null;
+  if (form?.matches("[data-ticket-form]")) form.dataset.dirty = "1";
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(e.target instanceof HTMLTextAreaElement) || !e.target.closest(".drawer")) return;
+  e.preventDefault();
+  e.target.form?.requestSubmit();
+});
+
 const confirmBox = document.createElement("dialog");
 confirmBox.className = "confirm-dialog";
 confirmBox.setAttribute("aria-label", "Confirm the action");

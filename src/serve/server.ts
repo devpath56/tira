@@ -375,14 +375,17 @@ function ticketWordsHtml(t: Ticket | undefined): string {
     facts === "" ? "" : `<div class="tk-facts">${facts}</div>`,
   ].join("");
 }
+// tira's word, when there is one: what to do instead when it would refuse (its rule's own words when
+// it has no plainer ones), that nothing would change, or the finished parents it closes first
+function wordHtml(p: Packet): string {
+  if (!p.ok) return p.hint ? `<p class="verdict no" data-hint title="${esc(p.verdict)}">${esc(p.hint)}</p>` : `<p class="verdict no">${esc(p.verdict)}</p>`;
+  if (p.verdict.includes("nothing changes")) return `<p class="verdict ok">Nothing would change: it's already so.</p>`;
+  return p.closes && p.closes.length > 0 ? `<p class="hint" data-closes>Also closes ${esc(p.closes.join(", then "))}.</p>` : "";
+}
 function ticketSideHtml(p: Packet): string {
   const body = ticketWordsHtml(p.ticket);
-  const none = body === "" ? `<p class="tk-none">No description, steps, estimate or assignee yet: Edit ticket, in the task's dialog, adds them.</p>` : "";
-  const tone = p.ok ? "ok" : "no";
-  const word = !p.ok || p.verdict.includes("nothing changes") ? `<p class="verdict ${tone}">${esc(p.verdict)}</p>` : "";
-  const todo = p.hint ? `<p class="hint" data-hint><b>What to do:</b> ${esc(p.hint)}</p>` : "";
-  const closes = p.closes && p.closes.length > 0 ? `<p class="hint" data-closes>First, tira closes ${esc(p.closes.join(", then "))} (every child closed), citing this move.</p>` : "";
-  return `<section class="brief ticket-side" aria-label="The ticket" data-brief>${word}${todo}${closes}<h2>The ticket</h2><div class="ticket" data-ticket>${body}${none}</div></section>`;
+  const none = body === "" ? `<p class="tk-none">No details yet.</p>` : "";
+  return `<section class="brief ticket-side" aria-label="The ticket" data-brief>${wordHtml(p)}<div class="ticket" data-ticket>${body}${none}</div></section>`;
 }
 
 // values the move can take, as buttons that fill its field live, a plain list on the confirm page
@@ -405,16 +408,15 @@ function fieldHtml(name: string, label: string, value: string, placeholder: stri
 function commitsStatusHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (opts.synced) return `<p class="commits-status" data-commits-status role="status">${esc(opts.synced)}</p>`;
   if (!p.canLook || !fragment) return "";
-  const looking = `Looking on GitHub for ${opts.id}'s newest commits: the proof of work is one of them.`;
-  return `<p class="commits-status" data-commits-status data-commits-fetch="${esc(withQ("/commits", opts.q ?? ""))}" role="status" aria-live="polite">${esc(looking)}</p>`;
+  return `<p class="commits-status" data-commits-status data-commits-fetch="${esc(withQ("/commits", opts.q ?? ""))}" role="status" aria-live="polite">Checking GitHub…</p>`;
 }
 function commitsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const commits = p.commits ?? [];
   const status = commitsStatusHtml(p, opts, fragment);
-  const again = p.canLook ? `<button type="submit" class="how" formaction="${esc(withQ("/commits", opts.q ?? ""))}" formnovalidate data-commits-again>Look on GitHub again</button>` : "";
-  const legend = `Proof of work <small>a commit on ${esc(opts.id)}</small>`;
+  const again = p.canLook ? `<button type="submit" class="how" formaction="${esc(withQ("/commits", opts.q ?? ""))}" formnovalidate data-commits-again>Refresh</button>` : "";
+  const legend = "Proof of work";
   if (commits.length === 0) {
-    const how = `No commits for ${opts.id} yet. Push the work to a branch named after it (${opts.id}), or write "tira: ${opts.id}" in its pull request, then look again.`;
+    const how = `No commits yet. Push to a branch named ${opts.id}.`;
     return `<div class="field commits" data-proof><span>${legend}</span>${status}<p class="tk-none" data-no-commits>${esc(how)}</p>${again}</div>`;
   }
   const picked = opts.values?.evidenceRef ?? commits[0]?.sha;
@@ -428,7 +430,7 @@ function subtaskFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): stri
   const proposed = p.found ? "1" : "";
   const found = v.discovered ?? proposed;
   const mark = found === "1" || !fragment ? "" : `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`;
-  return fieldHtml("name", "Name of the new subtask", v.name ?? "", "e.g. header_layout", " required maxlength=\"80\"") + `<input type="hidden" name="discovered" value="${found}">` + mark;
+  return fieldHtml("name", "Name", v.name ?? "", "Name…", " required maxlength=\"80\"") + `<input type="hidden" name="discovered" value="${found}">` + mark;
 }
 
 // What the move needs from you: to block, what it waits on (a new ticket by name, or an open task)
@@ -440,16 +442,16 @@ function moveFieldsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string
   if (!p.ok || !verb) return "";
   if (opts.event === "BLOCK") {
     const open = (p.waitables ?? []).slice(0, 12);
-    return fieldHtml("blocker", "Blocked by", v.blocker ?? "", "a new ticket, e.g. design_tokens, or an open task", ` data-blocked-by="${esc(opts.id)}"`)
+    return fieldHtml("blocker", "Blocked by", v.blocker ?? "", "New ticket or open task…", ` data-blocked-by="${esc(opts.id)}"`)
       + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`)
-      + fieldHtml("reason", "Reason <small>optional: waiting on it, if left empty</small>", v.reason ?? "", "why it's blocked");
+      + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
   }
   if (opts.event === "COMPLETE") return commitsHtml(p, opts, fragment);
   if (verb.creates) return subtaskFieldHtml(p, opts, fragment);
   if (!verb.field) return "";
   const proposed = /parent_id="((?:[^"\\]|\\.)*)"/.exec(p.command ?? "")?.[1] ?? ""; // tira's proposal for an idea's parent
   const label = verb.field.name === "parent_id" ? "Goes under" : "Reason";
-  return fieldHtml(verb.field.name, label, v[verb.field.name] ?? (verb.field.name === "parent_id" ? proposed : ""), verb.field.name === "parent_id" ? "the task it becomes a subtask of" : "in words")
+  return fieldHtml(verb.field.name, label, v[verb.field.name] ?? (verb.field.name === "parent_id" ? proposed : ""), verb.field.name === "parent_id" ? "Parent task…" : "Why…")
     + choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (x) => `data-fill="reason" data-value="${esc(x)}"`)
     + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (x) => `data-fill="parent_id" data-value="${esc(x)}"`);
 }
@@ -464,7 +466,7 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!verb || p.brief === undefined) return `${head}<div class="split">${left}</div><div class="run">${close}</div></div>`;
   const hidden = [["token", opts.token], ["type", opts.type], ["id", opts.id], ["event", opts.event], ["seen", String(p.seen)], ["dialog", "1"]]
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v as string)}">`).join("");
-  const comment = opts.type === IDEA || !p.ok ? "" : `<label class="field comment-field" data-comment-field><span>Comment <small>optional: on the ticket, where its agent reads it</small></span><textarea name="comment" rows="3" maxlength="2000" placeholder="Feedback, context, what to watch for">${esc(opts.values?.comment ?? "")}</textarea></label>`;
+  const comment = opts.type === IDEA || !p.ok ? "" : `<label class="field comment-field" data-comment-field><span>Comment</span><textarea name="comment" rows="2" maxlength="2000" placeholder="Add a comment…">${esc(opts.values?.comment ?? "")}</textarea></label>`;
   const fields = moveFieldsHtml(p, opts, fragment) + comment;
   const right = fields === "" ? "" : `<section class="your-part" aria-label="Your part" data-you-part>${fields}</section>`;
   const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)}</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
@@ -969,10 +971,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { title, description, steps, estimate, assignee } = asked;
     const payload = { task, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
     const same = before && JSON.stringify([before.title, before.description, before.steps, before.estimate, before.assignee]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate, payload.assignee]);
-    if (same || (!before && Object.keys(payload).length === 1)) return said({ ok: true, text: "Nothing changed on the ticket." });
+    if (same || (!before && Object.keys(payload).length === 1)) return said({ ok: true, text: "Nothing changed." });
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
     if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
-    said({ ok: true, text: `Saved ${task}'s ticket.` }, task);
+    said({ ok: true, text: "Saved." }, task);
   };
 
   // POST /comments: a comment on a ticket (feedback its agent reads), written as the person commenting.
@@ -988,7 +990,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (words === "" || words.length > MAX_COMMENT || !NO_CONTROL.test(words)) return said({ ok: false, text: `A comment is 1 to ${MAX_COMMENT} characters.` });
     const w = await writeComment(ws.stream, task, words, actor);
     if (w !== undefined) return said({ ok: false, text: `The comment wasn't added (${w}).` });
-    said({ ok: true, text: `Comment added to ${task}.` }, task);
+    said({ ok: true, text: "Comment added." }, task);
   };
   // a comment on a task, as `actor`: undefined when it was written, else why not
   const writeComment = async (stream: string, task: string, words: string, actor: string): Promise<string | undefined> => {

@@ -156,7 +156,7 @@ test("every decision shows the ticket beside what the move needs, and a comment:
     assert.equal(unblock.status, 409); // loading_state is in progress: one active task at a time
     assert.match(unblock.body, /data-ok="false"/);
     // refused: tira's word and what to do, then the ticket (nothing written yet on it)
-    assert.match(unblock.body, /<section class="brief ticket-side" aria-label="The ticket" data-brief><p class="verdict no">tira would refuse this: gate: one active task: node:loading_state is already active\.<\/p><p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p><h2>The ticket<\/h2><div class="ticket" data-ticket><p class="tk-none">No description, steps, estimate or assignee yet: Edit ticket, in the task(?:'|&#39;)s dialog, adds them\.<\/p><\/div><\/section>/);
+    assert.match(unblock.body, /<section class="brief ticket-side" aria-label="The ticket" data-brief><p class="verdict no" data-hint title="tira would refuse this: gate: one active task: node:loading_state is already active\.">Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p><div class="ticket" data-ticket><p class="tk-none">No details yet\.<\/p><\/div><\/section>/); // what to do, in one line (the rule's words on hover)
     // no command, no recommendation essay; nothing to fill in or comment on a move tira refuses
     assert.doesNotMatch(unblock.body, /data-command|tira send|Your action|Recommendation|data-why|data-you-part/);
     assert.match(unblock.body, /<button class="act" type="submit">Check again<\/button>/);
@@ -169,22 +169,22 @@ test("every decision shows the ticket beside what the move needs, and a comment:
     assert.doesNotMatch(early.body, /class="verdict/); // allowed: no word from tira
     assert.match(early.body, /<input type="hidden" name="seen" value="11"><input type="hidden" name="dialog" value="1">/);
     assert.match(early.body, /<input type="hidden" name="token" value="t0k3n">/);
-    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits for loading_state yet\. Push the work to a branch named after it \(loading_state\), or write &#34;tira: loading_state&#34; in its pull request, then look again\.<\/p>/);
+    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits yet\. Push to a branch named loading_state\.<\/p>/);
     assert.doesNotMatch(early.body, /data-commits-fetch|data-commits-again/); // no repo linked: nowhere to look
     assert.match(early.body, /<button class="act primary" type="submit">Complete<\/button>/); // never greyed out: sent without a commit, it says so
-    assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment <small>optional: on the ticket, where its agent reads it<\/small><\/span><textarea name="comment"/);
+    assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment<\/span><textarea name="comment" rows="2" maxlength="2000" placeholder="Add a comment…">/);
     // with its ticket written and two commits kept: the work, and the newest commit picked
     await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", task: "loading_state", title: "Loading state for the cards", description: "A spinner while metrics load.", steps: "Add the spinner\nTest on a slow network", estimate: "2h", assignee: "isha" }).toString() });
     const old = await s.commit("loading_state", 1, "first try");
     const newest = await s.commit("loading_state", 2, "spinner, tested on 3G\n\nmore words");
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
-    assert.match(complete.body, /<h2>The ticket<\/h2><div class="ticket" data-ticket><p class="tk-title" data-ticket-title>Loading state for the cards<\/p><div class="tk-desc"><p>A spinner while metrics load\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol><li>Add the spinner<\/li><li>Test on a slow network<\/li><\/ol><\/div><div class="tk-facts"><span><span class="lk">Estimate<\/span>2h<\/span><span><span class="lk">Assignee<\/span>isha<\/span><\/div><\/div>/);
-    assert.match(complete.body, new RegExp(`<fieldset class="field commits" data-proof><legend>Proof of work <small>a commit on loading_state</small></legend><label class="commit"><input type="radio" name="evidenceRef" value="${newest}" checked><code>${newest.slice(0, 7)}</code><span>spinner, tested on 3G</span><small>#7</small></label><label class="commit"><input type="radio" name="evidenceRef" value="${old}"><code>`));
+    assert.match(complete.body, /<div class="ticket" data-ticket><p class="tk-title" data-ticket-title>Loading state for the cards<\/p><div class="tk-desc"><p>A spinner while metrics load\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol><li>Add the spinner<\/li><li>Test on a slow network<\/li><\/ol><\/div><div class="tk-facts"><span><span class="lk">Estimate<\/span>2h<\/span><span><span class="lk">Assignee<\/span>isha<\/span><\/div><\/div>/);
+    assert.match(complete.body, new RegExp(`<fieldset class="field commits" data-proof><legend>Proof of work</legend><label class="commit"><input type="radio" name="evidenceRef" value="${newest}" checked><code>${newest.slice(0, 7)}</code><span>spinner, tested on 3G</span><small>#7</small></label><label class="commit"><input type="radio" name="evidenceRef" value="${old}"><code>`));
     assert.match(complete.body, /<button class="act primary" type="submit">Complete<\/button>/);
     // to block: what it waits on, and why
     const block = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK");
-    assert.match(block.body, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="a new ticket, e\.g\. design_tokens, or an open task"[^>]* data-blocked-by="table"><\/label>/);
-    assert.match(block.body, /<label class="field" data-field="reason"><span>Reason <small>optional: waiting on it, if left empty<\/small><\/span><input type="text" name="reason"/);
+    assert.match(block.body, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…"[^>]* data-blocked-by="table"><\/label>/);
+    assert.match(block.body, /<label class="field" data-field="reason"><span>Reason<\/span><input type="text" name="reason" value="" placeholder="Optional…"/);
     assert.doesNotMatch(block.body + complete.body + early.body, /data-command|tira send|tira create/);
     // unknown verbs and tasks are explained, not offered
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=ADD_CHILD")).body, /tira doesn&#39;t take ADD_CHILD from the page\./);
@@ -196,7 +196,7 @@ test("every decision shows the ticket beside what the move needs, and a comment:
   }
 });
 
-test("a ticket is the work: Edit ticket saves its title, description, steps, estimate and assignee as a new version; comments are feedback on it; each comes back to the task's dialog", async () => {
+test("a ticket is edited where it shows: its title, description, steps, estimate and assignee save together as a new version (Save shows once something changes); comments are feedback on it; each comes back to the task's dialog", async () => {
   const s = await serving();
   try {
     const post = (path: string, fields: Record<string, string>) => s.http("POST", path, { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", ...fields }).toString() });
@@ -206,26 +206,33 @@ test("a ticket is the work: Edit ticket saves its title, description, steps, est
       return { at, page: (await s.http("GET", at)).body };
     };
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
-    assert.match(ls, /<div class="ticket" data-ticket><p class="tk-none">No description or steps yet\.<\/p><details class="tk-edit" data-ticket-edit><summary>Edit ticket<\/summary><form method="post" action="\/tickets" class="tk-form">/);
-    assert.match(ls, /<div class="prop" data-ticket-assignee><span class="lk">Assignee<\/span><div><span class="dim">Nobody yet<\/span><\/div><\/div><div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div><span class="dim">None yet<\/span><\/div><\/div>/);
-    assert.match(ls, /<select name="assignee" aria-label="Assignee"><option value="">Nobody yet<\/option><optgroup label="Team"><option value="isha">isha<\/option><\/optgroup><\/select>/);
-    assert.match(ls, /<div class="comments" data-comments><h3>Comments <span class="ev-seq">0<\/span><\/h3><p class="tk-none">No comments yet\.<\/p><form method="post" action="\/comments" class="cm-form" data-comment-form>/);
+    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><textarea name="steps" class="tk-in tk-steps-in" rows="1" placeholder="Add steps, one per line…"[^>]*><\/textarea><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // no Edit fold: the ticket is its form
+    const form = /id="(tk-\d+)" data-ticket/.exec(ls)?.[1] ?? "";
+    assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><input type="text" name="estimate" form="${form}" class="prop-in" maxlength="10" value="" placeholder="2h, 1d…"`)); // beside, in the same form
+    assert.match(ls, /<div class="subtasks" data-subtasks><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div>/); // none yet: just the way to add one
+    assert.match(ls, /<div class="comments" data-comments><h3>Comments<\/h3><form method="post" action="\/comments" class="cm-form" data-comment-form>[^]*?placeholder="Add a comment…"/);
+    assert.match(ls, /<details class="trail"><summary>History <span class="ev-seq">\d+<\/span><\/summary>/); // folded
+    // Save shows once something in the ticket changes (a field beside it too: it's in the same form)
+    assert.match((await s.http("GET", "/")).body, /\.js \.tk-form:not\(\[data-dirty\]\) \.tk-save\{display:none\}/);
+    const app = (await s.http("GET", "/app.mjs")).body;
+    assert.match(app, /document\.documentElement\.classList\.add\("js"\);/);
+    assert.match(app, /if \(form\?\.matches\("\[data-ticket-form\]"\)\) form\.dataset\.dirty = "1";/);
     const back = /name="back" value="(#t\d+)"/.exec(ls)?.[1] ?? "";
     // saved: back to its dialog, which shows the work under its title
     const saved = await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\n\n  Test on 3G  ", estimate: "2h", assignee: "isha" }));
     assert.match(saved.at, new RegExp(`^/\\?r=\\d+${back}$`));
-    assert.match(saved.page, /data-flash>Saved loading_state(?:'|&#39;)s ticket\.<\/div>/);
+    assert.match(saved.page, /data-flash>Saved\.<\/div>/);
     ls = dialog(saved.page, "loading_state");
-    assert.match(ls, /<h2>Loading state<\/h2><p class="tk-id">loading_state<\/p>/);
-    assert.match(ls, /<div class="tk-desc" data-ticket-description><p>A spinner while metrics load\.<\/p><p>No layout shift\.<\/p><\/div><div class="tk-steps"><h3>Steps<\/h3><ol aria-label="Steps" data-ticket-steps><li>Add the spinner<\/li><li>Test on 3G<\/li><\/ol><\/div>/);
-    assert.match(ls, /<div class="prop" data-ticket-assignee><span class="lk">Assignee<\/span><div>isha<\/div><\/div><div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div>2h<\/div><\/div>/); // properties, beside
+    assert.match(ls, /value="Loading state" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id">loading_state<\/p>/);
+    assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><h3 class="tk-steps-h">Steps<\/h3><textarea name="steps" class="tk-in tk-steps-in" rows="2" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>Add the spinner\nTest on 3G<\/textarea>/);
+    assert.match(ls, /name="estimate" form="tk-\d+" class="prop-in" maxlength="10" value="2h"/); // properties, beside
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
     // its parent's row for it: its title (and id), estimate and who; the parent adds the estimates up
     const parent = dialog(saved.page, "improve_visual");
     assert.match(parent, /data-subtask="node:loading_state"><span class="sub-ico s-in_progress" aria-hidden="true"><\/span><span class="sub-name">Loading state<small>loading_state<\/small><\/span><span class="sub-est">2h<\/span><span class="who" title="isha" aria-label="Assigned to isha">IS<\/span><span class="state s-in_progress">/);
-    assert.match(parent, /<div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div><span class="dim">None yet<\/span> <span class="dim">· subtasks 2h<\/span><\/div><\/div>/);
+    assert.match(parent, /value="" placeholder="2h, 1d…" aria-label="Estimate" autocomplete="off"><small class="dim">2h in subtasks<\/small>/);
     await post("/tickets", { task: "font", back, estimate: "1.5d" }); // a day is 8 hours
-    assert.match(dialog((await s.http("GET", "/")).body, "improve_visual"), /<span class="dim">· subtasks 1d 6h<\/span>/);
+    assert.match(dialog((await s.http("GET", "/")).body, "improve_visual"), /<small class="dim">1d 6h in subtasks<\/small>/);
     // what a ticket can't say, and nothing written
     const n0 = (await s.store.readStream(S)).length;
     for (const [fields, why] of [
@@ -239,15 +246,15 @@ test("a ticket is the work: Edit ticket saves its title, description, steps, est
     }
     assert.match((await flashOf(await post("/tickets", { task: "ghost", back }))).page, /data-flash>There is no task ghost\./);
     assert.equal((await s.store.readStream(S)).length, n0);
-    assert.match((await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\nTest on 3G", estimate: "2h", assignee: "isha" }))).page, /data-flash>Nothing changed on the ticket\./);
+    assert.match((await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\nTest on 3G", estimate: "2h", assignee: "isha" }))).page, /data-flash>Nothing changed\./);
     // a second save is the whole ticket again, its next version
     await post("/tickets", { task: "loading_state", back, title: "Loading state v2" });
     const { ticketsOf } = await import("../src/fold/tickets.ts");
     assert.deepEqual(ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("loading_state"), { version: 2, title: "Loading state v2", steps: [], by: "isha" });
     // a comment: feedback on the ticket, as the person writing it
     const commented = await flashOf(await post("/comments", { task: "loading_state", back, text: "Check the dark theme too." }));
-    assert.match(commented.page, /data-flash>Comment added to loading_state\./);
-    assert.match(dialog(commented.page, "loading_state"), /<h3>Comments <span class="ev-seq">1<\/span><\/h3><ol class="cm-list"><li class="cm" data-comment><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]* · seq \d+<\/span><\/div><p>Check the dark theme too\.<\/p><\/li><\/ol>/);
+    assert.match(commented.page, /data-flash>Comment added\./);
+    assert.match(dialog(commented.page, "loading_state"), /<h3>Comments <span class="ev-seq">1<\/span><\/h3><ol class="cm-list"><li class="cm" data-comment><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]*<\/span><\/div><p>Check the dark theme too\.<\/p><\/li><\/ol>/);
     assert.match((await flashOf(await post("/comments", { task: "loading_state", back, text: "   " }))).page, /data-flash>A comment is 1 to 2000 characters\./);
     assert.equal((await s.http("POST", "/comments", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: "task=loading_state&text=hi" })).status, 403); // no token
     // a comment sent with a move: on the ticket, once the move is written
@@ -333,7 +340,7 @@ test("the confirm page is the write path's own decision: a drained active parent
     await s.send("c1", "COMPLETE", { evidenceRef: "e" });
     const page = await s.http("GET", "/confirm?type=node&id=filters&event=START");
     assert.equal(page.status, 200, page.body.match(/tira would refuse[^<]*/)?.[0]);
-    assert.match(page.body, /First, tira closes p, then table \(/); // closing p drains table: the whole chain is named
+    assert.match(page.body, /<p class="hint" data-closes>Also closes p, then table\.<\/p>/); // closing p drains table: the whole chain is named
     const done = await s.form({ token: "t0k3n", type: "node", id: "filters", event: "START" });
     const flash = await s.http("GET", String(done.headers.location));
     assert.match(flash.body, /Start filters: done \(seq \d+\)\. tira closed p, table, citing it\./);
@@ -637,7 +644,7 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
   const s = await serving();
   try {
     const block = (await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body;
-    assert.match(block, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="a new ticket, e\.g\. design_tokens, or an open task" autocomplete="off" spellcheck="false" data-blocked-by="table"><\/label>/);
+    assert.match(block, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="table"><\/label>/);
     const open = () => [...block.matchAll(/data-fill="blocker" data-value="([^"]*)"/g)].map((m) => m[1]);
     for (const id of ["colors", "loading_state", "font", "filters", "fetch_metrics"]) assert.ok(open().includes(id), id);
     assert.ok(!open().includes("table"), "not itself");
@@ -754,7 +761,7 @@ test("Cancel, Reopen and Add subtask go through the page like the other verbs", 
     assert.equal((await state("ticks"))?.tree?.kind, "planned");
     // the packet for a subtask asks its name; under a done task it says to re-open first
     const add = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK")).body;
-    assert.match(add, /<label class="field" data-field="name"><span>Name of the new subtask<\/span><input type="text" name="name" value="" placeholder="e\.g\. header_layout" autocomplete="off" spellcheck="false" required maxlength="80"><\/label><input type="hidden" name="discovered" value="">/); // dashboard isn't under way: planned, unless you say found
+    assert.match(add, /<label class="field" data-field="name"><span>Name<\/span><input type="text" name="name" value="" placeholder="Name…" autocomplete="off" spellcheck="false" required maxlength="80"><\/label><input type="hidden" name="discovered" value="">/); // dashboard isn't under way: planned, unless you say found
     const addLive = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK&fragment=1")).body;
     assert.match(addLive, /<button type="button" class="fill" data-fill-found="dashboard">Mark as found while working on dashboard<\/button>/);
     // under a task in progress, a new subtask is marked as found while working on it
@@ -763,7 +770,7 @@ test("Cancel, Reopen and Add subtask go through the page like the other verbs", 
     await s.send("fetch_metrics", "START");
     await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
     const underDone = (await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=ADD_SUBTASK")).body;
-    assert.match(underDone, /What to do:<\/b> Re-open fetch_metrics first, with a reason\./);
+    assert.match(underDone, /<p class="verdict no" data-hint title="[^"]+">Re-open fetch_metrics first, with a reason\.<\/p>/);
   } finally {
     await s.done();
   }

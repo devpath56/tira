@@ -13,8 +13,7 @@ it on GitHub, and its message).
 **The ticket** (2026-10-24, Isha) is what the work is: its **title** (the task's id stays its
 key, under it), **description**, **steps**, **time estimate** ("2h", "1d") and **assignee**: a
 person on the project, or one of its connected agents (Project settings → Connect agents).
-Under `tira serve`, **Edit ticket** opens its form; each save is a new version of the whole
-ticket, written as you. **Comments** follow, oldest first, each with who wrote it (an agent's
+Each save is a new version of the whole ticket, written as you. **Comments** follow, oldest first, each with who wrote it (an agent's
 marked), when, and its seq; under `tira serve`, one to add. They're feedback for whoever works
 on the task: its agent reads them through tira's MCP server, and can reply. Under `tira serve` the dialog offers what the task's
 state allows: start, complete, block, unblock, cancel, reopen (and, under its subtasks, add
@@ -23,16 +22,20 @@ Graph, and the canvas moves to the task (an idea's dialog does the same for its 
 
 **How to read it** (laid out 2026-10-24, Isha). At the top, where it sits: the project (back to
 the board) and the tickets above it, each one click away; for a subtask, "2 of 3" with the sister
-subtask before and after. Then two columns. **The work**: for a subtask, "Subtask of …" with its
-parent's progress; the title (the id under it); the description and steps; its **subtasks**, each
-a row with its state, name (and id), estimate and who it's assigned to (an agent's spark, a
-person's initials), one click to its own dialog, under "N of M subtasks closed" and its meter, and
-under them **+ Add subtask** while it can take one; its comments; its history. **Beside**, its
-properties: status (with marks: next, active, all subtasks closed, closed by tira, found during X)
-and what it allows; how many subtasks are closed; assignee; estimate (and its subtasks' added up,
-a day as 8 hours); parent, with its progress; the blocks link both ways ("Blocked by
-design_tokens" on the blocked task, "Blocks colors" on its ticket); its Jira issue and pull
-requests; its proof of work; Show on graph. On a phone the properties come first.
+subtask before and after. Then two columns. **The work**: the title (the id under it); the
+description and steps; its **subtasks**, each a row with its state, name (and id), estimate and
+who it's assigned to (an agent's spark, a person's initials), one click to its own dialog, under
+"closed/all" and its meter, and under them **+ Add subtask** while it can take one; its comments;
+its history, folded. **Beside**, its properties: status (with marks: next, active, all subtasks
+closed, closed by tira, found during X) and what it allows; assignee; estimate (its subtasks'
+added up under it, a day as 8 hours); parent, with its progress; the blocks link both ways
+("Blocked by design_tokens" on the blocked task, "Blocks colors" on its ticket); its Jira issue and
+pull requests; its proof of work; Show on graph. On a phone the properties come first. Few words:
+labels and placeholders, no sentences explaining what's empty.
+
+Under `tira serve` the ticket is edited where it shows (no Edit fold): its title, description and
+steps are fields that read as words until you click them, its assignee and estimate fields beside
+(in the same form); **Save** appears once something changes, and Cmd/Ctrl+Enter in its text saves.
 tira's entries say why and which move they cite. An entry written before the rules version
 marker carries a "legacy" tag: it was judged, and is replayed, under the legacy era's rules
 (versioned rules, 2026-10-20). Close it with ×, a click on the dimmed page around it, or Esc
@@ -42,9 +45,9 @@ under `tira serve` (which also moves focus into the dialog, and back to the task
 
 - `.drawer` sections with ids `#t0`, `#t1`, … in tree order, `role="dialog"`; the palette's index uses the same ids.
 - `.modal-box` on the centred box, `.scrim` on the dimmed page behind it (a link that closes the dialog).
-- `.tk-crumbs` on where it sits, `[data-siblings]` on a subtask's place among its sisters, `[data-subtask-of]` on its parent line; `.tk-side` on the properties, `[data-parent]` on the parent there.
+- `.tk-crumbs` on where it sits, `[data-siblings]` on a subtask's place among its sisters; `.tk-side` on the properties, `[data-parent]` on the parent there.
 - `[data-subtasks]` on the subtasks, `.kids-list` on their rows, `[data-subtask]` on each row (its key); `[data-proof]` on a done task's proof of work; `[data-links]` on the blocks link.
-- `[data-ticket]` on the ticket, with `[data-ticket-description]`, `[data-ticket-steps]`, `[data-ticket-estimate]` and `[data-ticket-assignee]`; `[data-ticket-edit]` on Edit ticket (live only).
+- `[data-ticket]` on the ticket, with `[data-ticket-description]`, `[data-ticket-steps]`, `[data-ticket-estimate]` and `[data-ticket-assignee]`; `[data-ticket-form]` on the ticket's form (live only).
 - `[data-comments]` on the comments, `[data-comment]` on each, `[data-comment-form]` on the one to add (live only).
 - `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only).
 - `.legacy` on the tag of each entry with no rules era (Activity counts them too).

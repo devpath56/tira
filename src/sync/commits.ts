@@ -47,11 +47,11 @@ export async function lookForCommits(store: EventStore, registry: Registry, stre
 export async function lookedSaid(task: string, look: () => Promise<Looked | undefined>): Promise<string> {
   try {
     const l = await look();
-    if (!l) return "This project links no GitHub repo: link one in Project settings to complete with a commit.";
+    if (!l) return "No GitHub repo linked to this project.";
     if (l.found === 0) return `No commits for ${task} on GitHub yet.`;
     const noun = l.found === 1 ? "commit" : "commits";
-    return `Found ${l.found} ${noun} for ${task} on GitHub just now${l.kept > 0 ? ` (${l.kept} new)` : ""}.`;
+    return `${l.found} ${noun} on GitHub${l.kept > 0 ? ` (${l.kept} new)` : ""}.`;
   } catch (err) {
-    return `Couldn't reach GitHub just now (${(err as Error).message}): these are the commits tira already has.`;
+    return `Couldn't reach GitHub (${(err as Error).message}).`;
   }
 }
