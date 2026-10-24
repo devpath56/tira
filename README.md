@@ -671,7 +671,7 @@ Every write goes through the same dispatcher and rules as a person's, under the 
 
 ## Hosting tira on Render
 
-One shared tira at an https address, so everyone (and Claude's Connectors) reaches the same board. `render.yaml` is the service: Node 22, `npm ci`, `tira serve`, one always-on instance (Starter: Claude gives a connector 10 seconds to answer, and a Free service sleeps), Render's own check at `/healthz`.
+One shared tira at an https address, so everyone (and Claude's Connectors) reaches the same board. `render.yaml` is the service: Node 22, `npm ci`, `tira serve`, one instance on Render's Free plan, Render's own check at `/healthz`. Free sleeps after 15 minutes with no visits and takes about a minute to wake; Claude gives a connector 10 seconds to answer, so the first connector call after a quiet spell can fail until tira is awake (Starter, $7 a month, stays awake).
 
 Setting `TIRA_PUBLIC_URL` turns on public mode (`src/serve/public.ts`). tira then:
 - listens on every address at `$PORT`, and answers only that address;

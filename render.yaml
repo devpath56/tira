@@ -7,7 +7,8 @@ services:
     name: tira
     runtime: node
     region: oregon # beside the database
-    plan: starter # always on: Claude gives a connector 10 seconds to answer, and Free sleeps
+    plan: free # no cost (Isha, 2026-10-24). It sleeps after 15 minutes with no visits and takes about
+    # a minute to wake, so the first visit or connector call after a quiet spell can time out: try again.
     numInstances: 1 # sign-ins under way are kept in memory: one instance
     buildCommand: npm ci
     startCommand: node --disable-warning=ExperimentalWarning scripts/tira.ts serve
