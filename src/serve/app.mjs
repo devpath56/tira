@@ -8,6 +8,7 @@ import { rank, parse } from "./rank.mjs";
 import "./theme.mjs";
 import { graph } from "./graph.mjs";
 import { fx, tint } from "./layout.mjs";
+import { wireDrag } from "./drag.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -134,14 +135,21 @@ function show(packet) {
   if (!box) return;
   const name = confirmBox.querySelector("[data-blocked-by] input"); // to block: what it waits on first
   if (name) return name.focus();
+  const proof = confirmBox.querySelector("[data-proof] input"); // to complete: the proof of work first
+  if (proof) {
+    proof.value = valueIn(box.value, "evidenceRef");
+    return proof.focus();
+  }
   box.focus();
   const at = box.value.indexOf('""'); // the first value to fill in
   const caret = at < 0 ? box.value.length : at + 1;
   box.setSelectionRange(caret, caret);
 }
+// a decision's packet, just the packet (?fragment=1): null if the answer has none
+const packetAt = async (href) => packetOf(await (await fetch(`${href}&fragment=1`, { headers: { accept: "text/html" } })).text());
 async function openConfirm(href) {
   try {
-    const packet = packetOf(await (await fetch(`${href}&fragment=1`, { headers: { accept: "text/html" } })).text());
+    const packet = await packetAt(href);
     if (!packet) throw new Error("no packet");
     show(packet);
   } catch {
@@ -151,10 +159,15 @@ async function openConfirm(href) {
 // key="value" in a command: replaced if it's there, else added
 const BACKSLASH = "\\";
 const quoted = (v) => '"' + v.replaceAll(BACKSLASH, BACKSLASH + BACKSLASH).replaceAll('"', BACKSLASH + '"') + '"';
-function fill(box, key, value) {
+function fill(box, key, value, focus = true) {
   const re = new RegExp(String.raw`(^|\s)${key}=("(?:[^"\\]|\\.)*"|\S*)`);
   box.value = re.test(box.value) ? box.value.replace(re, (_m, pre) => `${pre}${key}=${quoted(value)}`) : `${box.value.trimEnd()} ${key}=${quoted(value)}`;
-  box.focus();
+  if (focus) box.focus();
+}
+// key's value in a command, unquoted ("" when it isn't there)
+function valueIn(text, key) {
+  const v = new RegExp(String.raw`(?:^|\s)${key}=("(?:[^"\\]|\\.)*"|\S*)`).exec(text)?.[1] ?? "";
+  return v.startsWith('"') ? v.slice(1, -1).replaceAll(/\\(.)/g, "$1") : v;
 }
 // Blocking: name what it waits on, and the command becomes two lines (a new ticket under the
 // task, found while working on it, then the block on it), or one line for an open task picked
@@ -176,7 +189,11 @@ function composeBlock(name) {
   box.value = n !== "" && open.includes(n) ? block : `${ticket}\n${block}`;
 }
 confirmBox.addEventListener("input", (e) => {
+  const box = confirmBox.querySelector("textarea[data-command]");
+  const proof = confirmBox.querySelector("[data-proof] input");
   if (e.target instanceof HTMLInputElement && e.target.closest("[data-blocked-by]")) composeBlock(e.target.value);
+  else if (box && e.target === proof) fill(box, "evidenceRef", proof.value, false);
+  else if (box && proof && e.target === box) proof.value = valueIn(box.value, "evidenceRef");
 });
 confirmBox.addEventListener("click", (e) => {
   const el = e.target instanceof Element ? e.target : null;
@@ -190,6 +207,8 @@ confirmBox.addEventListener("click", (e) => {
   }
   const chip = el?.closest("[data-fill], [data-fill-found]");
   if (!box || !chip) return;
+  const proof = confirmBox.querySelector("[data-proof] input");
+  if (chip.dataset.fill === "evidenceRef" && proof) proof.value = chip.dataset.value ?? ""; // a merged pull request as the proof
   if (chip.dataset.fill) fill(box, chip.dataset.fill, chip.dataset.value ?? "");
   else { fill(box, "kind", "discovered"); fill(box, "discovered_during", chip.dataset.fillFound ?? ""); chip.remove(); }
 });
@@ -199,22 +218,49 @@ confirmBox.addEventListener("keydown", (e) => {
     e.target.form?.requestSubmit();
   }
 });
-confirmBox.addEventListener("submit", async (e) => {
-  const form = e.target;
-  if (!(form instanceof HTMLFormElement)) return;
-  e.preventDefault();
-  const body = new URLSearchParams(new FormData(form));
+// A decision posted from here (the dialog's form, or a drop's Start): the page comes back with
+// the result; a value missing, an edited-into-another action or a moved log comes back into the
+// dialog. `fallback` when there's no answer to read.
+async function post(action, body, fallback) {
   body.set("fragment", "1");
   try {
-    const doc = new DOMParser().parseFromString(await (await fetch(form.getAttribute("action") ?? "/act", { method: "POST", body })).text(), "text/html"); // /act, in this project
+    const doc = new DOMParser().parseFromString(await (await fetch(action, { method: "POST", body })).text(), "text/html"); // /act, in this project
     const go = doc.querySelector("[data-go]")?.dataset.go;
     const packet = doc.querySelector("[data-packet]");
     if (go) location.href = go;
     else if (packet) show(packet);
-    else form.submit();
+    else fallback();
   } catch {
-    form.submit(); // no answer: post it the plain way
+    fallback();
   }
+}
+confirmBox.addEventListener("submit", (e) => {
+  const form = e.target;
+  if (!(form instanceof HTMLFormElement)) return;
+  e.preventDefault();
+  void post(form.getAttribute("action") ?? "/act", new URLSearchParams(new FormData(form)), () => form.submit()); // no answer: post it the plain way
+});
+
+// A drop that runs at once (To do → In progress: Start) posts tira's own decision as it stands,
+// with no dialog. If tira would refuse it (another task is in progress, say), the dialog opens to
+// say why; if the decision can't be fetched, the confirm page does.
+async function runNow(href) {
+  try {
+    const packet = await packetAt(href);
+    const form = packet?.querySelector("form[data-you]");
+    if (!packet || !form) throw new Error("no packet");
+    if (packet.dataset.ok !== "true") return show(packet);
+    const body = new URLSearchParams();
+    for (const el of form.querySelectorAll("input[name], textarea[name]")) body.set(el.getAttribute("name") ?? "", el.value);
+    await post(form.getAttribute("action") ?? "/act", body, () => show(packet));
+  } catch {
+    location.href = href;
+  }
+}
+// Cards dragged between the Kanban's columns (drag.mjs): the move's verb, at once or in the dialog.
+wireDrag((type, id, event, now) => {
+  const href = withW(`/confirm?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&event=${event}`);
+  void (now ? runNow(href) : openConfirm(href));
 });
 document.addEventListener("click", (e) => {
   const link = e.target instanceof Element ? e.target.closest('a.act[href^="/confirm"]') : null;

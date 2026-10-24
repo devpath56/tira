@@ -7,6 +7,8 @@
 // A block names what it waits on as a ticket (blocker=…): an open task, or a new one the line
 // above creates under the blocked task. Those two lines are the only pair the page runs.
 
+import type { Registry } from "../tables/registry.ts";
+
 // The verbs a page may send, with the field each needs (the node table's guards, and the idea
 // table's: a reject needs a reason, hasReason).
 // `text`: the field must have text, not only spaces, as the gate checks (2026-10-20).
@@ -33,6 +35,24 @@ export const PAGE_VERBS: Record<string, PageVerb> = {
 
 // Whether a verb is for this type: its own type (`on`), else any tree type (a task).
 export const verbFits = (verb: PageVerb, type: string, isTreeType: (type: string) => boolean): boolean => (verb.on === undefined ? isTreeType(type) : type === verb.on);
+
+// A drag on the Kanban, as a verb: the card's type, the column it leaves and the one it lands
+// in, to the task verb today's rules give that move (a transition, never a noop or a refusal).
+// Keys read "node:unstarted>in_progress". A move two verbs could mean is left out: a drag can't
+// choose between them.
+export function dragMoves(registry: Registry): Record<string, string> {
+  const verbs = new Map<string, string[]>();
+  for (const def of registry.types()) {
+    if (def.tree === undefined) continue;
+    for (const p of registry.tableFor(def, def.tree.region).pairs) {
+      const verb = PAGE_VERBS[p.event];
+      if (p.outcome !== "transition" || p.to === undefined || !verb || verb.creates || verb.on !== undefined) continue;
+      const key = `${def.type}:${p.from}>${p.to}`;
+      verbs.set(key, [...(verbs.get(key) ?? []), p.event]);
+    }
+  }
+  return Object.fromEntries([...verbs].flatMap(([key, [event, ...more]]) => (event !== undefined && more.length === 0 ? [[key, event]] : [])));
+}
 
 // What the page writes: an event on a task, or (Add subtask) a birth under it.
 export interface PageAction { type: string; id: string; event: string; payload: Record<string, unknown>; child?: string }

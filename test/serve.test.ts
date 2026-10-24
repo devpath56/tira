@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
-import { defaultRegistry } from "../src/tables/registry.ts";
+import { defaultRegistry, Registry } from "../src/tables/registry.ts";
+import { loadTable } from "../src/tables/table.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
@@ -17,6 +18,8 @@ import { filesMatching, srcCode } from "./src-text.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
 import { priority, rank, score } from "../src/serve/rank.mjs";
 import { answerFor, words } from "../src/serve/help.mjs";
+import { moveFor, RUNS_AT_ONCE } from "../src/serve/drag.mjs";
+import { dragMoves } from "../src/serve/command.ts";
 
 const S = "tasktree-dash";
 
@@ -370,10 +373,85 @@ test("a confirm opens as a dialog over the page: ?fragment=1 is just the packet,
     assert.match(app, /if \(verb\) void openConfirm\(/); // and the palette's verbs
     assert.match(app, /fetch\(`\$\{href\}&fragment=1`/);
     assert.match(app, /confirmBox\.showModal\(\)/);
-    assert.match(app, /catch \{\n    location\.href = href;/); // no packet: the confirm page instead
+    assert.match(app, /show\(packet\);\n  \} catch \{\n    location\.href = href;/); // no packet: the confirm page instead
     // running it posts from the dialog: a decision comes back into it, a result sends the page there
     assert.match(app, /body\.set\("fragment", "1"\);/);
     assert.match(app, /if \(go\) location\.href = go;\n    else if \(packet\) show\(packet\);/);
+  } finally {
+    await s.done();
+  }
+});
+
+// Every move a person can make with a card, from the node table. Never To do → Done: start it first.
+const MOVES = {
+  "node:unstarted>in_progress": "START", "node:unstarted>blocked": "BLOCK", "node:unstarted>cancelled": "CANCEL",
+  "node:in_progress>blocked": "BLOCK", "node:in_progress>cancelled": "CANCEL", "node:in_progress>done": "COMPLETE",
+  "node:blocked>cancelled": "CANCEL", "node:blocked>in_progress": "UNBLOCK", "node:done>in_progress": "REOPEN",
+};
+
+test("cards drag between the Kanban's columns: the live board carries what each move means under today's rules; a drop starts at once or opens its dialog", async () => {
+  assert.deepEqual(dragMoves(defaultRegistry()), MOVES);
+  // a move two verbs could mean is left out: a drag can't choose between them
+  const node = loadTable(new URL("../charts/node-lifecycle.json", import.meta.url));
+  const twin = { ...node, pairs: node.pairs.map((p) => (p.from === "unstarted" && p.event === "UNBLOCK" ? { ...p, outcome: "transition" as const, to: "in_progress" } : p)) };
+  const tree = defaultRegistry().get("node")?.tree;
+  assert.ok(tree);
+  const both = dragMoves(new Registry().register({ type: "node", createdAs: "BORN", regions: { lifecycle: twin }, tree }));
+  assert.equal(both["node:unstarted>in_progress"], undefined);
+  assert.equal(both["node:in_progress>done"], "COMPLETE");
+  const s = await serving();
+  try {
+    const page = (await s.http("GET", "/")).body;
+    assert.ok(page.includes(`<div class="cols" data-moves="${esc(JSON.stringify(dragMoves(s.registry)))}">`), "the live board carries its moves");
+    for (const state of ["unstarted", "in_progress", "blocked", "done", "cancelled"]) assert.match(page, new RegExp(`<div class="col" data-col="${state}">`));
+    // a rendered file has none of it
+    const events = await s.store.readStream(S);
+    assert.doesNotMatch(renderHtml(fold(events, s.registry), S, "h", events), /<div class="cols" data-moves|data-col="/);
+    // the script: served, loaded by the page's own; a drop's verb runs at once (Start) or opens its dialog
+    assert.equal((await s.http("GET", "/drag.mjs")).status, 200);
+    const app = (await s.http("GET", "/app.mjs")).body;
+    assert.match(app, /import \{ wireDrag \} from "\.\/drag\.mjs";/);
+    assert.match(app, /void \(now \? runNow\(href\) : openConfirm\(href\)\);/);
+    // at once: tira's own decision, posted as it stands; one tira would refuse opens the dialog instead
+    assert.match(app, /if \(packet\.dataset\.ok !== "true"\) return show\(packet\);/);
+    assert.match(app, /await post\(form\.getAttribute\("action"\) \?\? "\/act", body, \(\) => show\(packet\)\);\n  \} catch \{\n    location\.href = href;/);
+  } finally {
+    await s.done();
+  }
+});
+
+test("a drop means its move's verb or nothing: only Start runs without a dialog, and a move the rules don't allow leaves the card where it was", () => {
+  assert.equal(moveFor(MOVES, "node:colors", "unstarted", "in_progress"), "START");
+  assert.equal(moveFor(MOVES, "node:colors", "in_progress", "done"), "COMPLETE");
+  assert.equal(moveFor(MOVES, "node:colors", "unstarted", "done"), undefined); // start it first
+  assert.equal(moveFor(MOVES, "node:colors", "done", "done"), undefined);
+  assert.equal(moveFor(MOVES, "idea:colors", "unstarted", "in_progress"), undefined); // not a task
+  assert.equal(moveFor(MOVES, "node:a:b", "blocked", "in_progress"), "UNBLOCK"); // the type ends at the first colon
+  assert.deepEqual([...RUNS_AT_ONCE], ["START"]);
+  const drag = readFileSync(new URL("../src/serve/drag.mjs", import.meta.url), "utf8");
+  assert.match(drag, /if \(!event\) return; \/\/ not a move the rules allow/);
+  assert.match(drag, /act\(key\.slice\(0, key\.indexOf\(":"\)\), id, event, RUNS_AT_ONCE\.has\(event\)\);/);
+  assert.match(drag, /board\.addEventListener\("click", \(e\) => \{ if \(dragged\) \{ e\.preventDefault\(\);/); // a drop doesn't open the card's dialog
+  assert.match(drag, /if \(e\.pointerType === "touch"\) return end\(\); \/\/ moved before the hold: a scroll/);
+  assert.match(drag, /if \(col\.dataset\.col === pick\.from\) return "home";\n    return moveTo\(col\) \? "ok" : "no";/); // only where the rules allow it looks like a place to drop
+  assert.match(drag, /for \(const col of cols\) col\.dataset\.drop = dropOf\(col\);/);
+});
+
+test("In progress → Done asks for the proof of work in its own field; the command fills in as you type", async () => {
+  const s = await serving();
+  try {
+    const done = (await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body;
+    assert.match(done, /<label class="proof-of-work" data-proof><span>Proof of work<\/span><input type="text" placeholder="a link, file or note anyone can re-check"/);
+    assert.match(done, /<p class="cmd-help">Add the proof of work: a link, file or note anyone can re-check, or pick a merged pull request\./);
+    assert.match(done, /tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/);
+    // the confirm page as a page of its own, a refused complete, and other verbs have no such field
+    assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE")).body, /data-proof/);
+    assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body, /data-proof/);
+    assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=loading_state&event=BLOCK&fragment=1")).body, /data-proof/);
+    const app = (await s.http("GET", "/app.mjs")).body;
+    assert.match(app, /if \(proof\) \{\n    proof\.value = valueIn\(box\.value, "evidenceRef"\);\n    return proof\.focus\(\);/); // the field first
+    assert.match(app, /else if \(box && e\.target === proof\) fill\(box, "evidenceRef", proof\.value, false\);/); // typing stays in the field
+    assert.match(app, /if \(chip\.dataset\.fill === "evidenceRef" && proof\) proof\.value = chip\.dataset\.value \?\? "";/);
   } finally {
     await s.done();
   }
@@ -807,7 +885,8 @@ test("the page's script keeps the workspace: the palette's index and verbs, and 
   const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
   assert.match(app, /const load = \(\) => fetch\(withW\("\/api\/tasks"\)\)/);
   assert.match(app, /if \(verb\) void openConfirm\(withW\(`\/confirm\?/);
-  assert.match(app, /await fetch\(form\.getAttribute\("action"\) \?\? "\/act", \{ method: "POST", body \}\)/);
+  assert.match(app, /void post\(form\.getAttribute\("action"\) \?\? "\/act", new URLSearchParams\(new FormData\(form\)\)/);
+  assert.match(app, /const href = withW\(`\/confirm\?type=\$\{encodeURIComponent\(type\)\}/); // a dragged card's decision
   assert.match(app, /await fetch\(withW\("\/api\/workspaces"\)\)/);
 });
 

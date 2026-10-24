@@ -31,7 +31,7 @@ import { flatten, streamView } from "../render/tree-view.ts";
 import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
 import { WritePath, isReservedActor, type Command, type Preview, type WriteResult } from "../write/write-path.ts";
-import { blockerOf, commandFor, missing, PAGE_VERBS, parseCommand, subtaskName, verbFits, withDefaults, type PageAction } from "./command.ts";
+import { blockerOf, commandFor, dragMoves, missing, PAGE_VERBS, parseCommand, subtaskName, verbFits, withDefaults, type PageAction } from "./command.ts";
 import { briefFor, ideaBriefFor, ideaRefusal, type Brief, type BriefFacts } from "./brief.ts";
 import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
@@ -64,6 +64,7 @@ const ASSETS: Record<string, string> = {
   "/new-project.mjs": readFileSync(new URL("./new-project.mjs", import.meta.url), "utf8"),
   "/help.mjs": readFileSync(new URL("./help.mjs", import.meta.url), "utf8"),
   "/secrets.mjs": readFileSync(new URL("./secrets.mjs", import.meta.url), "utf8"),
+  "/drag.mjs": readFileSync(new URL("./drag.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -349,6 +350,7 @@ const NOTE_HELP = `Any command can take note="…": the history keeps it. The sa
 function helpText(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   if (!p.ok) return "tira would refuse this as it stands: edit it (another task or verb) and check again, or close.";
   if (opts.event === "BLOCK" && fragment) return `Name what it waits on: a new ticket is created under ${opts.id} and linked as blocking it, or pick an open task. The command updates as you type and runs exactly as written.`;
+  if (opts.event === "COMPLETE" && fragment) return `Add the proof of work: a link, file or note anyone can re-check, or pick a merged pull request. The command updates as you type and runs exactly as written.`;
   if (opts.event === "BLOCK") return `Name the new ticket on line 1 and as blocker= on line 2 (the reason defaults to "waiting on" it). To wait on an open task instead, delete line 1 and set blocker= to it.`;
   if (opts.event === "APPROVE_NODE") return (p.command?.includes('parent_id=""') ? "Fill in parent_id: the task it goes under. " : "parent_id is tira's proposal: change it to put the task elsewhere. ") + NOTE_HELP;
   return (PAGE_VERBS[opts.event]?.field ? "Fill in the empty quotes. " : "Ready to run as it is. ") + NOTE_HELP;
@@ -369,6 +371,12 @@ function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string 
   const tasks = choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (v) => `data-fill-blocker="${esc(v)}"`);
   if (!fragment) return tasks;
   return `<label class="blocked-by" data-blocked-by="${esc(opts.id)}" data-type="${esc(opts.type)}"><span>Blocked by</span><input type="text" placeholder="a new ticket, e.g. design_tokens" autocomplete="off" spellcheck="false" aria-label="Blocked by: name a new ticket, or pick an open task"></label>` + tasks;
+}
+
+// to complete: the proof of work, in its own field; the command fills in as you type (app.mjs)
+function proofFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  if (opts.event !== "COMPLETE" || !p.ok || !fragment) return "";
+  return `<label class="proof-of-work" data-proof><span>Proof of work</span><input type="text" placeholder="a link, file or note anyone can re-check" autocomplete="off" spellcheck="false" aria-label="Proof of work: a link, file or note anyone can re-check"></label>`;
 }
 
 function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
@@ -393,7 +401,7 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const hidden = [["token", opts.token], ["type", opts.type], ["id", opts.id], ["event", opts.event], ["seen", String(p.seen)]]
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v as string)}">`).join("");
   const right = `<section class="your-action" aria-label="Your action, edit before sending"><h2>Your action — edit before sending</h2>`
-    + blockedByHtml(p, opts, fragment) + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
+    + blockedByHtml(p, opts, fragment) + proofFieldHtml(p, opts, fragment) + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
     + `<p class="cmd-help">${esc(helpText(p, opts, fragment))}</p>${fillsHtml(p, opts, fragment)}</section>`;
   const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)} — run it</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
   return `${head}<form method="post" action="${esc(withQ("/act", opts.q ?? ""))}" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${briefHtml(p)}${right}</div>`
@@ -537,6 +545,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's, the dispatcher's and the sync's own writes: serve as a person`);
   const token = opts.token ?? randomBytes(24).toString("hex");
   const dispatcher = new Dispatcher(opts.store, opts.registry);
+  // what a drag between the Kanban's columns means: today's rules, so the same for every page
+  const moves = dragMoves(opts.registry);
   // Who this request acts as: the GitHub login signed in, once GitHub sign-in is set up (no one,
   // until they sign in); else the name tira serve was started with.
   const linkEnv = opts.links?.env ?? process.env;
@@ -590,7 +600,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
     const name = me.actor ? displayName(me.actor, linkEnv) : undefined; // as they chose to be shown
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token };
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 

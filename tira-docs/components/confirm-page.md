@@ -17,7 +17,9 @@ fires by surprise, and every one has two views side by side (stacked on a phone)
    `note="…"`, which the history keeps. The same text runs in a terminal. Live, reasons used
    before (and "waiting on" each other open task, not one it sits under) are chips that fill
    the reason in; a subtask under work already under way is pre-marked as found
-   (`kind=discovered`), and elsewhere a chip adds it.
+   (`kind=discovered`), and elsewhere a chip adds it. To complete, live, the proof of work has
+   its own field above the command, focused when the dialog opens: what you type fills in
+   `evidenceRef`, and a merged pull request linked to the task is a chip that fills both.
 
 **An idea's two approvals use it too** (`ideas.md`): the Decision is the idea's summary, why,
 who declared it and where tira proposes it go; Approve placement opens with tira's parent
@@ -66,6 +68,7 @@ the reasons are listed as text).
 - `.confirm-dialog` on the live page's dialog; `[data-close-confirm]` on its way out.
 - `[data-hint]` on what to do, when tira would refuse; `[data-error]` on why nothing was written; `[data-fills]` on the chips.
 - `[data-blocked-by]` on a block's "Blocked by" field (the task's id).
+- `[data-proof]` on a complete's "Proof of work" field, live only.
 - `[data-flash]` on the result shown after an action.
 
 Assertion: the verdict is the write path's own decision (`WritePath.preview`: reserved
