@@ -67,7 +67,8 @@ export async function listTasks(c: AgentContext, wanted: ListState = "open"): Pr
   return { ok: true, text: lines.join("\n") };
 }
 
-const kidsLine = (row: TreeRow) => (row.children.length === 0 ? [] : [`Subtasks: ${row.children.map((k) => `${k.id} (${stateWord(k.state)})`).join(", ")}`]);
+const kid = (k: TreeRow) => `${k.id} (${stateWord(k.state)})`;
+const kidsLine = (row: TreeRow) => (row.children.length === 0 ? [] : [`Subtasks: ${row.children.map(kid).join(", ")}`]);
 const bare = (key: string) => key.slice(key.indexOf(":") + 1);
 
 // one task: its state and place, its subtasks, why it's blocked and on what, its proof, its history
