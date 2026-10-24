@@ -13,12 +13,11 @@ views side by side (stacked on a phone):
 2. **Your part**: what the move needs, as plain fields, and a **comment** (optional) that goes
    on the ticket, where its agent reads it. No command: the page writes the move from these
    fields (the same move `tira send` writes in a terminal).
-   - **Complete**: the proof of work is a commit or a pull request of the project's repo. It
-     opens at once on the commits tira has ("Checking GitHub…" while it looks: the task's own
-     commits, about two seconds, no Jira, no whole sync; and the repo's latest commits and pull
-     requests), the task's newest picked, in groups (This ticket, Recent commits, Pull requests);
-     **Or paste** takes any other (a commit id, #12 or a link). What you pick is checked on GitHub
-     and kept for the task. **Refresh** looks again.
+   - **Complete**: the proof of work is a commit or a pull request of the project's repo, typed or
+     pasted in one field (a commit's id or link, #12 or a pull request's link). No list of ids to
+     pick from. As you type (at once on a paste), tira checks it on GitHub and says what it found
+     ("Found: …") or why it can't be one; nothing is written until Complete, which checks it again
+     and keeps it for the task.
    - **Block**: "Blocked by", a new ticket by name or an open task (live, the open tasks are
      chips), and a reason (optional: it waits on that ticket, if left empty).
    - **Add subtask**: its name; under work already under way it's marked as found, and
@@ -53,7 +52,7 @@ or the log moving after you opened it (the decision is shown again, as it is now
 - `.confirm-dialog` on the live page's dialog; `[data-close-confirm]` on its way out.
 - `[data-hint]` on what to do, when tira would refuse; `[data-error]` on why nothing was written; `[data-fills]` on the chips.
 - `[data-field]` on each field (its name), `[data-blocked-by]` on Block's "Blocked by" (the task's id), `[data-comment-field]` on the comment.
-- `[data-proof]` on Complete's commits, `[data-no-commits]` when there are none yet; `[data-commits-status]` on what the look on GitHub is doing or found (`[data-commits-fetch]`, its address, while it's to run), `[data-commits-again]` on Look on GitHub again.
+- `[data-proof-check]` on Complete's proof field (its value, the address that checks it on GitHub as it's typed), `[data-proof-said]` on what the check found or why not.
 - `[data-flash]` on the result shown after an action.
 
 Assertion: the verdict is the write path's own decision (`WritePath.preview`: reserved

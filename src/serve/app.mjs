@@ -148,31 +148,34 @@ function show(packet) {
   // the first thing to fill in: what the move needs, else the comment
   const first = confirmBox.querySelector("[data-field] input:not([type=hidden]), [data-comment-field] textarea");
   first?.focus();
-  if (confirmBox.querySelector("[data-commits-fetch]")) void lookForCommits(); // Complete: the newest commits, looked up now
 }
-// Complete: the dialog is open at once, on the commits tira has, saying it's looking on GitHub for
-// newer ones. What comes back (the commits, and the form's seq: keeping one moves the log) goes in
-// place; what you typed stays. A look that fails says so, and the commits tira has stay.
-async function lookForCommits() {
-  const form = confirmBox.querySelector("form[data-you]");
-  const again = confirmBox.querySelector("[data-commits-again]");
-  const url = confirmBox.querySelector("[data-commits-fetch]")?.dataset.commitsFetch ?? again?.getAttribute("formaction");
-  if (!form || !url) return;
-  const body = new URLSearchParams(new FormData(form));
-  body.set("fragment", "1");
+// Complete: the proof as it's typed or pasted, checked on GitHub (POST /proof) a moment after the
+// last key, at once on a paste: what tira found, or why it can't be one, shows under it. An answer
+// to what was typed before is dropped. Complete checks it again either way.
+let proofTimer;
+async function checkProof(field) {
+  const said = confirmBox.querySelector("[data-proof-said]");
+  const url = field.dataset.proofCheck;
+  if (!said || !field.form || !url) return;
+  const asked = field.value.trim();
+  said.className = "proof-said";
+  said.textContent = asked === "" ? "" : "Checking GitHub…";
+  if (asked === "") return;
   try {
-    const packet = packetOf(await (await fetch(url, { method: "POST", body })).text());
-    const fresh = packet?.querySelector("[data-proof]");
-    if (!fresh) throw new Error("no commits came back");
-    confirmBox.querySelector("[data-proof]")?.replaceWith(document.importNode(fresh, true));
-    const seen = packet?.querySelector('input[name="seen"]');
-    const mine = form.querySelector('input[name="seen"]');
-    if (seen instanceof HTMLInputElement && mine instanceof HTMLInputElement) mine.value = seen.value;
+    const got = await (await fetch(url, { method: "POST", body: new URLSearchParams(new FormData(field.form)) })).json();
+    if (field.value.trim() !== asked) return; // typed on since
+    said.textContent = got.text;
+    said.className = got.ok ? "proof-said ok" : "proof-said no";
   } catch {
-    const status = confirmBox.querySelector("[data-commits-status]");
-    if (status) status.textContent = "Couldn't look on GitHub just now: these are the commits tira already has.";
+    if (field.value.trim() === asked) said.textContent = "Couldn't check on GitHub just now: Complete checks it again.";
   }
 }
+confirmBox.addEventListener("input", (e) => {
+  const field = e.target instanceof HTMLInputElement && e.target.matches("[data-proof-check]") ? e.target : null;
+  if (!field) return;
+  clearTimeout(proofTimer);
+  proofTimer = setTimeout(() => void checkProof(field), e.inputType === "insertFromPaste" ? 0 : 500);
+});
 // a decision's packet, just the packet (?fragment=1): null if the answer has none
 const packetAt = async (href) => packetOf(await (await fetch(`${href}&fragment=1`, { headers: { accept: "text/html" } })).text());
 async function openConfirm(href) {
@@ -187,13 +190,6 @@ async function openConfirm(href) {
 confirmBox.addEventListener("click", (e) => {
   const el = e.target instanceof Element ? e.target : null;
   if (e.target === confirmBox || el?.closest("[data-close-confirm]")) return confirmBox.close();
-  const again = el?.closest("[data-commits-again]"); // look on GitHub again, from here
-  if (again) {
-    e.preventDefault();
-    const status = confirmBox.querySelector("[data-commits-status]");
-    if (status) status.textContent = "Looking on GitHub again…";
-    return void lookForCommits();
-  }
   // a chip fills its field: an open task to wait on, a reason used before, a proof, a parent
   const chip = el?.closest("[data-fill]");
   if (chip) {

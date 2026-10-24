@@ -163,23 +163,23 @@ test("every decision shows the ticket beside what the move needs, and a comment:
     // the theme, and the script that remembers the choice
     assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/); // the theme you picked (in Account settings) carries here
     assert.doesNotMatch(unblock.body, /data-theme-switch/); // and is picked there, not here
-    // to complete: no commits yet, so nothing to complete it with; the comment box
+    // to complete: a field for the proof (a commit or pull request, by its id or link), checked as it's typed; the comment box
     const early = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal(early.status, 200);
     assert.doesNotMatch(early.body, /class="verdict/); // allowed: no word from tira
     assert.match(early.body, /<input type="hidden" name="seen" value="11"><input type="hidden" name="dialog" value="1">/);
     assert.match(early.body, /<input type="hidden" name="token" value="t0k3n">/);
-    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits yet\. Push to a branch named loading_state, or paste one\.<\/p><\/fieldset><label class="field" data-field="proofRef"><span>Or paste<\/span><input type="text" name="proofRef" value="" placeholder="Commit id or pull request link…"/);
-    assert.doesNotMatch(early.body, /data-commits-fetch|data-commits-again/); // no repo linked: nowhere to look
+    assert.match(early.body, /<label class="field" data-field="proofRef"><span>Proof of work<\/span><input type="text" name="proofRef" value="" placeholder="Commit or pull request: id or link…" autocomplete="off" spellcheck="false" data-proof-check="\/proof"><\/label><p class="proof-said" data-proof-said role="status" aria-live="polite"><\/p>/);
     assert.match(early.body, /<button class="act primary" type="submit">Complete<\/button>/); // never greyed out: sent without a commit, it says so
     assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment<\/span><textarea name="comment" rows="2" maxlength="2000" placeholder="Add a comment…">/);
-    // with its ticket written and two commits kept: the work, and the newest commit picked
+    // with its ticket written and two commits kept: the work, and no list of commit ids to pick from
     await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", task: "loading_state", title: "Loading state for the cards", description: "A spinner while metrics load.", steps: "Add the spinner\nTest on a slow network", estimate: "2h", assignee: "isha" }).toString() });
     const old = await s.commit("loading_state", 1, "first try");
     const newest = await s.commit("loading_state", 2, "spinner, tested on 3G\n\nmore words");
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.match(complete.body, /<div class="ticket" data-ticket><p class="tk-title" data-ticket-title>Loading state for the cards<\/p><div class="tk-desc"><p>A spinner while metrics load\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol><li>Add the spinner<\/li><li>Test on a slow network<\/li><\/ol><\/div><div class="tk-facts"><span><span class="lk">Estimate<\/span>2h<\/span><span><span class="lk">Assignee<\/span>isha<\/span><\/div><\/div>/);
-    assert.match(complete.body, new RegExp(`<fieldset class="field commits" data-proof><legend>Proof of work</legend><label class="commit"><input type="radio" name="evidenceRef" value="${newest}" checked><code>${newest.slice(0, 7)}</code><span>spinner, tested on 3G</span><small>#7</small></label><label class="commit"><input type="radio" name="evidenceRef" value="${old}"><code>`));
+    assert.match(complete.body, /data-field="proofRef"><span>Proof of work<\/span>/);
+    assert.doesNotMatch(complete.body, new RegExp(`${newest.slice(0, 7)}|${old.slice(0, 7)}|spinner, tested on 3G|first try|name="evidenceRef"`));
     assert.match(complete.body, /<button class="act primary" type="submit">Complete<\/button>/);
     // to block: what it waits on, and why
     const block = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK");
@@ -524,18 +524,19 @@ test("a drop means its move's verb or nothing: only Start runs without a dialog,
   assert.match(drag, /for \(const col of cols\) col\.dataset\.drop = dropOf\(col\);/);
 });
 
-test("In progress → Done asks for the proof of work: a commit or pull request of the project's repo, picked or pasted in the dialog; nothing else is taken, and the done task shows it", async () => {
+test("In progress → Done asks for the proof of work: a commit or pull request of the project's repo, typed or pasted in the dialog (its id or link); nothing else is taken, and the done task shows it", async () => {
   const s = await serving();
   try {
-    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body, /data-no-commits/);
     const sha = await s.commit("loading_state", 3, "spinner on the cards");
-    const done = (await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body;
-    assert.match(done, new RegExp(`<input type="radio" name="evidenceRef" value="${sha}" checked><code>${sha.slice(0, 7)}</code><span>spinner on the cards</span>`));
+    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body, /data-proof-check="\/proof"/);
     // a refused complete, and other verbs, have no such field
     assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body, /data-proof/);
     assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=loading_state&event=BLOCK&fragment=1")).body, /data-proof/);
+    // checked as it's typed: with no repo linked, there's nowhere to check
+    const checked = await s.http("POST", "/proof", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", proofRef: "#7" }).toString() });
+    assert.deepEqual([checked.status, JSON.parse(checked.body)], [200, { ok: false, text: "No GitHub repo linked to this project." }]);
     // the dialog posts its fields: anything but one of the task's commits is refused in the dialog
-    const post = (ref: string) => s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: ref, dialog: "1", fragment: "1" });
+    const post = (ref: string) => s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", proofRef: ref, dialog: "1", fragment: "1" });
     const wrong = await post("spinner.mp4");
     assert.equal(wrong.status, 422);
     assert.match(wrong.body, /data-error>No GitHub repo linked to this project\. Nothing was written\./); // anything else is checked on GitHub: here, there's no repo to check
@@ -566,7 +567,7 @@ test("a command posted to /act is read strictly: a value left empty, a stray key
       s.form({ token: "t0k3n", type: "node", ...at, command, fragment: "1", ...extra });
     const empty = await run('tira send node loading_state COMPLETE evidenceRef=""');
     assert.equal(empty.status, 422);
-    assert.match(empty.body, /<p class="flash no" role="alert" data-error>Pick the proof of work: one of the task(?:'|&#39;)s commits\. Nothing was written\.<\/p>/);
+    assert.match(empty.body, /<p class="flash no" role="alert" data-error>Paste the proof of work: a commit or pull request of the project(?:'|&#39;)s repo \(its id or link\)\. Nothing was written\.<\/p>/);
     const spaces = await run('tira send node table BLOCK reason="   "', { id: "table", event: "BLOCK" });
     assert.match(spaces.body, /data-error>Add the reason: reason=&#34;…&#34; \(words, not only spaces\)\. Nothing was written\./);
     for (const [bad, why] of [
