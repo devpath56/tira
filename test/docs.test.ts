@@ -15,6 +15,7 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
+import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { sync } from "../src/sync/sync.ts";
 import { FakeGitHub, FakeJira } from "./sync-fakes.ts";
@@ -100,7 +101,7 @@ async function pages(): Promise<string> {
   const getSignedOut = await ask(signInServer);
   // signed in, on a workspace linked to a repo (so the board shows, not the connect step)
   await d.submit({ stream: "w", kind: "create", entity: { type: "workspace", id: "workspace", version: 1 }, actor: "isha", payload: { repo: "acme/app" } });
-  const signedInServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env } });
+  const signedInServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env, agentTokens: new MemoryAgentTokens() } });
   const getSignedIn = await ask(signedInServer, "tira_session=docs-session");
   const firstRunServer = tiraServer({ store, registry, stream: "t", token: "k", links: { githubAuth, env: { TIRA_HOME: firstHome } } });
   const getFirstRun = await ask(firstRunServer);
@@ -117,7 +118,9 @@ async function pages(): Promise<string> {
     const signin = (await getSignedOut("GET", (await getSignedOut("POST", "/signin/start", "token=k")).location ?? "/")).body; // the code, at its own address
     const signedIn = (await getSignedIn("GET", "/integrations")).body + (await getSignedIn("GET", "/")).body + (await getSignedIn("GET", "/connect")).body
       + (await getSignedIn("GET", "/projects/new")).body + (await getSignedIn("POST", "/projects", "token=k&name=-bad&repo=a%2Fb")).body // + New project's page, and a name it refuses
-      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body; // Account settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body // Account settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/integrations?app=cursor&from=agents")).body // Connect agents' step 2, then step 3 with its agent made
+      + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body;
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const seen = String((await store.readStream("t")).at(-1)?.seq);

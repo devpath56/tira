@@ -2,6 +2,7 @@
 // that one value (the admin only: POST /integrations/setup/reveal, never cached) and shows it until
 // you hide it, or for 30 seconds; Copy fetches it to the clipboard and says so with a tick (where a
 // browser allows no copying, it shows the value selected, for ⌘C). The page itself only ever holds dots.
+// The same Copy serves the Agents section: a button with data-copy-target copies that element's text.
 const token = document.querySelector('input[name="token"]')?.value ?? "";
 const valueOf = async (key) => {
   const res = await fetch("/integrations/setup/reveal", { method: "POST", body: new URLSearchParams({ token, key }), credentials: "same-origin", cache: "no-store" });
@@ -33,6 +34,22 @@ const copyText = async (text) => {
     return done;
   }
 };
+
+// Agents: Copy puts the command (or Claude Desktop's entry) on the clipboard, or selects it for ⌘C.
+for (const b of document.querySelectorAll("button[data-copy-target]")) {
+  const target = document.getElementById(b.dataset.copyTarget ?? "");
+  if (!target) continue;
+  b.addEventListener("click", async () => {
+    if (await copyText(target.textContent ?? "")) {
+      b.dataset.done = "";
+      b.title = "Copied";
+      setTimeout(() => { delete b.dataset.done; b.title = "Copy"; }, 1500);
+      return;
+    }
+    getSelection()?.selectAllChildren(target);
+    b.title = "Press ⌘C to copy";
+  });
+}
 
 for (const row of document.querySelectorAll("[data-env]")) {
   const key = row.dataset.env;

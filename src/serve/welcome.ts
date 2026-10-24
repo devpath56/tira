@@ -120,7 +120,7 @@ export function landingPage(o: LandingOpts): string {
       + `<label class="land-field"><span>GitHub Client ID</span><input type="text" name="github_client_id" autocomplete="off" spellcheck="false" required></label>`
       + `<label class="land-field"><span>GitHub Secret (optional: sign in in one click)</span><input type="password" name="github_secret" autocomplete="off"></label>`
       + `<button class="land-btn blue" type="submit">Continue</button></form>`
-      + `<details class="land-how"><summary>Where do I find it?</summary><ol><li>GitHub → Settings → Developer settings → OAuth Apps → New.</li><li>Homepage <code>http://localhost:${esc(o.port)}</code>, callback <code>http://localhost:${esc(o.port)}/</code>.</li><li>Register, tick Enable Device Flow, copy the Client ID.</li><li>For sign-in in one click: Generate a new client secret, and paste it too.</li></ol></details>`;
+      + `<details class="land-how"><summary>Where do I find it?</summary><ol><li>GitHub → Settings → Developer settings → OAuth Apps → New.</li><li>Homepage <code>http://localhost:${esc(o.port)}</code>, callback <code>http://localhost:${esc(o.port)}/signin/github/callback</code> (the address tira sends, exactly).</li><li>Register, tick Enable Device Flow, copy the Client ID.</li><li>For sign-in in one click: Generate a new client secret, and paste it too.</li></ol></details>`;
   return page("Sign in to tira", `<div class="land-card" data-landing>${brandSide()}<section class="land-form">${form}</section></div>`);
 }
 

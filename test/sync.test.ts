@@ -22,6 +22,7 @@ import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, s
 import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
 import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
+import { landingPage } from "../src/serve/welcome.ts";
 import { LINK_GUARDS } from "../src/tables/links.ts";
 import { tint } from "../src/serve/layout.mjs";
 import { renderHtml } from "../src/render/html.ts";
@@ -439,7 +440,7 @@ test("before setup: the board points to Project settings, and Account settings o
     // Project settings: the project's own (its GitHub, Jira, Sync and Delete), none of yours
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);
-    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "github", "jira", "sync", "delete"]);
+    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "github", "jira", "sync", "agents", "delete"]);
     assert.doesNotMatch(project, /data-int="(?:account|appearance|people|setup)"/);
     // without sign-in set up, tira serve's own name still acts
     assert.equal((await s.post("/integrations/link", { what: "repo", repo: "acme/app" })).status, 303);
@@ -587,6 +588,8 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
+    // the first run's steps name the address tira sends GitHub back to, exactly
+    assert.match(landingPage({ token: "k", githubReady: false, port: "4772" }), /callback <code>http:\/\/localhost:4772\/signin\/github\/callback<\/code> \(the address tira sends, exactly\)/);
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", github_secret: "gh-secret" });
     // the way in has no theme switch (that's Account settings'); it follows the computer, or this browser's choice
     const landing = (await s.http("GET", "/welcome")).body;
@@ -1083,8 +1086,8 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     const at = (id: string) => page.indexOf(`data-int="${id}"`);
     assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
     assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
-    assert.deepEqual(nav(project), [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "github", "jira", "sync", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    assert.deepEqual(nav(project), [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]]);
+    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);
@@ -1106,8 +1109,10 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.match(help, /^<aside[^>]*><details class="hc" data-remember="tira-help-centre" open><summary class="help-head"[^>]*><span class="av tira">\?<\/span><span class="hc-t"><b>Help centre<\/b><small><i class="hc-on" aria-hidden="true"><\/i>Answers right away<\/small>/);
     assert.match(readFileSync(new URL("../src/serve/theme.mjs", import.meta.url), "utf8"), /for \(const d of document\.querySelectorAll\("details\[data-remember\]"\)\)[^]*?localStorage\.setItem\(d\.dataset\.remember, d\.open \? "1" : "0"\)/);
     assert.match(help, /<div class="hc-log" role="log" aria-live="polite" aria-label="Conversation" data-help-log><div class="msg from-tira"><span class="av tira" aria-hidden="true">t<\/span><div class="msg-b"><p class="bubble">Hi isha! I'm tira's help\./);
-    assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 6);
-    assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>/);
+    assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 7);
+    // agents: tira mcp, under each agent's own name
+    assert.match(help, /How do my agents use tira\?<\/summary><p class="bubble">Through tira(?:'|&#39;)s MCP server, each with its own token and name\. In Project settings → Connect agents: choose your app \(Claude Code, Cursor, VS Code or Claude Desktop\), name your agent, then do the one thing it shows in that app and test the connection\./);
+    assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>, callback <code>http:\/\/localhost:\d+\/signin\/github\/callback<\/code>, exactly/);
     assert.match(help, /<div class="hc-bottom" data-help-bottom hidden><form class="hc-compose" data-help-ask><input name="q" aria-label="Ask a question" placeholder="Ask a question…"[^>]*><button class="hc-send" type="submit" aria-label="Send" disabled>/);
     assert.match(page, /<script type="module" src="\/help\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/help.mjs")).status, 200);

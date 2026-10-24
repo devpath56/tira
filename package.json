@@ -1,7 +1,7 @@
 {
   "name": "tira",
   "version": "1.0.0",
-  "description": "Deterministic task-tree tracking MVP \u2014 executable spec (XState charts), scenario sources, demo",
+  "description": "Deterministic task-tree tracking MVP — executable spec (XState charts), scenario sources, demo",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -18,12 +18,15 @@
     "scenarios": "node --disable-warning=ExperimentalWarning --test test/scenarios.test.ts"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "^22.19.1",
     "@types/pg": "^8.23.1",
     "typescript": "^5.9.3",
     "xstate": "^5.33.2"
   },
   "dependencies": {
-    "pg": "^8.23.1"
+    "@modelcontextprotocol/server": "2.3.1",
+    "pg": "^8.23.1",
+    "zod": "4.6.5"
   }
 }

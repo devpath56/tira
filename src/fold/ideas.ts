@@ -126,6 +126,13 @@ export function placement(view: StateView, registry: Registry, file: IdeaFile, u
 // An id for a new idea, from its summary: up to three words that aren't filler or its parent's
 // name ("pagination would be good in table" under table: pagination), free as an idea and as a
 // task (the task it becomes takes the same id).
+// What happens next to an idea just filed, in a sentence (the CLI's and tira mcp's).
+const candidatesNote = (p: Placement): string => (p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : "");
+export const whatNext = (p: Placement): string => {
+  if (p.parent !== undefined) return `a person approves the file; tira then proposes it under ${p.parent}, and a person approves that`;
+  return `a person approves the file, then picks where it goes when approving the placement${candidatesNote(p)}`;
+};
+
 export function ideaId(view: StateView, summary: string, parent?: string): string {
   const skip = new Set(parent === undefined ? [] : words(parent).trim().split(" ").flatMap((w) => [w, `${w}s`]));
   const picked = words(summary).trim().split(" ").filter((w) => w !== "" && !FILLER.has(w) && !skip.has(w)).slice(0, 3);

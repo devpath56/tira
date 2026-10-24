@@ -43,6 +43,8 @@ import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 import { CSP } from "./csp.ts";
+import { MCP_PATH, mcpRoute } from "../mcp/http.ts";
+import { agentTokensFor } from "../mcp/tokens.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 export { CSP } from "./csp.ts";
@@ -65,6 +67,7 @@ const ASSETS: Record<string, string> = {
   "/help.mjs": readFileSync(new URL("./help.mjs", import.meta.url), "utf8"),
   "/secrets.mjs": readFileSync(new URL("./secrets.mjs", import.meta.url), "utf8"),
   "/drag.mjs": readFileSync(new URL("./drag.mjs", import.meta.url), "utf8"),
+  "/agents.mjs": readFileSync(new URL("./agents.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -447,7 +450,8 @@ export function carryQ(html: string, q: string): string {
     /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(joiner(path))}${esc(q)}"`);
 }
 
-const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
+// A write's result in the page's words (and tira mcp's).
+export const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
   const label = PAGE_VERBS[event]?.label ?? event;
   if (r.status === "appended") {
     const closes = (r.closedByTira ?? []).map((c) => bareKey(c.key));
@@ -481,7 +485,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 // Why a block can't wait on an existing task: it must be an open task of the stream, and not
 // one the blocked task sits under (a task can't wait on what it is part of).
-function blockerProblem(r: FoldResult, stream: string, a: PageAction, blocker: string): string | undefined {
+export function blockerProblem(r: FoldResult, stream: string, a: Pick<PageAction, "type" | "id">, blocker: string): string | undefined {
   const rows = flatten(streamView(r, stream).roots);
   const target = rows.find((x) => x.type === a.type && x.id === blocker);
   if (!target) return `there is no task ${blocker} to wait on. To make it a new ticket, create it on the line above: tira create ${a.type} ${blocker} --parent ${a.id}`;
@@ -939,10 +943,13 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     },
   }, who);
   const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, ...integrations };
+  // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env) });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
     const url = new URL(req.url ?? "/", `http://${host}`);
+    if (url.pathname === MCP_PATH) return mcp(req, res, url); // agents, by their own token: no page, no sign-in
     const asset = req.method === "GET" ? ASSETS[url.pathname] : undefined;
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
     const route = routes[`${req.method} ${url.pathname}`];
@@ -953,7 +960,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return current.run({ ...who(req), ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
-    handle(req, res).catch((err: unknown) => send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`));
+    handle(req, res).catch((err: unknown) => (res.headersSent ? res.destroy() : send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`)));
   });
+  server.on("close", () => void mcp.close());
   return Object.assign(server, { token });
 }

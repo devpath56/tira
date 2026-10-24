@@ -49,6 +49,24 @@ Project settings (the project's mark and name at the top):
 - **Jira**: a picker of your Jira site's projects (**Link this project**, **Unlink**); before
   you've connected Jira, **Connect Jira** (it connects your account, for every project).
 - **Sync**: **Sync now**, the same as `tira sync`.
+- **Connect agents** (Isha, 2026-10-24: "systematic and simple for a first time user"): connect
+  an AI agent to this project through tira's MCP server, each with its own token and name, in
+  three numbered steps, each its own address. (1) **Choose your app**: Claude Code, Cursor, VS Code
+  or Claude Desktop. (2) **Name your agent**: its name suggested (`claude-code`, `cursor-agent`,
+  `vscode-agent` or `claude-desktop`, numbered if taken; a person's name is caught, with why), and
+  **Connect** makes its token. (3) **Finish in the app**, one thing to do: **Add to Cursor** or
+  **Add to VS Code** (the app shows the server and asks first; the setup by hand folds under it),
+  Claude Code's one command (it replaces an earlier tira entry for the project; then a new
+  session, asked "what's next in tira?"), or Claude Desktop's config entry (with a warning when tira's `.env`
+  wouldn't reach this board). The token shows only there, for 10 minutes, to whoever made it.
+  **Test connection** says whether tira has heard from the agent yet (its first call); until then
+  it says so calmly, as a wait, not an error, with the quickest way to make that call (for Claude
+  Code, `claude mcp list`). Below, the **Connected agents** (their app, who connected them, when, last used;
+  **Revoke** for whoever connected it, or the admin). **More** folds the rest: tira's MCP address
+  (`http://127.0.0.1:<port>/mcp`), each app by hand with `<your token>`, what agents can do, and
+  whether Claude Desktop's agent would reach this tira's database (tira's own `.env`, compared,
+  never shown), and why Claude's own Connectors settings can't add tira yet (they need a public
+  https address: tira hosted). Only each token's fingerprint is kept; a revoked agent's next call is refused.
 - **Delete project**: type the project's name to confirm, then **Delete this project**. It leaves
   the project list and its board closes, for everyone; tira never erases, so its history stays in
   the log (a new version of its link, marked deleted). The project tira serve was started with
@@ -63,6 +81,7 @@ only. The store keeps a hash of each session (it lasts 30 days), so it can't sig
 ## Devtool hook
 
 - `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Account settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
+- `[data-agent-step]` on each of Connect agents' three steps (`now`, `done` or `later` in its class), `[data-agent-tile]` on each app to choose; `[data-agent-name]` on naming the agent; `[data-agent-install]` on the app's Add to button; `[data-agent-test]` on Test connection, its answer in `[data-agent-tested]`; `[data-agents]` on the connected agents; `[data-agent-more]` on More, `[data-agent-app]` on each app's setup there (`[data-copy-target]` on every Copy); `[data-agent-database]` on the database line (`ready`, `missing` or `different`); `[data-agent-connectors]` on the word about Claude's Connectors.
 - `[data-people]` on the admin's list; `[data-add-person]` on Add; `[data-admin-contact]` on how people reach the admin.
 - `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
 - `[data-integrations-nav]` on the profile menu's Account settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).

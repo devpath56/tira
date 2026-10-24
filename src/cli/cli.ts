@@ -19,6 +19,9 @@ import { fxKey, transitionOf } from "../write/fxkey.ts";
 import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { tiraMcpServer } from "../mcp/server.ts";
+import { agentTokensFor, type AgentTokens } from "../mcp/tokens.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
@@ -30,7 +33,7 @@ import { JiraCloud, type JiraClient } from "../sync/jira.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from "../sync/credentials.ts";
 import { join } from "node:path";
-import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
+import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, whatNext, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
 
 // s without the run of ch at its end (a loop, not a /ch+$/ regex: that one backtracks on a long run)
 const trimEnd = (s: string, ch: string): string => {
@@ -45,6 +48,8 @@ export interface Io {
   env: Record<string, string | undefined>;
   // asks for a secret without showing it as it's typed (a Jira API token); absent: no terminal
   secret?(prompt: string): Promise<string>;
+  // agents' tokens (tira mcp); absent: tira's Postgres database's
+  agentTokens?: AgentTokens;
   // stand-ins for tests; absent: the real Jira Cloud and the GitHub CLI
   jira?(site: string, login: JiraLogin): JiraClient;
   github?: GitHubClient;
@@ -102,7 +107,15 @@ Usage:
                                                   written as NAME; without --actor, people sign in with GitHub
                                                   first (a landing page, then connect a repo and, optionally,
                                                   a Jira project); the divergence section is recomputed on every
-                                                  page load. Ctrl-C stops it
+                                                  page load. It also answers agents' MCP at /mcp, each with its
+                                                  own token (Project settings → Connect agents). Ctrl-C stops it
+  tira mcp                                        tira for agents: an MCP server on stdio, for an app that can
+                                                  only start a program (Claude Desktop), with the agent's
+                                                  own token in TIRA_AGENT_TOKEN (Project settings → Connect
+                                                  agents): it names the project and the agent, and a revoked
+                                                  one is refused. Tools: what's next, list tasks, show a task,
+                                                  start, complete (with proof), block, add a subtask, file an
+                                                  idea. It stops when the program that started it does
   tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
                                                   event as it was, into an empty schema; a re-run adds nothing.
                                                   Each stream's fingerprint must match before and after
@@ -302,11 +315,6 @@ async function idea(args: string[], values: Values, store: ClosableStore, regist
   return exitOf(r);
 }
 
-const candidatesNote = (p: Placement): string => (p.candidates.length > 0 ? ` (candidates: ${p.candidates.join(", ")})` : "");
-const whatNext = (p: Placement): string => {
-  if (p.parent !== undefined) return `a person approves the file; tira then proposes it under ${p.parent}, and a person approves that`;
-  return `a person approves the file, then picks where it goes when approving the placement${candidatesNote(p)}`;
-};
 
 // The stream's ideas, for an agent checking on what it pushed.
 async function ideas(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
@@ -868,6 +876,47 @@ async function serve(open: () => ClosableStore, registry: Registry, stream: stri
   }
 }
 
+// tira for agents (src/mcp): an MCP server on stdio for an app that can only start a program
+// (Claude Desktop; the others reach tira serve's /mcp), with the agent's own token (TIRA_AGENT_TOKEN, from Project settings → Connect
+// agents): the token names the project and the agent it acts as, and a revoked one is refused, at
+// the start and at every call. It runs until the program that started it closes its end, or
+// Ctrl-C; the store closes on the way out. Nothing goes to stdout: that's the protocol's.
+const CONNECT_AGAIN = "connect the agent in Project settings → Connect agents, which gives you the command or config with its token";
+async function mcp(open: () => ClosableStore, registry: Registry, values: Values, io: Io): Promise<number> {
+  const token = io.env.TIRA_AGENT_TOKEN?.trim();
+  if (!token) throw new UsageError(`tira mcp needs its agent's token (TIRA_AGENT_TOKEN): ${CONNECT_AGAIN}`);
+  const tokens = io.agentTokens ?? agentTokensFor(io.env);
+  if (!tokens) throw new UsageError("tira mcp needs tira's Postgres database (TIRA_DATABASE_URL), where agents' tokens are kept");
+  const agent = await tokens.find(token);
+  if (!agent) throw new UsageError(`that agent token isn't valid: it was revoked, or wasn't made on this tira. To use the agent again, ${CONNECT_AGAIN}`);
+  if (values.stream !== undefined && values.stream !== agent.project) throw new UsageError(`this agent's token is for ${agent.project}, not ${values.stream}`);
+  await tokens.used(agent.id);
+  const stillConnected = async () => {
+    const now = await tokens.find(token);
+    if (now) await tokens.used(now.id);
+    return now !== undefined;
+  };
+  const { project: stream, agent: actor } = agent;
+  const store = open();
+  try {
+    io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
+    await new Promise<void>((resolve) => {
+      const handle = serveStdio(() => {
+        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected });
+        server.server.onclose = () => resolve();
+        return server;
+      });
+      process.stdin.once("end", () => resolve());
+      const stop = () => void handle.close().then(resolve);
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+    return 0;
+  } finally {
+    await store.close();
+  }
+}
+
 export async function run(argv: string[], io: Io): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -890,7 +939,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence", "import"].includes(cmd)) {
+  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "mcp", "divergence", "import"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -908,6 +957,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === "import") return await importCmd(args, values, registry, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     if (cmd === "serve") return await serve(open, registry, stream, values, io);
+    if (cmd === "mcp") return await mcp(open, registry, values, io);
     store = open();
     switch (cmd) {
       case "create":
