@@ -19,9 +19,9 @@ import { linksOf, reportLines, sync, tasksNamed, workspaceOf } from "../src/sync
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
 import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
-import type { GitHubAuthApi } from "../src/auth/github.ts";
+import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
-import { carryQ, tiraServer } from "../src/serve/server.ts";
+import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
 import { LINK_GUARDS } from "../src/tables/links.ts";
 import { tint } from "../src/serve/layout.mjs";
 import { renderHtml } from "../src/render/html.ts";
@@ -592,6 +592,11 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     const landing = (await s.http("GET", "/welcome")).body;
     assert.doesNotMatch(landing, /data-theme-switch|class="land-top"/);
     assert.match(landing, /<input class="view-radio" type="radio" name="theme" id="th-system" checked[^]*?<script type="module" src="\/theme\.mjs"><\/script>/);
+    // a browser holds a form's whole trip to the page's form-action: the way in lets Continue go on to
+    // GitHub's real sign-in page and nowhere else; every other page keeps its forms to tira
+    const real = new URL(new GitHubDevice().authorizeUrl("Iv1.gh", "http://localhost/", "s"));
+    assert.equal((await s.http("GET", "/welcome")).headers["content-security-policy"], CSP.replace("form-action 'self'", `form-action 'self' ${real.origin}${real.pathname}`));
+    assert.equal((await s.http("GET", "/")).headers["content-security-policy"], CSP);
     // Continue with GitHub: off to GitHub's page, with a state, and the same state in a cookie for this browser
     const leave = async () => {
       const start = await s.post("/signin/start", {});
