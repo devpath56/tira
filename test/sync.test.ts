@@ -944,7 +944,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     await s.send("table", "START");
     s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["table done"], shas: ["7".repeat(40)] });
     const opened = (await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body;
-    assert.match(opened, /<p class="commits-status" data-commits-status data-commits-fetch="\/commits" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"><\/span>Looking on GitHub for table(?:'|&#39;)s newest commits: the proof of work is one of them\.<\/p>/);
+    assert.match(opened, /<p class="commits-status" data-commits-status data-commits-fetch="\/commits" role="status" aria-live="polite">Looking on GitHub for table(?:'|&#39;)s newest commits: the proof of work is one of them\.<\/p>/);
     assert.match(opened, /data-no-commits[^]*?<button type="submit" class="how" formaction="\/commits" formnovalidate data-commits-again>Look on GitHub again<\/button>/);
     const seen = /name="seen" value="(\d+)"/.exec(opened)?.[1] ?? "";
     const looked = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", seen, dialog: "1", fragment: "1" })).body;

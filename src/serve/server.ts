@@ -406,7 +406,7 @@ function commitsStatusHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): str
   if (opts.synced) return `<p class="commits-status" data-commits-status role="status">${esc(opts.synced)}</p>`;
   if (!p.canLook || !fragment) return "";
   const looking = `Looking on GitHub for ${opts.id}'s newest commits: the proof of work is one of them.`;
-  return `<p class="commits-status" data-commits-status data-commits-fetch="${esc(withQ("/commits", opts.q ?? ""))}" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span>${esc(looking)}</p>`;
+  return `<p class="commits-status" data-commits-status data-commits-fetch="${esc(withQ("/commits", opts.q ?? ""))}" role="status" aria-live="polite">${esc(looking)}</p>`;
 }
 function commitsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const commits = p.commits ?? [];
