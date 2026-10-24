@@ -15,7 +15,7 @@ import type { Command } from "../write/write-path.ts";
 import type { AgentContext } from "./server.ts";
 import type { ToolText } from "./tasks.ts";
 import { randomBytes } from "node:crypto";
-import { COMMENT, MAX_COMMENT, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { COMMENT, MAX_COMMENT, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
 import { commitsOf, firstLine, shortSha, ticketsOf, type Commit, type Ticket } from "../fold/tickets.ts";
 
 const NODE = "node";
@@ -129,7 +129,7 @@ export async function addComment(c: AgentContext, id: string, text: string): Pro
 export interface TicketFill { title?: string | undefined; description?: string | undefined; steps?: string[] | undefined; estimate?: string | undefined }
 // the ticket's words once filled: each given one, else what it says now, trimmed as the page trims them
 const filledWords = (fill: TicketFill, before: Ticket | undefined): TicketWords => ({
-  title: (fill.title ?? before?.title ?? "").trim().replace(/\s+/g, " "),
+  title: (fill.title ?? before?.title ?? "").trim().replaceAll(/\s+/g, " "),
   description: (fill.description ?? before?.description ?? "").replaceAll("\r\n", "\n").trim(),
   steps: (fill.steps ?? before?.steps ?? []).map((x) => x.trim()).filter((x) => x !== ""),
   estimate: (fill.estimate ?? before?.estimate ?? "").trim(),
@@ -139,13 +139,12 @@ export async function fillTicket(c: AgentContext, id: string, fill: TicketFill):
   if (!rows.some((x) => x.id === id)) return missing(c, id);
   if (Object.values(fill).every((x) => x === undefined)) return { ok: false, text: "Give at least one of title, description, steps or estimate. Nothing was written." };
   const before = ticketsOf(r, c.stream).get(id);
-  const { title, description, steps, estimate } = filledWords(fill, before);
-  const why = ticketWordsProblem({ title, description, steps, estimate });
+  const words = filledWords(fill, before);
+  const why = ticketWordsProblem(words);
   if (why) return { ok: false, text: `${why} Nothing was written.` };
   const assignee = before?.assignee;
-  const payload = { task: id, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
-  const same = JSON.stringify([before?.title, before?.description, before?.steps ?? [], before?.estimate]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate]);
-  if (same) return { ok: true, text: `Nothing changed: ${id}'s ticket already says that.` };
+  const payload = ticketPayload(id, words, assignee);
+  if (saysSame(before, payload)) return { ok: true, text: `Nothing changed: ${id}'s ticket already says that.` };
   const cmd: Command = { stream: c.stream, kind: "create", entity: { type: TICKET, id, version: (before?.version ?? 0) + 1 }, actor: c.actor, payload };
   const w = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
   if (w.status === "appended") return { ok: true, text: `Filled in ${id}'s ticket (seq ${w.seq}): people see it on the ticket. get_task shows it.` };

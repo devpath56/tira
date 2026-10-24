@@ -53,10 +53,11 @@ export async function lookForCommits(store: EventStore, registry: Registry, stre
 type Named = { pr: number } | { sha: string };
 export function namedProof(repo: string, ref: string): Named | undefined {
   const said = /^https?:\/\//i.test(ref.trim()) ? ref.trim().replace(/[?#].*$/, "") : ref.trim(); // a link's own query or anchor isn't part of it
-  const at = `^https?://(?:www\\.)?github\\.com/${repo.replace(/[.]/g, "\\.")}`;
-  const pr = /^#(\d{1,7})$/.exec(said) ?? /^(\d{1,6})$/.exec(said) ?? new RegExp(`${at}/pull/(\\d{1,7})(?:/(?:files|commits|checks))?/?$`, "i").exec(said);
+  const name = repo.replaceAll(".", String.raw`\.`);
+  const at = String.raw`^https?://(?:www\.)?github\.com/${name}`;
+  const pr = /^#(\d{1,7})$/.exec(said) ?? /^(\d{1,6})$/.exec(said) ?? new RegExp(String.raw`${at}/pull/(\d{1,7})(?:/(?:files|commits|checks))?/?$`, "i").exec(said);
   if (pr) return { pr: Number(pr[1]) };
-  const sha = /^([0-9a-f]{7,40})$/i.exec(said) ?? new RegExp(`${at}/(?:pull/\\d{1,7}/commits|commit)/([0-9a-f]{7,40})/?$`, "i").exec(said);
+  const sha = /^([0-9a-f]{7,40})$/i.exec(said) ?? new RegExp(String.raw`${at}/(?:pull/\d{1,7}/commits|commit)/([0-9a-f]{7,40})/?$`, "i").exec(said);
   return sha ? { sha: (sha[1] ?? "").toLowerCase() } : undefined;
 }
 
@@ -124,7 +125,8 @@ export async function lookedSaid(task: string, look: () => Promise<Looked | unde
     if (!l) return "No GitHub repo linked to this project.";
     if (l.found === 0) return `No commits for ${task} on GitHub yet.`;
     const noun = l.found === 1 ? "commit" : "commits";
-    return `${l.found} ${noun} on GitHub${l.kept > 0 ? ` (${l.kept} new)` : ""}.`;
+    const fresh = l.kept > 0 ? ` (${l.kept} new)` : "";
+    return `${l.found} ${noun} on GitHub${fresh}.`;
   } catch (err) {
     return `Couldn't reach GitHub (${(err as Error).message}).`;
   }

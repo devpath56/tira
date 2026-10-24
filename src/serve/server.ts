@@ -37,7 +37,7 @@ import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
-import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
 import { commitsOf, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -243,12 +243,19 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   const hint = pv.ok ? undefined : hintFor(pv.code, pv.detail, event, id, state);
   const suggestions = verb.field?.suggest ? reasonSuggestions(ask.events, stream, r, event, id) : [];
   return {
-    ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
-    ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
-    ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
+    ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found, ...packetExtras(ask, pv),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
-    ...(ticketsOf(r, stream).has(id) ? { ticket: ticketsOf(r, stream).get(id) as Ticket } : {}),
+  };
+}
+// what only some decisions carry: to block, the open tasks it could wait on; the finished parents
+// tira closes too; the task's ticket, once written
+function packetExtras({ r, stream, id, event }: PacketAsk, pv: Preview): Partial<Packet> {
+  const ticket = ticketsOf(r, stream).get(id);
+  return {
+    ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
+    ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
+    ...(ticket ? { ticket } : {}),
   };
 }
 
@@ -760,21 +767,23 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return form;
   };
 
+  // from a decision's own fields (the dialog): what it asks for, else the dialog again with what's wrong
+  const dialogAsked = async (res: ServerResponse, form: URLSearchParams, ws: Workspace, fragment: boolean, seen: string | null): Promise<Asked | undefined> => {
+    const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
+    const values = valuesOf(form);
+    const got = fromDialog(form, opts.registry, (await now(ws.stream)).r, ws.stream);
+    if (!got) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
+    const long = (values.comment ?? "").trim().length > MAX_COMMENT ? `Keep the comment to ${MAX_COMMENT} characters.` : undefined;
+    const why = "why" in got ? got.why : long;
+    if (why !== undefined || "why" in got) { await decide(res, ws, opened, { error: why ?? "", values }, fragment, 422); return undefined; }
+    return { ws, fragment, typed: null, seen, ask: withDefaults(got.ask), ticket: got.ticket, target: targetOf(got.ask), dialog: true, values };
+  };
   // what it asks for: the command as you left it, read strictly; without one, the posted fields
   const askedOf = async (res: ServerResponse, form: URLSearchParams, ws: Workspace): Promise<Asked | undefined> => {
     const fragment = form.get("fragment") === "1";
     const seen = form.get("seen");
     const typed = form.get("command");
-    if (form.get("dialog") === "1") {
-      const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
-      const values = valuesOf(form);
-      const got = fromDialog(form, opts.registry, (await now(ws.stream)).r, ws.stream);
-      if (!got) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
-      const long = (values.comment ?? "").trim().length > MAX_COMMENT ? `Keep the comment to ${MAX_COMMENT} characters.` : undefined;
-      const why = "why" in got ? got.why : long;
-      if (why !== undefined || "why" in got) { await decide(res, ws, opened, { error: why ?? "", values }, fragment, 422); return undefined; }
-      return { ws, fragment, typed: null, seen, ask: withDefaults(got.ask), ticket: got.ticket, target: targetOf(got.ask), dialog: true, values };
-    }
+    if (form.get("dialog") === "1") return dialogAsked(res, form, ws, fragment, seen);
     if (typed === null) {
       const ask = actionFrom(form, opts.registry);
       if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
@@ -801,11 +810,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (lacking !== undefined) return back({ error: lacking }, 422);
     const problem = await waitProblem(a);
     if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
-    const atStart = String((await now(a.ws.stream)).r.lastSeq);
-    const proof = await commitProblem(a);
-    if (proof.why && !shown(a)) { send(res, 409, text, `${proof.why}\n`); return true; }
-    if (proof.why) return back({ error: proof.why }, 422);
-    if (proof.kept && a.seen === atStart) a.seen = String((await now(a.ws.stream)).r.lastSeq); // its own keeping moved the log
+    if (await proofHeldBack(res, a, back)) return true;
     const misplaced = await placeCheck(a);
     if (misplaced && !shown(a)) { send(res, 409, text, `tira can't run that: ${misplaced}\n`); return true; }
     if (misplaced) return back({ error: `tira can't run that: ${misplaced}.` }, 422);
@@ -820,6 +825,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (!shown(a)) return false;
     const refused = await refusal(a, cmd, first);
     if (refused) return back({ error: refused }, 409);
+    return false;
+  };
+
+  // a Complete's proof of work that can't be: said, or the dialog again with why; keeping it for the
+  // task moves the log, which doesn't count as the log moving under the decision
+  const proofHeldBack = async (res: ServerResponse, a: Asked, back: (o: Partial<ConfirmOpts>, status?: number) => Promise<boolean>): Promise<boolean> => {
+    const atStart = String((await now(a.ws.stream)).r.lastSeq);
+    const proof = await commitProblem(a);
+    if (proof.why && !shown(a)) { send(res, 409, text, `${proof.why}\n`); return true; }
+    if (proof.why) return back({ error: proof.why }, 422);
+    if (proof.kept && a.seen === atStart) a.seen = String((await now(a.ws.stream)).r.lastSeq); // its own keeping moved the log
     return false;
   };
 
@@ -923,7 +939,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // a ticket's Edit form, read: each field trimmed, the steps one per line
   type TicketAsked = TicketWords & { assignee: string };
   const ticketAsked = (form: URLSearchParams): TicketAsked => ({
-    title: (form.get("title") ?? "").trim().replace(/\s+/g, " "),
+    title: (form.get("title") ?? "").trim().replaceAll(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
     steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
     estimate: (form.get("estimate") ?? "").trim(),
@@ -950,10 +966,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { people, agents } = await assignees(ws.stream, actor);
     const why = ticketProblem(asked, [...people, ...agents, before?.assignee]);
     if (why) return said({ ok: false, text: `The ticket wasn't saved: ${why}` });
-    const { title, description, steps, estimate, assignee } = asked;
-    const payload = { task, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
-    const same = before && JSON.stringify([before.title, before.description, before.steps, before.estimate, before.assignee]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate, payload.assignee]);
-    if (same || (!before && Object.keys(payload).length === 1)) return said({ ok: true, text: "Nothing changed." });
+    const payload = ticketPayload(task, asked, asked.assignee);
+    if (saysSame(before, payload)) return said({ ok: true, text: "Nothing changed." });
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
     if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
     said({ ok: true, text: "Saved." }, task);

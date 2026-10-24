@@ -360,14 +360,20 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
 }
 
 // The report in a few lines, for the terminal and the page.
+// the commits a sync kept, in a line: how many, and for which tasks
+function keptLine(kept: readonly { task: string }[]): string | undefined {
+  if (kept.length === 0) return undefined;
+  const noun = kept.length === 1 ? "commit" : "commits";
+  return `${kept.length} ${noun} kept for ${[...new Set(kept.map((c) => c.task))].join(", ")}`;
+}
 export function reportLines(rep: SyncReport): string[] {
   const out: string[] = [];
   const linked = [rep.linked.repo ? `GitHub ${rep.linked.repo}` : "", rep.linked.jira ? `Jira ${rep.linked.jira}` : ""].filter(Boolean).join(" and ");
   if (linked) out.push(`synced with ${linked}`);
   if (rep.jiraName) out.push(`Jira calls ${rep.linked.jira} "${rep.jiraName}": the link shows that name now`);
   for (const p of rep.prs) out.push(`${p.pr} ${p.change}${p.change === "linked" ? ` to ${p.task}` : ` (${p.task})`}`);
-  const kept = rep.commits ?? [];
-  if (kept.length > 0) out.push(`${kept.length} ${kept.length === 1 ? "commit" : "commits"} kept for ${[...new Set(kept.map((c) => c.task))].join(", ")}`);
+  const kept = keptLine(rep.commits ?? []);
+  if (kept) out.push(kept);
   for (const m of rep.imported) out.push(`${m.key} brought in as ${m.task} (${m.to})`);
   for (const c of rep.created) out.push(`${c.task}: made Jira ${c.key}`);
   for (const q of rep.requests) out.push(`${q.key} moved to ${q.to} in Jira by ${q.who}: ${q.result}`);
