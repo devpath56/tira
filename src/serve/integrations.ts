@@ -99,7 +99,8 @@ export function whoIs(req: IncomingMessage, fallback: string | undefined, env: E
 // what someone who can't get in is told: who to ask
 export function askAdmin(a: Access): string {
   const { name, email } = a.contact ?? {};
-  const who = name && email ? `${name} (${email})` : name ?? email ?? (a.admin ? `@${a.admin} on GitHub` : "");
+  const onGitHub = a.admin ? `@${a.admin} on GitHub` : "";
+  const who = name && email ? `${name} (${email})` : name ?? email ?? onGitHub;
   return who ? `Ask the admin, ${who}, to add your GitHub account.` : "Ask this tira's admin to add your GitHub account.";
 }
 const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
@@ -222,11 +223,12 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   };
 
   // GitHub's code to approve, at its own address: the page waits there, and goes on in once it's approved
-  const signinCode = async (_req: IncomingMessage, res: ServerResponse, url: URL) => {
+  const signinCode = (_req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
     const id = url.searchParams.get("id") ?? "";
     const p = pendingSignIns.get(id);
-    if (!p || p.until < Date.now()) return back(res, "/welcome", { ok: false, text: "That sign-in expired: start again." });
-    signinPage(res, id, p);
+    if (!p || p.until < Date.now()) back(res, "/welcome", { ok: false, text: "That sign-in expired: start again." });
+    else signinPage(res, id, p);
+    return Promise.resolve();
   };
 
   // GitHub, back from the direct way: its one-time code, for a token, once, in the browser that left
@@ -318,89 +320,92 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const hidden = () => `<input type="hidden" name="token" value="${esc(c.token)}">`;
   const cmd = (text: string) => `<details class="int-cmd"><summary>Show the command</summary><code>${esc(text)}</code></details>`;
   const row = (k: string, v: string) => `<div class="grp-row"><span class="grp-k">${k}</span>${v}</div>`;
-  const group = (id: string, title: string, rows: string, foot = "") => `<section class="grp" id="${id}" data-int="${id}"><h2 class="grp-h">${title}</h2>${descOf(id) ? `<p class="grp-desc">${esc(descOf(id) ?? "")}</p>` : ""}<div class="grp-list">${rows}</div>${foot ? `<div class="grp-foot">${foot}</div>` : ""}</section>`;
+  const group = (id: string, title: string, rows: string, foot = "") => {
+    const desc = descOf(id) ? `<p class="grp-desc">${esc(descOf(id) ?? "")}</p>` : "";
+    const footer = foot ? `<div class="grp-foot">${foot}</div>` : "";
+    return `<section class="grp" id="${id}" data-int="${id}"><h2 class="grp-h">${title}</h2>${desc}<div class="grp-list">${rows}</div>${footer}</section>`;
+  };
   const problem = (text: string) => (text ? `<div class="grp-row"><span class="grp-k no">${esc(text)}</span></div>` : "");
   const flashOf = (url: URL) => {
     const f = c.takeFlash(url.searchParams.get("r") ?? "");
-    return f ? `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>` : "";
+    if (!f) return "";
+    return `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>`;
   };
   const scripts = `<script type="module" src="/tabs.mjs"></script><script type="module" src="/help.mjs"></script><script type="module" src="/secrets.mjs"></script>`;
   const signedOut = (res: ServerResponse, url: URL) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/welcome${url.search}` }); // a result goes along
 
   // Account settings (GET /settings): who you are, your GitHub and Jira, how tira looks, who may
-  // sign in, and tira's own apps.
-  const profile = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
-    const me = who(req);
-    if (!me.actor) return signedOut(res, url); // yours: sign in first
-    const keys = appKeys(env);
-    const ghAuth = me.login ? githubAuth(me.login, env) : undefined;
-    const t = hidden();
+  // sign in, and tira's own apps, a helper per section.
+  type Keys = ReturnType<typeof appKeys>;
+  const initial = (name: string) => esc(([...name][0] ?? "?").toUpperCase());
+  const roleOf = (login: string) => (isAdmin(access(env), login) ? "Admin" : "Member");
 
-    // you (someone who isn't signed in is sent to the landing, unless tira serve acts as its own name),
-    // shown by the name you chose (else GitHub's, else your login); your changes stay under your login
-    const initial = (name: string) => esc(([...name][0] ?? "?").toUpperCase());
-    const role = me.login ? (isAdmin(access(env), me.login) ? "Admin" : "Member") : "";
-    const chosen = displayName(me.actor, env);
-    const shown = chosen ?? (me.login ? ghAuth?.name ?? me.login : me.actor);
-    const nameRow = `<form method="post" action="/integrations/profile" class="grp-row" data-display-name>${t}<span class="grp-k">Display name</span><input type="text" name="name" value="${esc(chosen ?? "")}" maxlength="60" autocomplete="off" placeholder="${esc(me.login ? ghAuth?.name ?? me.login : me.actor)}" aria-label="Display name"><button class="act" type="submit">Save</button></form>`;
-    // you and your accounts, in one list (as Apple's settings put them): who you are, the name you're
-    // shown by, then GitHub (who you're signed in as) and Jira (sign in, pick a site, disconnect),
-    // each with its action on its own row
-    const card = me.login
-      ? `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>@${esc(me.login)} · signed in with GitHub</span></span><span class="pill">${role}</span>`
-        + `<form method="post" action="/signout" class="pf-out">${t}<button class="act" type="submit">Sign out</button></form></div>`
-      : `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>the name tira serve was started with</span></span></div>`
-        + row("Working as", `<span class="grp-v">${esc(me.actor)}</span>`);
-    let jira: string;
-    if (!me.login) jira = row("Jira", `<span class="grp-v">${keys.atlassian ? "Sign in with GitHub first" : "Not set up: add tira's Atlassian app under Setup"}</span>`);
-    else {
-      const j = await acc.jira(me.login, host, "/settings");
-      if (j.state === "unset") jira = row("Jira", `<span class="grp-v">Not set up: add tira's Atlassian app under Setup</span>`);
-      else if (j.state === "elsewhere") jira = row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
-      else if (j.state === "disconnected") jira = row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?back=/settings&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`);
-      else {
-        const off = `<button class="how" type="submit">Disconnect</button></form>`;
-        jira = j.sites.length > 1
-          ? `<form method="post" action="/integrations/jira/site" class="grp-row">${t}<input type="hidden" name="back" value="/settings"><span class="grp-k">Jira site</span><select name="site" aria-label="Jira site">${j.sites.map((x) => `<option value="${esc(x.id)}"${x.id === j.cloudId ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><button class="act" type="submit">Use</button></form>`
-            + `<form method="post" action="/integrations/jira/disconnect" class="grp-row" data-disconnect-jira>${t}<span class="grp-k">Jira</span>${off}`
-          : `<form method="post" action="/integrations/jira/disconnect" class="grp-row" data-disconnect-jira>${t}<span class="grp-k">Jira</span><span class="grp-v">${j.site ? esc(j.site.replace(/^https:\/\//, "")) : "Connected"}</span>${off}`;
-      }
+  // you (someone who isn't signed in is sent to the landing, unless tira serve acts as its own name),
+  // shown by the name you chose (else GitHub's, else your login); your changes stay under your login
+  const profileCard = (login: string | undefined, actor: string, shown: string, t: string) => {
+    if (!login) {
+      return `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>the name tira serve was started with</span></span></div>`
+        + row("Working as", `<span class="grp-v">${esc(actor)}</span>`);
     }
-    const github = me.login
-      ? `<form method="post" action="/integrations/github/disconnect" class="grp-row" data-disconnect-github>${t}<span class="grp-k">GitHub</span><span class="grp-v">@${esc(me.login)}</span><button class="how" type="submit">Disconnect</button></form>`
-      : row("GitHub", `<span class="grp-v">${keys.github ? "Not signed in" : "Not set up: add tira's GitHub app under Setup"}</span>`);
-    const account = group("account", "Account", card + nameRow + github + jira, me.login
-      ? "Your changes are recorded under your GitHub login; the display name is only how you're shown. GitHub and Jira stay linked until you disconnect them here."
-      : "GitHub sign-in isn't set up. Add it under Setup.");
+    return `<div class="profile" data-profile-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>@${esc(login)} · signed in with GitHub</span></span><span class="pill">${roleOf(login)}</span>`
+      + `<form method="post" action="/signout" class="pf-out">${t}<button class="act" type="submit">Sign out</button></form></div>`;
+  };
 
-    // how tira looks, in this browser (the theme's radios are at the top of every page)
-    const looks: [string, string, string][] = [["system", "System", "Follows your computer"], ["light", "Light", "Always light"], ["dark", "Dark", "Always dark"]];
-    const appearance = `<section class="grp" id="appearance" data-int="appearance"><h2 class="grp-h">Appearance</h2><p class="grp-desc">${esc(DESC.appearance)}</p>`
-      + `<div class="appear" data-theme-switch>${looks.map(([v, label, said]) => `<label for="th-${v}" class="look look-${v}"><span class="look-pic" aria-hidden="true"><i></i><i></i><i></i></span><b>${label}</b><small>${said}</small></label>`).join("")}</div></section>`;
+  // GitHub: who you're signed in as, with its action on its own row
+  const githubAccountRow = (login: string | undefined, keys: Keys, t: string) => {
+    if (login) return `<form method="post" action="/integrations/github/disconnect" class="grp-row" data-disconnect-github>${t}<span class="grp-k">GitHub</span><span class="grp-v">@${esc(login)}</span><button class="how" type="submit">Disconnect</button></form>`;
+    return row("GitHub", `<span class="grp-v">${keys.github ? "Not signed in" : "Not set up: add tira's GitHub app under Setup"}</span>`);
+  };
 
-    // people: who may sign in (the admin changes it; everyone else sees who to ask)
+  // Jira: sign in, pick a site, disconnect
+  const siteOption = (x: { id: string; name: string }, cloudId: string | undefined) => `<option value="${esc(x.id)}"${x.id === cloudId ? " selected" : ""}>${esc(x.name)}</option>`;
+  const jiraAccountRow = async (login: string | undefined, keys: Keys, host: string, t: string): Promise<string> => {
+    if (!login) return row("Jira", `<span class="grp-v">${keys.atlassian ? "Sign in with GitHub first" : "Not set up: add tira's Atlassian app under Setup"}</span>`);
+    const j = await acc.jira(login, host, "/settings");
+    if (j.state === "unset") return row("Jira", `<span class="grp-v">Not set up: add tira's Atlassian app under Setup</span>`);
+    if (j.state === "elsewhere") return row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
+    if (j.state === "disconnected") return row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?back=/settings&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`);
+    const disconnect = `<form method="post" action="/integrations/jira/disconnect" class="grp-row" data-disconnect-jira>${t}<span class="grp-k">Jira</span>`;
+    const off = `<button class="how" type="submit">Disconnect</button></form>`;
+    if (j.sites.length > 1) {
+      const options = j.sites.map((x) => siteOption(x, j.cloudId)).join("");
+      return `<form method="post" action="/integrations/jira/site" class="grp-row">${t}<input type="hidden" name="back" value="/settings"><span class="grp-k">Jira site</span><select name="site" aria-label="Jira site">${options}</select><button class="act" type="submit">Use</button></form>`
+        + disconnect + off;
+    }
+    const site = j.site ? esc(j.site.replace(/^https:\/\//, "")) : "Connected";
+    return disconnect + `<span class="grp-v">${site}</span>` + off;
+  };
+
+  // how tira looks, in this browser (the theme's radios are at the top of every page)
+  const LOOKS: [string, string, string][] = [["system", "System", "Follows your computer"], ["light", "Light", "Always light"], ["dark", "Dark", "Always dark"]];
+  const lookOption = ([v, label, said]: [string, string, string]) => `<label for="th-${v}" class="look look-${v}"><span class="look-pic" aria-hidden="true"><i></i><i></i><i></i></span><b>${label}</b><small>${said}</small></label>`;
+  const appearanceGroup = () => `<section class="grp" id="appearance" data-int="appearance"><h2 class="grp-h">Appearance</h2><p class="grp-desc">${esc(DESC.appearance)}</p>`
+    + `<div class="appear" data-theme-switch>${LOOKS.map(lookOption).join("")}</div></section>`;
+
+  // people: who may sign in (the admin changes it; everyone else sees who to ask)
+  const memberRow = (m: string, t: string) => `<form method="post" action="/integrations/people" class="grp-row">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(m)}"><span class="grp-k">${esc(m)}</span><button class="how" type="submit">Remove</button></form>`;
+  const peopleGroups = (login: string | undefined, ghName: string | undefined, t: string) => {
     const a = access(env);
-    let people: string;
-    if (!me.login) people = group("people", "People", row("Admin", `<span class="grp-v">The first to sign in</span>`));
-    else if (!isAdmin(a, me.login)) people = group("people", "People", row("Admin", `<span class="grp-v">${esc(a.contact?.name ?? a.admin ?? "")}</span>`), "Ask the admin to add or remove people.");
-    else {
-      const rows = (a.members ?? []).map((m) => `<form method="post" action="/integrations/people" class="grp-row">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(m)}"><span class="grp-k">${esc(m)}</span><button class="how" type="submit">Remove</button></form>`).join("");
-      people = `<section class="grp" id="people" data-int="people"><h2 class="grp-h">People</h2><p class="grp-desc">${esc(DESC.people)}</p><div class="grp-list" data-people>`
-        + `<div class="grp-row"><span class="grp-k">${esc(a.admin ?? me.login)}</span><span class="pill">Admin</span></div>${rows}`
-        + `<form method="post" action="/integrations/people" class="grp-row" data-add-person>${t}<input type="hidden" name="do" value="add"><input type="text" name="login" aria-label="GitHub username" autocomplete="off" spellcheck="false" placeholder="GitHub username" required><button class="act primary" type="submit">Add</button></form>`
-        + `</div><div class="grp-foot">Only these people can sign in.</div></section>`
-        + `<section class="grp" id="contact" data-int="contact"><h2 class="grp-h">Your contact</h2><form method="post" action="/integrations/people" class="grp-list" data-admin-contact>${t}<input type="hidden" name="do" value="contact">`
-        + `<label class="grp-row"><span class="grp-k">Name</span><input type="text" name="name" value="${esc(a.contact?.name ?? ghAuth?.name ?? "")}" autocomplete="off"></label>`
-        + `<label class="grp-row"><span class="grp-k">Email</span><input type="email" name="email" value="${esc(a.contact?.email ?? "")}" autocomplete="off"></label>`
-        + `<div class="grp-row"><span class="grp-k"></span><button class="act" type="submit">Save</button></div></form><div class="grp-foot">Shown to people who can't sign in yet.</div></section>`;
-    }
+    if (!login) return group("people", "People", row("Admin", `<span class="grp-v">The first to sign in</span>`));
+    if (!isAdmin(a, login)) return group("people", "People", row("Admin", `<span class="grp-v">${esc(a.contact?.name ?? a.admin ?? "")}</span>`), "Ask the admin to add or remove people.");
+    const rows = (a.members ?? []).map((m) => memberRow(m, t)).join("");
+    return `<section class="grp" id="people" data-int="people"><h2 class="grp-h">People</h2><p class="grp-desc">${esc(DESC.people)}</p><div class="grp-list" data-people>`
+      + `<div class="grp-row"><span class="grp-k">${esc(a.admin ?? login)}</span><span class="pill">Admin</span></div>${rows}`
+      + `<form method="post" action="/integrations/people" class="grp-row" data-add-person>${t}<input type="hidden" name="do" value="add"><input type="text" name="login" aria-label="GitHub username" autocomplete="off" spellcheck="false" placeholder="GitHub username" required><button class="act primary" type="submit">Add</button></form>`
+      + `</div><div class="grp-foot">Only these people can sign in.</div></section>`
+      + `<section class="grp" id="contact" data-int="contact"><h2 class="grp-h">Your contact</h2><form method="post" action="/integrations/people" class="grp-list" data-admin-contact>${t}<input type="hidden" name="do" value="contact">`
+      + `<label class="grp-row"><span class="grp-k">Name</span><input type="text" name="name" value="${esc(a.contact?.name ?? ghName ?? "")}" autocomplete="off"></label>`
+      + `<label class="grp-row"><span class="grp-k">Email</span><input type="email" name="email" value="${esc(a.contact?.email ?? "")}" autocomplete="off"></label>`
+      + `<div class="grp-row"><span class="grp-k"></span><button class="act" type="submit">Save</button></div></form><div class="grp-foot">Shown to people who can't sign in yet.</div></section>`;
+  };
 
-    // setup: tira's own apps, as Render shows environment secrets: each value as dots, and for the
-    // admin (or, before GitHub sign-in is on, whoever runs this tira) an eye to show it and a copy
-    // button, each fetching that one value when pressed (secrets.mjs), so no key is ever in the page.
-    // Edit swaps the list for the form (a checkbox, so it works with no script), where an empty field
-    // keeps what's saved. Open while one is missing; straight to the form while nothing is set.
-    const mayKeys = mayChangeApps(me.login);
+  // setup: tira's own apps, as Render shows environment secrets: each value as dots, and for the
+  // admin (or, before GitHub sign-in is on, whoever runs this tira) an eye to show it and a copy
+  // button, each fetching that one value when pressed (secrets.mjs), so no key is ever in the page.
+  // Edit swaps the list for the form (a checkbox, so it works with no script), where an empty field
+  // keeps what's saved. Open while one is missing; straight to the form while nothing is set.
+  const setupGroup = (login: string | undefined, keys: Keys, t: string) => {
+    const mayKeys = mayChangeApps(login);
     const envKeys: [string, string, string | undefined][] = [["github_client_id", "GitHub Client ID", keys.github?.clientId], ["github_secret", "GitHub Secret", keys.github?.secret], ["atlassian_client_id", "Atlassian Client ID", keys.atlassian?.clientId], ["atlassian_secret", "Atlassian Secret", keys.atlassian?.secret]];
     const envButtons = (label: string) => `<button type="button" class="env-btn" data-env-copy title="Copy" aria-label="Copy ${label}">${COPY}</button><button type="button" class="env-btn" data-env-show title="Show" aria-label="Show ${label}" aria-pressed="false">${EYE}</button>`;
     const envRow = ([k, label, v]: [string, string, string | undefined]) => {
@@ -421,13 +426,66 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       + (mayKeys ? `<form method="post" action="/integrations/setup" class="grp-list env-edit" data-setup-form>${t}<input type="hidden" name="back" value="/settings">${envKeys.map(envField).join("")}`
         + `<div class="grp-row env-acts"><label class="how" for="setup-edit">Cancel</label><button class="act primary" type="submit">Save</button></div></form>` : "")
       + `<div class="grp-foot">${mayKeys ? "Kept privately and sealed, never in the page: Show and Copy fetch one value when you press them. How to make these apps: ask the Help centre." : "Only this tira's admin can see or change these."}</div></details>`;
+    return setup;
+  };
 
-    const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + setup + people + appearance;
+  const profile = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
+    const me = who(req);
+    if (!me.actor) return signedOut(res, url); // yours: sign in first
+    const keys = appKeys(env);
+    const ghAuth = me.login ? githubAuth(me.login, env) : undefined;
+    const t = hidden();
+    const chosen = displayName(me.actor, env);
+    const fallbackName = me.login ? ghAuth?.name ?? me.login : me.actor;
+    const shown = chosen ?? fallbackName;
+    const nameRow = `<form method="post" action="/integrations/profile" class="grp-row" data-display-name>${t}<span class="grp-k">Display name</span><input type="text" name="name" value="${esc(chosen ?? "")}" maxlength="60" autocomplete="off" placeholder="${esc(fallbackName)}" aria-label="Display name"><button class="act" type="submit">Save</button></form>`;
+    // you and your accounts, in one list (as Apple's settings put them): who you are, the name you're
+    // shown by, then GitHub and Jira, each with its action on its own row
+    const accounts = profileCard(me.login, me.actor, shown, t) + nameRow + githubAccountRow(me.login, keys, t) + await jiraAccountRow(me.login, keys, host, t);
+    const account = group("account", "Account", accounts, me.login
+      ? "Your changes are recorded under your GitHub login; the display name is only how you're shown. GitHub and Jira stay linked until you disconnect them here."
+      : "GitHub sign-in isn't set up. Add it under Setup.");
+    const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + setupGroup(me.login, keys, t) + peopleGroups(me.login, ghAuth?.name, t) + appearanceGroup();
     c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections: [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]] }, body, helpPanel(portOf(host), shown), scripts));
   };
 
   // Project settings (GET /integrations): this project's name, its GitHub repo, its Jira project,
-  // Sync, and deleting it.
+  // Sync, and deleting it, a helper per section.
+  type Linked = ReturnType<typeof workspaceOf>;
+  const unlinkButton = (name: string, linked: string | undefined) => (linked ? `<button class="how" type="submit" name="${name}" value="">Unlink</button>` : "");
+
+  // GitHub: pick one of your repos
+  const repoOption = (x: string, linked: string | undefined) => `<option value="${esc(x)}"${x === linked ? " selected" : ""}>${esc(x)}</option>`;
+  const githubGroup = async (login: string | undefined, keys: Keys, ws: Linked, t: string) => {
+    const got = await acc.repos(login);
+    const noRepos = keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Account settings first";
+    const repoOptions = [...new Set([...(ws?.repo ? [ws.repo] : []), ...got.repos])];
+    const options = repoOptions.map((x) => repoOption(x, ws?.repo)).join("");
+    const verb = ws?.repo ? "Change" : "Link";
+    const picker = repoOptions.length === 0
+      ? row("Repository", `<span class="grp-v">${noRepos}</span>`)
+      : `<form method="post" action="/integrations/link" class="grp-row" data-link-repo-form>${t}<input type="hidden" name="what" value="repo"><span class="grp-k">Repository</span><select name="repo" aria-label="Repository">${options}</select><button class="act primary" type="submit">${verb}</button>${unlinkButton("repo", ws?.repo)}</form>`;
+    return group("github", "GitHub", problem(got.problem ?? "") + picker, repoOptions.length > 0 ? cmd(`tira link --repo ${quote(ws?.repo ?? repoOptions[0] ?? "OWNER/NAME")}`) : "");
+  };
+
+  // Jira: pick a project from your connected site (connecting is yours: Account settings)
+  const projectOption = (x: { key: string; name: string }, linked: string | undefined) => `<option value="${esc(x.key)}"${x.key === linked ? " selected" : ""}>${esc(x.name)} (${esc(x.key)})</option>`;
+  const jiraProjectGroup = async (login: string | undefined, keys: Keys, host: string, ws: Linked, t: string): Promise<string> => {
+    if (!keys.atlassian) return group("jira", "Jira", row("Jira", `<span class="grp-v">Not set up</span>`), `Add tira's Atlassian app in <a class="how" href="/settings#setup">Account settings</a>.`);
+    if (!login) return group("jira", "Jira", row("Jira", `<span class="grp-v">Sign in with GitHub first</span>`));
+    const j = await acc.jira(login, host, "/integrations", ws);
+    if (j.state === "elsewhere") return group("jira", "Jira", row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`));
+    if (j.state !== "connected") return group("jira", "Jira", row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`), "Connects your Atlassian account, for every project (Account settings).");
+    if (!j.cloudId) return group("jira", "Jira", row("Jira", `<a class="how" href="/settings#account">Pick your Jira site in Account settings</a>`));
+    const options = j.projects.map((x) => projectOption(x, ws?.jira_project)).join("");
+    const verb = ws?.jira_project ? "Change" : "Link";
+    return group("jira", "Jira",
+      row("Site", `<span class="grp-v">${esc(j.site ?? "")}</span>`)
+        + problem(j.problem ?? "")
+        + `<form method="post" action="/integrations/link" class="grp-row" data-link-jira-form>${t}<input type="hidden" name="what" value="jira"><span class="grp-k">Project</span><select name="jira_project" aria-label="Jira project">${options}</select><button class="act primary" type="submit">${verb}</button>${unlinkButton("jira_project", ws?.jira_project)}</form>`,
+      cmd(`tira link --jira-site ${quote(j.site ?? "")} --jira ${quote(ws?.jira_project ?? j.projects[0]?.key ?? "KEY")}`));
+  };
+
   const page = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const me = who(req);
     if (!me.actor) return signedOut(res, url); // the project's: sign in first
@@ -435,32 +493,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const ws = workspaceOf(r, c.stream);
     const keys = appKeys(env);
     const t = hidden();
-
-    // GitHub: pick one of your repos
-    const got = await acc.repos(me.login);
-    const noRepos = keys.github ? "Sign in with GitHub to pick one" : "Set up GitHub sign-in in Account settings first";
-    const repoOptions = [...new Set([...(ws?.repo ? [ws.repo] : []), ...got.repos])];
-    const github = group("github", "GitHub",
-      problem(got.problem ?? "")
-        + (repoOptions.length === 0 ? row("Repository", `<span class="grp-v">${noRepos}</span>`)
-          : `<form method="post" action="/integrations/link" class="grp-row" data-link-repo-form>${t}<input type="hidden" name="what" value="repo"><span class="grp-k">Repository</span><select name="repo" aria-label="Repository">${repoOptions.map((x) => `<option value="${esc(x)}"${x === ws?.repo ? " selected" : ""}>${esc(x)}</option>`).join("")}</select><button class="act primary" type="submit">${ws?.repo ? "Change" : "Link"}</button>${ws?.repo ? `<button class="how" type="submit" name="repo" value="">Unlink</button>` : ""}</form>`),
-      repoOptions.length > 0 ? cmd(`tira link --repo ${quote(ws?.repo ?? repoOptions[0] ?? "OWNER/NAME")}`) : "");
-
-    // Jira: pick a project from your connected site (connecting is yours: Account settings)
-    let jira: string;
-    if (!keys.atlassian) jira = group("jira", "Jira", row("Jira", `<span class="grp-v">Not set up</span>`), `Add tira's Atlassian app in <a class="how" href="/settings#setup">Account settings</a>.`);
-    else if (!me.login) jira = group("jira", "Jira", row("Jira", `<span class="grp-v">Sign in with GitHub first</span>`));
-    else {
-      const j = await acc.jira(me.login, host, "/integrations", ws);
-      if (j.state === "elsewhere") jira = group("jira", "Jira", row("Jira", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`));
-      else if (j.state !== "connected") jira = group("jira", "Jira", row("Jira", `<a class="act primary" href="${esc("/integrations/jira/connect?tab=1")}" target="_blank" rel="noopener" data-connect-jira>Sign in to Jira</a>`), "Connects your Atlassian account, for every project (Account settings).");
-      else if (!j.cloudId) jira = group("jira", "Jira", row("Jira", `<a class="how" href="/settings#account">Pick your Jira site in Account settings</a>`));
-      else jira = group("jira", "Jira",
-        row("Site", `<span class="grp-v">${esc(j.site ?? "")}</span>`)
-          + problem(j.problem ?? "")
-          + `<form method="post" action="/integrations/link" class="grp-row" data-link-jira-form>${t}<input type="hidden" name="what" value="jira"><span class="grp-k">Project</span><select name="jira_project" aria-label="Jira project">${j.projects.map((x) => `<option value="${esc(x.key)}"${x.key === ws?.jira_project ? " selected" : ""}>${esc(x.name)} (${esc(x.key)})</option>`).join("")}</select><button class="act primary" type="submit">${ws?.jira_project ? "Change" : "Link"}</button>${ws?.jira_project ? `<button class="how" type="submit" name="jira_project" value="">Unlink</button>` : ""}</form>`,
-        cmd(`tira link --jira-site ${quote(j.site ?? "")} --jira ${quote(ws?.jira_project ?? j.projects[0]?.key ?? "KEY")}`));
-    }
+    const github = await githubGroup(me.login, keys, ws, t);
+    const jira = await jiraProjectGroup(me.login, keys, host, ws, t);
 
     // sync
     const canSync = !!ws && (!!ws.repo || !!ws.jira_project);
@@ -477,9 +511,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       + `<div class="grp-foot">Its address and its history keep the name it was made with: <code>${esc(c.stream)}</code>.</div></section>`;
 
     // delete: type the project's name to be sure (not the one tira serve was started with)
+    const startedHere = row("Delete", `<span class="grp-v">This is the project tira serve was started with: start it on another to delete this one</span>`);
     const remove = `<section class="grp danger" id="delete" data-int="delete"><h2 class="grp-h">Delete project</h2><p class="grp-desc">${esc(DESC.delete)}</p>`
       + (c.stream === c.home
-        ? `<div class="grp-list">${row("Delete", `<span class="grp-v">This is the project tira serve was started with: start it on another to delete this one</span>`)}</div></section>`
+        ? `<div class="grp-list">${startedHere}</div></section>`
         : `<form method="post" action="/projects/delete" class="grp-list" data-delete-project>${t}<label class="grp-row"><span class="grp-k">Type <b>${name}</b> to confirm</span><input type="text" name="confirm" autocomplete="off" spellcheck="false" required aria-label="Type ${name} to confirm"></label>`
           + `<div class="grp-row"><span class="grp-k"></span><button class="act danger" type="submit">Delete this project</button></div></form></section>`);
 
@@ -634,6 +669,17 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     }));
   };
 
+  // the connect step's Jira picker was there: its choice, "No Jira project" included, onto the link;
+  // or why it can't be
+  const pickJira = (form: URLSearchParams, login: string, link: Record<string, string | undefined>): string | undefined => {
+    const key = (form.get("jira_project") ?? "").trim();
+    const site = atlassianAuth(login, env)?.site;
+    if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return "Pick a Jira project from your connected site.";
+    link.jira_project = key || undefined;
+    link.jira_site = key ? site : undefined;
+    return undefined;
+  };
+
   const connectPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
     if (form === undefined) return;
@@ -644,13 +690,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const repo = (form.get("repo") ?? "").trim();
     if (!REPO.test(repo)) return back(res, "/connect", { ok: false, text: repo ? `${repo} isn't a repo as owner/name.` : "Pick a repo." });
     const link: Record<string, string | undefined> = { repo, jira_site: ws?.jira_site, jira_project: ws?.jira_project };
-    if (form.has("jira_project")) { // the Jira picker was there: its choice, "No Jira project" included
-      const key = (form.get("jira_project") ?? "").trim();
-      const site = atlassianAuth(me.login, env)?.site;
-      if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return back(res, "/connect", { ok: false, text: "Pick a Jira project from your connected site." });
-      link.jira_project = key || undefined;
-      link.jira_site = key ? site : undefined;
-    }
+    const notPicked = form.has("jira_project") ? pickJira(form, me.login, link) : undefined;
+    if (notPicked) return back(res, "/connect", { ok: false, text: notPicked });
     const same = link.repo === ws?.repo && link.jira_project === ws?.jira_project && link.jira_site === ws?.jira_site;
     if (!same) link.jira_name = await nameOfPicked(me.login, link);
     const f = same ? { ok: true, text: "" } : await writeLink(me.login, ws, link);
@@ -660,14 +701,24 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   };
 
   // ---------- Atlassian's round trip ----------
-  const jiraConnect = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
+  const jiraConnect = (req: IncomingMessage, res: ServerResponse, url: URL, host: string): Promise<void> => {
     const me = who(req);
     const keys = appKeys(env).atlassian;
     const to = backOf(url.searchParams.get("back"));
-    if (!me.login || !keys) return back(res, to, { ok: false, text: !keys ? "Add tira's Atlassian app under Setup first." : "Sign in with GitHub first." });
+    if (!me.login || !keys) {
+      back(res, to, { ok: false, text: !keys ? "Add tira's Atlassian app under Setup first." : "Sign in with GitHub first." });
+      return Promise.resolve();
+    }
     const state = randomBytes(24).toString("hex");
     pendingJira.set(state, { login: me.login, until: Date.now() + 10 * 60_000, back: to, tab: url.searchParams.get("tab") === "1" });
     c.send(res, 302, "text/plain; charset=utf-8", "", { Location: at.authorizeUrl(keys.clientId, redirectUri(host), state) });
+    return Promise.resolve();
+  };
+
+  // what connecting Jira says: no site, the one it picked, or pick one
+  const connectedText = (sites: number, one: { url: string } | undefined) => {
+    if (sites === 0) return "Connected, but your Atlassian account has no Jira site.";
+    return one ? `Connected to Jira ${one.url}. Pick a project to link.` : "Connected. Pick a Jira site, then a project.";
   };
 
   const jiraCallback = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
@@ -688,7 +739,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       const sites = await at.sites(auth.access);
       const one = sites.length === 1 ? sites[0] : undefined;
       await saveAtlassianAuth(p.login, { ...auth, sites, ...(one ? { cloudId: one.id, site: one.url } : {}) }, env);
-      done({ ok: true, text: sites.length === 0 ? "Connected, but your Atlassian account has no Jira site." : one ? `Connected to Jira ${one.url}. Pick a project to link.` : "Connected. Pick a Jira site, then a project." });
+      done({ ok: true, text: connectedText(sites.length, one) });
     } catch (err) {
       done({ ok: false, text: `Jira wasn't connected (${(err as Error).message}).` });
     }

@@ -22,7 +22,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
@@ -106,7 +105,9 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
 // serves any other the store holds at ?w=<name>; every link and form it makes carries that on,
 // so a page, its decisions and their writes stay in the workspace they were opened in.
 export interface Workspace { stream: string; q: string } // q: "w=…", or "" for the one it started on
-export const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
+// what joins a query onto a path: ? for the first, & after
+const joiner = (path: string) => (path.includes("?") ? "&" : "?");
+export const withQ = (path: string, q: string) => (q === "" ? path : `${path}${joiner(path)}${q}`);
 const MAX_NAME = 200;
 // a new project's name: the same rule the New project page's field shows
 const NEW_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
@@ -126,7 +127,8 @@ export interface WorkspaceEntry { stream: string; title?: string; href: string; 
 export function workspaceList(r: FoldResult, streams: readonly string[], home: string, current: string): WorkspaceEntry[] {
   const live = [...new Set(streams)].map((stream) => ({ stream, link: workspaceOf(r, stream) })).filter((x) => !x.link?.deleted);
   const named = (x: { stream: string; link?: { title?: string } | undefined }) => x.link?.title ?? x.stream; // as people see it
-  return live.sort((a, b) => compareCodeUnits(named(a), named(b))).map(({ stream, link }) => {
+  live.sort((a, b) => compareCodeUnits(named(a), named(b)));
+  return live.map(({ stream, link }) => {
     const rows = flatten(streamView(r, stream).roots);
     const leaves = rows.filter((x) => x.children.length === 0);
     const attention = rows.filter((x) => x.state === "blocked" || (x.active && !x.awaitingClose)).length;
@@ -420,10 +422,11 @@ function noWorkspace(stream: string): string {
 
 // a project someone deleted: its board is closed (its history stays in the log), and the way home
 function deletedProject(stream: string, by: string | undefined): string {
+  const who = by ? esc(by) + " deleted it. " : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · deleted project</title><style>${CSS}</style></head><body>${THEME_RADIOS}<main class="packet-page"><nav class="top">${brand("/")}</nav>`
     + `<div class="packet" data-deleted-project><h1>${esc(stream)} was deleted</h1>`
-    + `<p class="hint">${by ? `${esc(by)} deleted it. ` : ""}Its board is closed; its history stays in tira's log.</p>`
+    + `<p class="hint">${who}Its board is closed; its history stays in tira's log.</p>`
     + `<p class="hint"><a class="how" href="/">Back to your board</a></p></div></main><script type="module" src="/theme.mjs"></script></body></html>\n`;
 }
 
@@ -433,7 +436,7 @@ function deletedProject(stream: string, by: string | undefined): string {
 export function carryQ(html: string, q: string): string {
   if (q === "") return html;
   return html.replace(/\b(href|action|data-go)="(\/(?!\/)[^"#]*)"/g, (m, attr: string, path: string) =>
-    /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(path.includes("?") ? "&" : "?")}${esc(q)}"`);
+    /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(joiner(path))}${esc(q)}"`);
 }
 
 const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
@@ -786,9 +789,14 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // Cancel and the tira mark go back to. It offers what your accounts hold: your GitHub repos, and
   // your Jira's projects (or a way to connect it). No one who can act yet: the landing first.
   const acc = accounts(opts.links);
+  // the page's Jira: your connected site's projects, else a way to sign in, else that it isn't set up
+  const newProjectJira = async (login: string | undefined, host: string, ws: Workspace): Promise<NewProject["jira"]> => {
+    if (login) return acc.jira(login, host, withQ("/projects/new", ws.q));
+    return appKeys(acc.env).atlassian ? { state: "signin" } : { state: "unset" };
+  };
   const projectForm = async (login: string | undefined, host: string, ws: Workspace, f: Partial<NewProject> = {}): Promise<NewProject> => {
     const got = await acc.repos(login);
-    const jira: NewProject["jira"] = login ? await acc.jira(login, host, withQ("/projects/new", ws.q)) : appKeys(acc.env).atlassian ? { state: "signin" } : { state: "unset" };
+    const jira = await newProjectJira(login, host, ws);
     return { token, back: withQ("/", ws.q), action: withQ("/projects", ws.q), repos: got.repos, jira, ...f };
   };
   const newProjectGet = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string, ws: Workspace) => {
@@ -801,6 +809,25 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // a repo or a Jira project on it): its name, its GitHub repo and, if picked, its Jira project from
   // your connected site, written as the person acting; then its board. One that can't be made comes
   // back to the page, with what was typed and why.
+  // what's wrong with a new project, or the workspace it makes and the Jira site it links (none: no Jira)
+  type NewProjectField = "name" | "repo" | "jira" | "who";
+  const newProjectCheck = async (name: string, repo: string, key: string, login: string | undefined, actor: string | undefined): Promise<{ problem: [number, NewProjectField, string] } | { at: Workspace; site: string | undefined; actor: string }> => {
+    if (actor === undefined) return { problem: [401, "who", "Sign in with GitHub first (Settings), so tira knows who makes the project."] };
+    const at = NEW_NAME.test(name) ? workspaceIn(new URL(`http://h/?w=${encodeURIComponent(name)}`), opts.stream) : undefined;
+    if (!at) return { problem: [400, "name", "A project's name is letters, digits, dots, dashes or underscores, starting with a letter or digit."] };
+    if (!REPO.test(repo)) return { problem: [400, "repo", `${repo || "That"} isn't a GitHub repo as owner/name.`] };
+    const site = key !== "" && login ? atlassianAuth(login, acc.env)?.site : undefined;
+    if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return { problem: [400, "jira", "Pick a Jira project from your connected site, or none for now."] };
+    const before = await opts.store.readStream(at.stream);
+    if (before.length === 0) return { at, site, actor };
+    const deleted = workspaceOf(fold(before, opts.registry), at.stream)?.deleted;
+    return { problem: [409, "name", deleted ? `${name} was a project here, since deleted: pick another name.` : `There is a project named ${name} already: pick it in Projects, or name this one differently.`] };
+  };
+  // a new project's link: its repo and, when one was picked, its Jira project (with Jira's name for it)
+  const newLink = (repo: string, site: string | undefined, key: string, jiraName: string | undefined) => {
+    if (!site) return { repo };
+    return { repo, jira_site: site, jira_project: key, ...(jiraName ? { jira_name: jiraName } : {}) };
+  };
   const newProject = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
@@ -809,19 +836,12 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const name = (form.get("name") ?? "").trim();
     const repo = (form.get("repo") ?? "").trim();
     const key = (form.get("jira_project") ?? "").trim();
-    const again = async (status: number, field: "name" | "repo" | "jira" | "who", why: string) => send(res, status, html, newProjectPage(await projectForm(me.login, host, ws, { name, repo, jiraProject: key, problem: { field, text: why } })));
-    if (actor === undefined) return again(401, "who", "Sign in with GitHub first (Settings), so tira knows who makes the project.");
-    const at = NEW_NAME.test(name) ? workspaceIn(new URL(`http://h/?w=${encodeURIComponent(name)}`), opts.stream) : undefined;
-    if (!at) return again(400, "name", "A project's name is letters, digits, dots, dashes or underscores, starting with a letter or digit.");
-    if (!REPO.test(repo)) return again(400, "repo", `${repo || "That"} isn't a GitHub repo as owner/name.`);
-    const site = key !== "" && me.login ? atlassianAuth(me.login, acc.env)?.site : undefined;
-    if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return again(400, "jira", "Pick a Jira project from your connected site, or none for now.");
-    const before = await opts.store.readStream(at.stream);
-    if (before.length > 0) return again(409, "name", workspaceOf(fold(before, opts.registry), at.stream)?.deleted
-      ? `${name} was a project here, since deleted: pick another name.`
-      : `There is a project named ${name} already: pick it in Projects, or name this one differently.`);
+    const again = async (status: number, field: NewProjectField, why: string) => send(res, status, html, newProjectPage(await projectForm(me.login, host, ws, { name, repo, jiraProject: key, problem: { field, text: why } })));
+    const checked = await newProjectCheck(name, repo, key, me.login, actor);
+    if ("problem" in checked) return again(...checked.problem);
+    const { at, site, actor: by } = checked;
     const jiraName = site ? await projectName(acc.jiraOf(me.login, { version: 0, jira_site: site }), key) : undefined;
-    const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor, payload: { repo, ...(site ? { jira_site: site, jira_project: key, ...(jiraName ? { jira_name: jiraName } : {}) } : {}) } })).result;
+    const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor: by, payload: newLink(repo, site, key, jiraName) })).result;
     if (w.status !== "appended") return again(400, "name", `${name} wasn't created (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
     const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${jiraName ?? key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
     const k = String(++flashSeq);
