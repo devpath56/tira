@@ -50,8 +50,9 @@ export async function startTask(c: AgentContext, id: string): Promise<ToolText> 
 }
 
 // complete: done, with proof of work anyone can re-check (and a note for the history, if given)
-// complete: the proof of work is one of the task's commits (its sha, or 7 or more of its first
-// characters); one tira hasn't seen yet makes it look on GitHub for the task's newest commits first
+// complete: the proof of work is a commit or pull request of the project's repo: one of the task's own
+// commits (its sha, or 7 or more of its first characters; one tira hasn't seen yet makes it look on
+// GitHub for the task's newest first), else any other, checked on GitHub and kept for the task
 export async function completeTask(c: AgentContext, id: string, proof: string, note?: string): Promise<ToolText> {
   const commitsNow = async () => commitsOf((await treeNow(c)).r, c.stream).get(id) ?? [];
   const row = (await treeNow(c)).rows.find((x) => x.id === id);
@@ -65,7 +66,13 @@ export async function completeTask(c: AgentContext, id: string, proof: string, n
     commits = await commitsNow();
   }
   const found = match(commits);
-  if (found.length === 1) return write(c, event(c, id, "COMPLETE", { evidenceRef: (found[0] as Commit).sha, ...(note ? { note } : {}) }), id, row);
+  const done = (ref: string) => write(c, event(c, id, "COMPLETE", { evidenceRef: ref, ...(note ? { note } : {}) }), id, row);
+  if (found.length === 1) return done((found[0] as Commit).sha);
+  if (c.proveWith && found.length === 0) {
+    const got = await c.proveWith(id, proof).catch((err: unknown) => ({ why: `Couldn't reach GitHub (${(err as Error).message}).` }));
+    if ("ref" in got) return done(got.ref);
+    return { ok: false, text: `${got.why} Nothing was written.` };
+  }
   const after = synced ? ` (${synced})` : "";
   if (commits.length === 0) return { ok: false, text: `${id} has no commits yet${after}: push the work to a branch named after it (${id}), or write "tira: ${id}" in its pull request, then complete it with the commit's id. Nothing was written.` };
   const list = commits.slice(0, 10).map((x) => `${shortSha(x.sha)} ${firstLine(x.message)}`).join("; ");

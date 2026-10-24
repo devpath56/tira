@@ -39,16 +39,25 @@ function webRequest(req: IncomingMessage, url: URL): Request {
   return new Request(url, { method: req.method ?? "POST", headers, ...(body ? { body, duplex: "half" } : {}) } as RequestInit);
 }
 
-// commitsFor: look on GitHub for a task's newest commits (complete_task, before it takes one)
-export interface McpHttp { store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; commitsFor?: (stream: string, task: string) => Promise<string | undefined> }
+// commitsFor: look on GitHub for a task's newest commits (complete_task, before it takes one);
+// proofFor: check a commit or pull request named as proof, and keep it for the task
+export interface McpHttp {
+  store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined
+  commitsFor?: (stream: string, task: string) => Promise<string | undefined>
+  proofFor?: (stream: string, task: string, ref: string) => Promise<{ ref: string } | { why: string }>
+}
 export type McpRoute = ((req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>) & { close: () => Promise<void> };
 
 export function mcpRoute(o: McpHttp): McpRoute {
   const handler = createMcpHandler((ctx) => {
     const agent = ctx.authInfo?.extra?.agent as AgentToken | undefined;
     if (!agent) throw new Error("tira: an MCP request reached the server without its agent");
-    const commitsFor = o.commitsFor;
-    return tiraMcpServer({ store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent, ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent.project, task) } : {}) });
+    const { commitsFor, proofFor } = o;
+    return tiraMcpServer({
+      store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent,
+      ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent.project, task) } : {}),
+      ...(proofFor ? { proveWith: (task: string, ref: string) => proofFor(agent.project, task, ref) } : {}),
+    });
   }, { maxRequestBodySize: MAX_BODY });
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL) => {
     const origin = req.headers.origin;

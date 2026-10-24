@@ -13,11 +13,12 @@ views side by side (stacked on a phone):
 2. **Your part**: what the move needs, as plain fields, and a **comment** (optional) that goes
    on the ticket, where its agent reads it. No command: the page writes the move from these
    fields (the same move `tira send` writes in a terminal).
-   - **Complete**: the proof of work is one of the task's commits, picked from a list, the
-     newest first and picked. It opens at once on the commits tira has ("Checking GitHub…" while
-     it looks for newer ones: only that task's pull requests, and a branch named after it with
-     none yet, about two seconds; no Jira, no whole sync); what comes back goes in place, and what
-     you typed stays. **Refresh** looks again. With none yet: "Push to a branch named <task>".
+   - **Complete**: the proof of work is a commit or a pull request of the project's repo. It
+     opens at once on the commits tira has ("Checking GitHub…" while it looks: the task's own
+     commits, about two seconds, no Jira, no whole sync; and the repo's latest commits and pull
+     requests), the task's newest picked, in groups (This ticket, Recent commits, Pull requests);
+     **Or paste** takes any other (a commit id, #12 or a link). What you pick is checked on GitHub
+     and kept for the task. **Refresh** looks again.
    - **Block**: "Blocked by", a new ticket by name or an open task (live, the open tasks are
      chips), and a reason (optional: it waits on that ticket, if left empty).
    - **Add subtask**: its name; under work already under way it's marked as found, and

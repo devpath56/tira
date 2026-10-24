@@ -17,6 +17,7 @@ import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
 import { linksOf, reportLines, sync, tasksNamed, workspaceOf } from "../src/sync/sync.ts";
 import { commitsOf } from "../src/fold/tickets.ts";
+import { proveWith } from "../src/sync/commits.ts";
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
 import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
@@ -137,6 +138,25 @@ test("in from GitHub: the commits of a pull request that names a task are kept f
   // only the sync keeps commits
   const r = await new Dispatcher(w.store, w.registry).submit({ stream: S, kind: "create", entity: { type: "commit", id: "fake-table" }, actor: "isha", payload: { task: "table", repo: "acme/app", sha: "3".repeat(40), pr: 1, message: "m" } });
   assert.equal(r.result.status, "rejected");
+});
+
+test("a proof named for a task, checked on GitHub against the project's repo: a pull request (#7, 7 or its link) is linked to it, a commit kept for it; anything else, or no repo, says why", async () => {
+  const w = await world();
+  const github = new FakeGitHub();
+  github.add({ number: 7, title: "Pagination", state: "open", commits: ["paging"], shas: ["a".repeat(40)] });
+  github.recentCommits = [{ sha: "b".repeat(40), message: "tidy" }];
+  const prove = (ref: string) => proveWith(w.store, w.registry, S, "table", github, ref);
+  assert.deepEqual(await prove("#7"), { why: "No GitHub repo linked to this project." });
+  await w.link(linked);
+  assert.deepEqual(await prove("#7"), { ref: "https://github.com/acme/app/pull/7" });
+  assert.deepEqual(await prove("https://github.com/acme/app/pull/7"), { ref: "https://github.com/acme/app/pull/7" }); // linked once
+  assert.deepEqual(linksOf(await w.state(), S).get("table")?.prs.map((p) => p.number), [7]);
+  assert.deepEqual(await prove("#99"), { why: "No pull request #99 in acme/app." });
+  assert.deepEqual(await prove("https://github.com/someone/else/pull/7"), { why: "Name a commit (its id) or a pull request (#12, or its link)." }); // another repo's
+  assert.deepEqual(await prove("bbbbbbb"), { ref: "b".repeat(40) }); // a short id, as its whole id
+  assert.ok(commitsOf(await w.state(), S).get("table")?.some((c) => c.sha === "b".repeat(40)));
+  assert.deepEqual(await prove("1234567"), { why: "No commit 1234567 in acme/app." });
+  assert.deepEqual(await prove("done it"), { why: "Name a commit (its id) or a pull request (#12, or its link)." });
 });
 
 test("in from Jira: issues people made there become tasks, in Jira's shape and where they are in Jira, once", async () => {
@@ -956,6 +976,22 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     const failed = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body;
     assert.match(failed, /data-commits-status role="status">Couldn(?:'|&#39;)t reach GitHub \(rate limited\)\.<\/p>[^]*?value="7{40}" checked/);
     s.github.fail = undefined;
+    // the look also brings the repo's latest commits and pull requests: any of them completes it
+    s.github.recentCommits = [{ sha: "9".repeat(40), message: "tidy the header\n\nmore" }];
+    const wider = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body;
+    assert.match(wider, /<p class="commits-h">This ticket<\/p><label class="commit"><input type="radio" name="evidenceRef" value="7{40}" checked>[^]*?<p class="commits-h">Recent commits<\/p><label class="commit"><input type="radio" name="evidenceRef" value="9{40}"><code>9999999<\/code><span>tidy the header<\/span><small><\/small><\/label><p class="commits-h">Pull requests<\/p><label class="commit"><input type="radio" name="evidenceRef" value="https:\/\/github\.com\/acme\/app\/pull\/7"><code>#7<\/code><span>tira: table<\/span><small>merged<\/small><\/label>/);
+    const now = /name="seen" value="(\d+)"/.exec(wider)?.[1] ?? "";
+    const picked = await s.post("/act", { type: "node", id: "table", event: "COMPLETE", evidenceRef: "9".repeat(40), seen: now, dialog: "1", fragment: "1" });
+    assert.match(picked.body, /^<div data-go=/, picked.body.slice(0, 300)); // checked on GitHub, kept for it, written: its own keeping doesn't count as the log moving
+    const after = await s.state();
+    assert.equal(after.entities.find((e) => e.key === "node:table")?.regions.lifecycle, "done");
+    assert.ok(commitsOf(after, S).get("table")?.some((c) => c.sha === "9".repeat(40) && c.pr === undefined), "kept for table");
+    // or pasted: a pull request of the repo, written as its link
+    await s.post("/act", { type: "node", id: "table", event: "REOPEN", reason: "one more pass", seen: String((await s.store.readStream(S)).at(-1)?.seq), dialog: "1" });
+    const pasted = await s.post("/act", { type: "node", id: "table", event: "COMPLETE", proofRef: "#7", seen: String((await s.store.readStream(S)).at(-1)?.seq), dialog: "1", fragment: "1" });
+    assert.match(pasted.body, /^<div data-go=/, pasted.body.slice(0, 300));
+    assert.equal(((await s.store.readStream(S)).at(-1)?.data.payload as { evidenceRef?: string }).evidenceRef, "https://github.com/acme/app/pull/7");
+    assert.match((await s.http("GET", "/")).body, /<span class="proof-v"><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer"><code>#7<\/code><\/a> tira: table<\/span>/); // the done task shows it
     // the page's script: the look runs when the dialog opens, and what comes back goes in place with the form's seq
     const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
     assert.match(app, /if \(confirmBox\.querySelector\("\[data-commits-fetch\]"\)\) void lookForCommits\(\);/);

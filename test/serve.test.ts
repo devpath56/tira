@@ -169,7 +169,7 @@ test("every decision shows the ticket beside what the move needs, and a comment:
     assert.doesNotMatch(early.body, /class="verdict/); // allowed: no word from tira
     assert.match(early.body, /<input type="hidden" name="seen" value="11"><input type="hidden" name="dialog" value="1">/);
     assert.match(early.body, /<input type="hidden" name="token" value="t0k3n">/);
-    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits yet\. Push to a branch named loading_state\.<\/p>/);
+    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits yet\. Push to a branch named loading_state, or paste one\.<\/p><\/fieldset><label class="field" data-field="proofRef"><span>Or paste<\/span><input type="text" name="proofRef" value="" placeholder="Commit id or pull request link…"/);
     assert.doesNotMatch(early.body, /data-commits-fetch|data-commits-again/); // no repo linked: nowhere to look
     assert.match(early.body, /<button class="act primary" type="submit">Complete<\/button>/); // never greyed out: sent without a commit, it says so
     assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment<\/span><textarea name="comment" rows="2" maxlength="2000" placeholder="Add a comment…">/);
@@ -524,7 +524,7 @@ test("a drop means its move's verb or nothing: only Start runs without a dialog,
   assert.match(drag, /for \(const col of cols\) col\.dataset\.drop = dropOf\(col\);/);
 });
 
-test("In progress → Done asks for the proof of work: one of the task's commits, picked in the dialog; nothing else is taken, and the done task shows it", async () => {
+test("In progress → Done asks for the proof of work: a commit or pull request of the project's repo, picked or pasted in the dialog; nothing else is taken, and the done task shows it", async () => {
   const s = await serving();
   try {
     assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body, /data-no-commits/);
@@ -538,7 +538,7 @@ test("In progress → Done asks for the proof of work: one of the task's commits
     const post = (ref: string) => s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: ref, dialog: "1", fragment: "1" });
     const wrong = await post("spinner.mp4");
     assert.equal(wrong.status, 422);
-    assert.match(wrong.body, /data-error>The proof of work is one of loading_state(?:'|&#39;)s commits: pick one\. Nothing was written\./);
+    assert.match(wrong.body, /data-error>No GitHub repo linked to this project\. Nothing was written\./); // anything else is checked on GitHub: here, there's no repo to check
     const ok = await post(sha);
     assert.match(ok.body, /^<div data-go="\/\?r=\d+"><\/div>$/);
     const last = (await s.store.readStream(S)).at(-1);
@@ -593,7 +593,7 @@ test("a command posted to /act is read strictly: a value left empty, a stray key
     assert.match(late.body, /data-moved>The log changed since you opened this/);
     assert.equal(await count(), n0); // none of it wrote anything
     // a good one runs exactly as typed, quotes and a note included; the dialog is told where to go
-    assert.match((await run('tira send node loading_state COMPLETE evidenceRef="spinner \\"v2\\".mp4"')).body, /data-error>The proof of work is one of loading_state(?:'|&#39;)s commits: pick one\./); // only a commit
+    assert.match((await run('tira send node loading_state COMPLETE evidenceRef="spinner \\"v2\\".mp4"')).body, /data-error>No GitHub repo linked to this project\./); // only a commit or pull request of its repo
     const ok = await run(`tira send node loading_state COMPLETE evidenceRef="${sha}" note="checked on a slow network"`);
     assert.equal(ok.status, 200);
     const go = /^<div data-go="(\/\?r=\d+)"><\/div>$/.exec(ok.body)?.[1];

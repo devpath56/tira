@@ -19,9 +19,43 @@ export interface Pull {
 
 // taskCommits: one task's commits only, straight from GitHub (taskCommitsVia); a client without it
 // is asked for its pulls instead (src/sync/commits.ts)
+// recent, commit, pull: what a task can be completed with besides its own commits: the repo's
+// latest commits and pull requests, and any one commit or pull request, looked up (repoVia)
 export interface GitHubClient {
   pulls(repo: string): Promise<Pull[]>;
   taskCommits?(repo: string, task: string, linked: readonly number[]): Promise<TaskCommit[]>;
+  recent?(repo: string): Promise<Recent>;
+  commit?(repo: string, sha: string): Promise<RepoCommit | undefined>;
+  pull?(repo: string, number: number): Promise<RepoPull | undefined>;
+}
+
+export interface RepoCommit { sha: string; message: string }
+export interface RepoPull { number: number; title: string; url: string; state: "open" | "closed"; merged: boolean; branch: string }
+export interface Recent { commits: RepoCommit[]; pulls: RepoPull[] }
+const pullOf = (p: RawPull): RepoPull => ({ number: p.number, title: p.title ?? "", url: p.html_url, state: p.state === "open" ? "open" : "closed", merged: !!p.merged_at, branch: p.head?.ref ?? "" });
+// a lookup that found nothing (GitHub's 404) is an answer, not a failure
+const orNone = async <T>(ask: () => Promise<T>): Promise<T | undefined> => {
+  try {
+    return await ask();
+  } catch (err) {
+    if (/\b404\b|Not Found/.test((err as Error).message)) return undefined;
+    throw err;
+  }
+};
+
+// The repo's latest commits (on its default branch) and pull requests; one commit or pull request.
+export function repoVia(get: (path: string) => Promise<unknown>) {
+  return {
+    recent: async (repo: string): Promise<Recent> => {
+      const [commits, pulls] = await Promise.all([get(`repos/${repo}/commits?per_page=8`) as Promise<RawCommit[]>, get(`repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=6`) as Promise<RawPull[]>]);
+      return { commits: commits.map((c) => ({ sha: c.sha ?? "", message: c.commit?.message ?? "" })).filter((c) => /^[0-9a-f]{40}$/.test(c.sha)), pulls: pulls.map(pullOf) };
+    },
+    commit: (repo: string, sha: string) => orNone(async () => {
+      const c = (await get(`repos/${repo}/commits/${encodeURIComponent(sha)}`)) as RawCommit;
+      return /^[0-9a-f]{40}$/.test(c.sha ?? "") ? { sha: c.sha as string, message: c.commit?.message ?? "" } : undefined;
+    }),
+    pull: (repo: string, number: number) => orNone(async () => pullOf((await get(`repos/${repo}/pulls/${number}`)) as RawPull)),
+  };
 }
 
 // A commit for a task: on a pull request that names it (pr), or on a branch named after it.
@@ -68,7 +102,11 @@ export class GhCli implements GitHubClient {
   private readonly run: Run;
   private readonly limit: number;
 
-  readonly taskCommits = (repo: string, task: string, linked: readonly number[]) => taskCommitsVia(async (path) => JSON.parse(await this.run(["api", path])), repo, task, linked);
+  private readonly api = async (path: string) => JSON.parse(await this.run(["api", path])) as unknown;
+  readonly taskCommits = (repo: string, task: string, linked: readonly number[]) => taskCommitsVia(this.api, repo, task, linked);
+  readonly recent = (repo: string) => repoVia(this.api).recent(repo);
+  readonly commit = (repo: string, sha: string) => repoVia(this.api).commit(repo, sha);
+  readonly pull = (repo: string, number: number) => repoVia(this.api).pull(repo, number);
 
   constructor(run: Run = runGh, limit = 50) {
     this.run = run;

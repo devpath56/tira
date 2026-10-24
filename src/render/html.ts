@@ -440,7 +440,7 @@ body:has(.drawer:target){overflow:hidden}
 .comments{margin-top:16px}.comments h3{margin:0 0 8px;font-size:14px}.cm-list{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:8px}.cm{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.cm-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px}.cm-h .ev-seq{margin-left:auto}.cm p{margin:4px 0 0;font-size:14px;line-height:1.5}
 .cm-form{display:grid;gap:8px}.cm-form .act{justify-self:start}.cm-form textarea{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:7px 9px;resize:vertical}
 .commits{border:0;padding:0;margin:0 0 12px;min-width:0}.commits legend{padding:0;margin-bottom:6px}.commit{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 10px;margin:0 0 4px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2);font-weight:400;cursor:pointer}.commit:has(input:checked){border-color:var(--accent);background:var(--accent-bg)}.commit code{font:12px var(--mono);color:var(--accent)}.commit span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}.commit small{color:var(--dim)}
-.commits-status{margin:0 0 8px;font-size:12px;font-weight:400;color:var(--mut)}.commits .how{justify-self:start;margin-top:4px}
+.commits-h{margin:8px 0 4px;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}.commits-status{margin:0 0 8px;font-size:12px;font-weight:400;color:var(--mut)}.commits .how{justify-self:start;margin-top:4px}
 .proof{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--done);border-radius:var(--r);background:var(--done-bg)}
 .proof-k{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--done)}.proof-v{font-family:var(--mono);font-size:13px;color:var(--fg);overflow-wrap:anywhere}
 .drawer-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
@@ -902,7 +902,9 @@ function proofHtml(r: TreeRow, ctx: DialogContext): string {
   if (r.state !== "done" || !ctx.proof) return "";
   const ref = ctx.proof.ref;
   const c = ctx.ext.commits.get(r.id)?.find((x) => x.sha === ref);
-  const shown = c ? `<a href="https://github.com/${esc(c.repo)}/commit/${esc(c.sha)}" ${OUT}><code>${esc(shortSha(c.sha))}</code></a> ${esc(firstLine(c.message))}` : esc(ref);
+  const pr = ctx.ext.links.get(r.id)?.prs.find((x) => x.url === ref);
+  const asPr = pr ? `<a href="${esc(pr.url)}" ${OUT}><code>#${pr.number}</code></a> ${esc(pr.title)}` : esc(ref);
+  const shown = c ? `<a href="https://github.com/${esc(c.repo)}/commit/${esc(c.sha)}" ${OUT}><code>${esc(shortSha(c.sha))}</code></a> ${esc(firstLine(c.message))}` : asPr;
   return `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${shown}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`;
 }
 

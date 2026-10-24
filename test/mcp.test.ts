@@ -52,9 +52,10 @@ async function world() {
 }
 
 // tira mcp's server for the project, with the official MCP client on the other end of a pipe
-async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>, fetchCommits?: (task: string) => Promise<string | undefined>) {
+type Proved = { ref: string } | { why: string };
+async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>, fetchCommits?: (task: string) => Promise<string | undefined>, proveWith?: (task: string, ref: string) => Promise<Proved>) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}), ...(fetchCommits ? { fetchCommits } : {}) }).connect(serverSide);
+  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}), ...(fetchCommits ? { fetchCommits } : {}), ...(proveWith ? { proveWith } : {}) }).connect(serverSide);
   const client = new Client({ name: "tira-tests", version: "1.0.0" });
   await client.connect(clientSide);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -217,6 +218,21 @@ test("complete_task looks on GitHub for the task's commits first when it doesn't
   assert.equal(synced.length, 1);
   // not there after the sync either: said, with what the sync said
   assert.match((await call("complete_task", { id: "site", proof: "1234567" })).text, /^site has no commits yet \(Found 1 commit for site on GitHub just now \(1 new\)\.\): push the work/);
+});
+
+test("complete_task takes any commit or pull request of the project's repo, checked on GitHub; one that isn't there says why", async () => {
+  const w = await world();
+  const asked: string[] = [];
+  const { call } = await connected(w, "claude-code", undefined, undefined, async (task, ref) => {
+    asked.push(`${task} ${ref}`);
+    return ref === "#9" ? { ref: "https://github.com/acme/site/pull/9" } : { why: `No pull request ${ref} in acme/site.` };
+  });
+  await w.send("footer", "START");
+  assert.match((await call("complete_task", { id: "footer", proof: "#9" })).text, /^Complete footer: done/);
+  assert.equal(((await w.store.readStream(S)).at(-1)?.data.payload as { evidenceRef?: string } | undefined)?.evidenceRef, "https://github.com/acme/site/pull/9");
+  await w.send("header", "START");
+  assert.deepEqual(await call("complete_task", { id: "header", proof: "#42" }), { error: true, text: "No pull request #42 in acme/site. Nothing was written." });
+  assert.deepEqual(asked, ["footer #9", "header #42"]);
 });
 
 test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, with the agent's token (the project and the agent come from it); it says so on stderr only, a revoked agent's next call is refused, and it stops when its client does", { skip: needsPg }, async () => {

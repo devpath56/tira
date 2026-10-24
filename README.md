@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 859 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 867 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -656,14 +656,15 @@ claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope us
 
 | Tool | What it does |
 |---|---|
-| `next_task` | The task in progress, the next one in tira's order, and how many are blocked |
+| `next_task` | The task in progress, the next one in tira's order, how many are blocked, what's assigned to the agent and feedback it hasn't answered |
 | `list_tasks` | The board's tasks in order: id, state, where each sits; open ones unless a state is asked for |
-| `get_task` | One task: state, place, subtasks, why it's blocked and on what, its proof, its history |
+| `get_task` | One task: its ticket (title, description, steps, estimate, assignee), state, place, subtasks, why it's blocked, its commits, comments, proof and history |
 | `start_task` | Moves a task to In progress (one at a time: tira says which to finish first) |
-| `complete_task` | Done, with proof of work anyone can re-check (required) |
+| `complete_task` | Done, with a commit or pull request of the project's GitHub repo as proof (checked on GitHub) |
 | `block_task` | Blocked, with a reason, waiting on an open task or on a new ticket made under it |
 | `add_subtask` | A new task under one, found while working on it when that one is under way |
 | `file_idea` | An idea for later: tira drafts it and proposes where it goes; a person approves |
+| `add_comment` | A reply on a task's comments, shown on its ticket |
 
 Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. A remote endpoint for cloud agents waits on the shared server.
 

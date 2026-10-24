@@ -31,7 +31,7 @@ import { JIRA_PROJECT, JIRA_SITE, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from ".
 import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
 import { JiraCloud, type JiraClient } from "../sync/jira.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
-import { lookedSaid, lookForCommits } from "../sync/commits.ts";
+import { lookedSaid, lookForCommits, proveWith } from "../sync/commits.ts";
 import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from "../sync/credentials.ts";
 import { join } from "node:path";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, whatNext, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
@@ -903,7 +903,7 @@ async function mcp(open: () => ClosableStore, registry: Registry, values: Values
     io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
     await new Promise<void>((resolve) => {
       const handle = serveStdio(() => {
-        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected, fetchCommits: (task: string) => lookedSaid(task, () => lookForCommits(store, registry, stream, task, io.github ?? new GhCli())) });
+        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected, fetchCommits: (task: string) => lookedSaid(task, () => lookForCommits(store, registry, stream, task, io.github ?? new GhCli())), proveWith: (task: string, ref: string) => proveWith(store, registry, stream, task, io.github ?? new GhCli(), ref) });
         server.server.onclose = () => resolve();
         return server;
       });
