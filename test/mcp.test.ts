@@ -3,7 +3,9 @@
 import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
+import type { AddressInfo } from "node:net";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +19,9 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { freshPgDb, needsPg } from "./test-stores.ts";
 import { openStore } from "../src/store/open.ts";
+import { connectWords, databaseCheck, serverName, TIRA_SCRIPT } from "../src/mcp/connect.ts";
+import { tiraServer } from "../src/serve/server.ts";
+import { esc } from "../src/render/escape.ts";
 
 const S = "demo";
 
@@ -177,6 +182,98 @@ test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, fo
     }
   } finally {
     await client.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("connecting an agent: the command for Claude Code (all projects or one folder) or Claude Desktop's entry, with this tira's Node and script, quoted for a shell; and how to undo it", () => {
+  assert.equal(serverName("factory-ui"), "tira-factory-ui");
+  assert.equal(serverName("Isha Portfolio"), "tira-isha-portfolio");
+  assert.equal(serverName("***"), "tira-project");
+  const words = (project: string, where: "user" | "local" | "desktop", agent = "claude-code") => connectWords("/n/node", "/t/scripts/tira.ts", { project, agent, where });
+  assert.deepEqual(words("factory-ui", "user"), {
+    add: "claude mcp add --scope user tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp --stream factory-ui --actor claude-code",
+    remove: "claude mcp remove tira-factory-ui -s user",
+  });
+  assert.deepEqual(words("factory-ui", "local", "claude-research"), {
+    add: "claude mcp add --scope local tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp --stream factory-ui --actor claude-research",
+    remove: "claude mcp remove tira-factory-ui -s local",
+  });
+  assert.match(words("Isha's site", "user").add, / --stream 'Isha'\\''s site' --actor claude-code$/);
+  const desktop = words("factory-ui", "desktop");
+  assert.deepEqual(JSON.parse(desktop.add), { mcpServers: { "tira-factory-ui": { command: "/n/node", args: ["--disable-warning=ExperimentalWarning", "/t/scripts/tira.ts", "mcp", "--stream", "factory-ui", "--actor", "claude-code"] } } });
+  assert.match(desktop.remove, /^Delete "tira-factory-ui" from mcpServers in Claude Desktop's settings file/);
+});
+
+test("connecting an agent: whether it would reach this tira's database, from tira's own .env, its values compared and never shown", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-envfile-"));
+  const file = join(dir, ".env");
+  try {
+    assert.equal(databaseCheck(file, {}), "missing"); // no .env
+    writeFileSync(file, "TIRA_HOME=/x\n");
+    assert.equal(databaseCheck(file, {}), "missing"); // no database in it
+    writeFileSync(file, "TIRA_DATABASE_URL=postgres://u@h/db\nTIRA_SCHEMA=board\n");
+    assert.equal(databaseCheck(file, {}), "ready"); // started with --db: nothing to compare
+    assert.equal(databaseCheck(file, { TIRA_DATABASE_URL: "postgres://u@h/db", TIRA_SCHEMA: "board" }), "ready");
+    assert.equal(databaseCheck(file, { TIRA_DATABASE_URL: "postgres://u@h/db" }), "different"); // another schema
+    assert.equal(databaseCheck(file, { TIRA_DATABASE_URL: "postgres://u@h/other", TIRA_SCHEMA: "board" }), "different");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Account settings → Agents, right after Account: pick the project, the agent's name and where, copy the command; a person's name is caught there; it says whether agents would reach this tira's database; nothing runs from the page", async () => {
+  const w = await world();
+  await new WritePath(w.store, w.registry).submit({ stream: "other", kind: "create", entity: { type: "node", id: "x" }, actor: "isha", payload: {} });
+  const dir = mkdtempSync(join(tmpdir(), "tira-agents-"));
+  const envFile = join(dir, ".env");
+  const server = tiraServer({ store: w.store, registry: w.registry, stream: S, actor: "isha", token: "k", links: { env: { TIRA_HOME: dir }, envFile } });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const get = (path: string) => new Promise<string>((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, method: "GET", path, headers: { host: `localhost:${port}` } }, (res) => {
+      let b = "";
+      res.on("data", (c) => (b += c));
+      res.on("end", () => resolve(b));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  const section = (page: string) => /<section class="grp" id="agents"[^]*?<\/section>/.exec(page)?.[0] ?? "";
+  const command = (project: string, where: string, agent = "claude-code") => esc(connectWords(process.execPath, TIRA_SCRIPT, { project, agent, where: where as "user" }).add);
+  try {
+    const page = await get("/settings");
+    assert.ok(page.indexOf('id="account"') < page.indexOf('id="agents"') && page.indexOf('id="agents"') < page.indexOf('id="setup"'), "right after Account");
+    const agents = section(page);
+    assert.match(agents, /<p class="grp-desc">Connect an AI agent \(Claude Code, Claude Desktop\) to a project through tira(?:'|&#39;)s MCP server\./);
+    assert.match(agents, /<form method="get" action="\/settings#agents" class="grp-list" data-agents-form>/);
+    assert.match(agents, /<option value="demo" selected>demo<\/option><option value="other">other<\/option>/); // the project you're in, first picked
+    assert.match(agents, /<input type="text" name="agent" value="claude-code"/);
+    assert.ok(agents.includes(`<pre class="agent-code" id="agent-add">${command("demo", "user")}</pre>`), "Claude Code, all projects, by default");
+    assert.match(agents, /<code class="agent-undo">claude mcp remove tira-demo -s user<\/code>/);
+    assert.match(agents, /<button type="button" class="env-btn" data-copy-target="agent-add" title="Copy" aria-label="Copy it">/);
+    assert.match(agents, /Nothing runs from this page: you run the command, and remove it the same way\./);
+    // the choices, kept on the page
+    const local = section(await get("/settings?project=other&agent=claude-research&where=local"));
+    assert.ok(local.includes(`id="agent-add">${command("other", "local", "claude-research")}</pre>`));
+    assert.match(local, /<option value="other" selected>other<\/option>/);
+    assert.match(local, /<input type="text" name="agent" value="claude-research"/);
+    assert.match(local, /<option value="local" selected>Claude Code, one folder \(run it there\)<\/option>/);
+    assert.ok(section(await get("/settings?where=desktop")).includes(`id="agent-add">${command("demo", "desktop")}</pre>`));
+    assert.ok(section(await get("/settings?project=nope")).includes(`id="agent-add">${command("demo", "user")}</pre>`), "an unknown project: the one you're in");
+    // a person's name: why not, and no command
+    const person = section(await get("/settings?agent=isha"));
+    assert.match(person, /<div class="grp-list" data-agent-problem><div class="grp-row"><span class="grp-k no">&#34;isha&#34; reads as a person(?:'|&#39;)s name/);
+    assert.doesNotMatch(person, /data-agent-command/);
+    // the database: none in tira's .env yet, then this tira's
+    assert.match(agents, /<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s .env names no database, so an agent couldn(?:'|&#39;)t reach your board\. Add TIRA_DATABASE_URL/);
+    assert.ok(agents.includes(`<code>${esc(envFile)}</code>`), "names the file");
+    writeFileSync(envFile, "TIRA_DATABASE_URL=postgres://u@h/db\n");
+    assert.match(section(await get("/settings")), /<p class="agent-db" data-agent-database="ready">Agents will work on this tira(?:'|&#39;)s database/);
+    // Copy, on the page's own script
+    assert.match(readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8"), /for \(const b of document\.querySelectorAll\("button\[data-copy-target\]"\)\) \{\n  const target = document\.getElementById\(b\.dataset\.copyTarget \?\? ""\);/);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
     rmSync(dir, { recursive: true, force: true });
   }
 });

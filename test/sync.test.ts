@@ -1082,7 +1082,7 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
     // yours: you and your accounts in one list, then Setup and People, Appearance last, on the page
     // in that order; each page a readable column (Apple's settings), never stretched across the window
-    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]]);
+    assert.deepEqual(nav(page), [["account", "Account"], ["agents", "Agents"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]]);
     const at = (id: string) => page.indexOf(`data-int="${id}"`);
     assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
     assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
@@ -1111,7 +1111,7 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.match(help, /<div class="hc-log" role="log" aria-live="polite" aria-label="Conversation" data-help-log><div class="msg from-tira"><span class="av tira" aria-hidden="true">t<\/span><div class="msg-b"><p class="bubble">Hi isha! I'm tira's help\./);
     assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 7);
     // agents: tira mcp, under each agent's own name
-    assert.match(help, /How do my agents use tira\?<\/summary><p class="bubble">Through tira(?:'|&#39;)s MCP server, under each agent(?:'|&#39;)s own name\. In a terminal: <code>claude mcp add tira -- node \/path\/to\/tira\/scripts\/tira\.ts mcp --stream PROJECT --actor claude-code<\/code>/);
+    assert.match(help, /How do my agents use tira\?<\/summary><p class="bubble">Through tira(?:'|&#39;)s MCP server, under each agent(?:'|&#39;)s own name\. In Account settings → Agents, pick the project and the agent(?:'|&#39;)s name, copy the command and run it in a terminal \(or add the entry to Claude Desktop\): nothing connects until you do\./);
     assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>, callback <code>http:\/\/localhost:\d+\/signin\/github\/callback<\/code>, exactly/);
     assert.match(help, /<div class="hc-bottom" data-help-bottom hidden><form class="hc-compose" data-help-ask><input name="q" aria-label="Ask a question" placeholder="Ask a question…"[^>]*><button class="hc-send" type="submit" aria-label="Send" disabled>/);
     assert.match(page, /<script type="module" src="\/help\.mjs"><\/script>/);

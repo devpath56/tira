@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 766 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 776 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -646,10 +646,10 @@ Calls made here, for the PM:
 
 ## Agents through MCP: `tira mcp`
 
-Claude Code, Claude Desktop or any MCP client can work a project's tasks directly. `tira mcp` is an MCP server on stdio, started by the client on the same computer, for one project (`--stream`) and under one agent's own name (`--actor`). It reads the database as every tira command does (tira's own `.env`, or `TIRA_DATABASE_URL`), so nothing secret goes in the client's settings:
+Claude Code, Claude Desktop or any MCP client can work a project's tasks directly. `tira mcp` is an MCP server on stdio, started by the client on the same computer, for one project (`--stream`) and under one agent's own name (`--actor`). It reads the database as every tira command does (tira's own `.env`, or `TIRA_DATABASE_URL`), so nothing secret goes in the client's settings. Nothing connects by default: in **Account settings → Agents**, pick the project, the agent's name and where it runs (Claude Code for all your projects, one folder, or Claude Desktop), and copy the command it shows, which names this tira's own Node and script; the section also says whether agents would reach this tira's database. For example:
 
 ```bash
-claude mcp add --scope user tira -- node /path/to/tira/scripts/tira.ts mcp --stream factory-ui --actor claude-code
+claude mcp add --scope user tira-factory-ui -- /path/to/node --disable-warning=ExperimentalWarning /path/to/tira/scripts/tira.ts mcp --stream factory-ui --actor claude-code
 ```
 
 | Tool | What it does |

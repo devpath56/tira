@@ -32,6 +32,14 @@ Account settings (no project on them):
   you out) and your Jira: **Connect Jira** goes to Atlassian and back (open tira at `localhost`:
   that's where Atlassian sends you), then a site picker if you have more than one; **Disconnect
   Jira** drops your Atlassian sign-in. Your links stay until you unlink them (Isha, 2026-10-22).
+- **Agents**, right after your account: connect an AI agent (Claude Code, Claude Desktop) to a
+  project through tira's MCP server (`tira mcp`). Pick the project (the one you came from first),
+  the agent's name (`claude-code` first; a person's name is caught here, with why) and where it
+  runs (Claude Code for all your projects, Claude Code in one folder, Claude Desktop); the section
+  shows the command to copy (or Claude Desktop's entry), with this tira's own Node and script, and
+  how to remove it. Nothing runs from the page: you run it. A line says whether agents would reach
+  this tira's database (tira's own `.env`, which `tira mcp` reads), naming the file when it
+  doesn't; values are compared, never shown (Isha, 2026-10-24).
 - **Appearance**: System, Light or Dark, each a card with a small picture (`theme-switch.md`).
 - **People**: who may sign in. The admin (the first person who signed in) sees the list, adds
   someone by GitHub username, removes someone (signed out at once and can't sign in; their GitHub
@@ -63,6 +71,7 @@ only. The store keeps a hash of each session (it lasts 30 days), so it can't sig
 ## Devtool hook
 
 - `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Account settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
+- `[data-agents-form]` on the Agents choices; `[data-agent-command]` on the command to copy (where it runs as its value), with `[data-copy-target]` on its Copy; `[data-agent-database]` on the database line (`ready`, `missing` or `different`).
 - `[data-people]` on the admin's list; `[data-add-person]` on Add; `[data-admin-contact]` on how people reach the admin.
 - `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
 - `[data-integrations-nav]` on the profile menu's Account settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).

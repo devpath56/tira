@@ -22,7 +22,10 @@
 // Every token, key and secret lives only in the private store (src/sync/credentials.ts).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import type { FoldResult } from "../fold/fold.ts";
+import { fold, type FoldResult } from "../fold/fold.ts";
+import { compareCodeUnits } from "../fold/view.ts";
+import { agentNameProblem } from "../mcp/names.ts";
+import { connectWords, databaseCheck, TIRA_ENV_FILE, TIRA_SCRIPT, WHERE, type DatabaseCheck, type Where } from "../mcp/connect.ts";
 import { workspaceOf, type WorkspaceLink } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { reportLines, sync } from "../sync/sync.ts";
@@ -57,6 +60,7 @@ export interface Outside {
   githubAuth?: GitHubAuthApi;
   atlassian?: AtlassianAuthApi;
   env?: Env;
+  envFile?: string; // tira's own .env, which tira mcp reads (Account settings → Agents checks it); default: this tira's
 }
 
 export interface IntegrationsContext {
@@ -382,6 +386,50 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const appearanceGroup = () => `<section class="grp" id="appearance" data-int="appearance"><h2 class="grp-h">Appearance</h2><p class="grp-desc">${esc(DESC.appearance)}</p>`
     + `<div class="appear" data-theme-switch>${LOOKS.map(lookOption).join("")}</div></section>`;
 
+  // agents: connect one to a project through tira's MCP server. The page shows the command to copy
+  // (or Claude Desktop's entry) and how to undo it, and whether the agent would reach this tira's
+  // database; it never runs anything or writes a file.
+  const projectsNow = async (): Promise<[string, string][]> => {
+    const all = await c.store.readAll();
+    const r = fold(all, c.registry);
+    const named = [...new Set(all.map((e) => e.stream))].filter((s) => !workspaceOf(r, s)?.deleted).map((s): [string, string] => [s, workspaceOf(r, s)?.title ?? s]);
+    return named.sort((a, b) => compareCodeUnits(a[1], b[1]));
+  };
+  const WHERE_SAID: Record<Where, string> = { user: "Claude Code, all your projects", local: "Claude Code, one folder (run it there)", desktop: "Claude Desktop" };
+  const option = (value: string, label: string, chosen: string) => `<option value="${esc(value)}"${value === chosen ? " selected" : ""}>${esc(label)}</option>`;
+  const DB_SAID: Record<DatabaseCheck, (file: string) => string> = {
+    ready: () => "Agents will work on this tira's database: tira's .env names it.",
+    missing: (file) => `tira's .env names no database, so an agent couldn't reach your board. Add TIRA_DATABASE_URL (and TIRA_SCHEMA, if this tira uses one) to <code>${esc(file)}</code>, the same as this tira's.`,
+    different: (file) => `tira's .env names a different database or schema than this tira uses, so an agent would work somewhere else. Make <code>${esc(file)}</code> match this tira's.`,
+  };
+  const commandBlock = (words: { add: string; remove: string }, where: Where) => {
+    const label = where === "desktop" ? "Add to Claude Desktop (Settings → Developer → Edit Config)" : "Run in a terminal";
+    return `<div class="grp-list agent-cmd" data-agent-command="${where}"><div class="grp-row"><span class="grp-k">${esc(label)}</span><button type="button" class="env-btn" data-copy-target="agent-add" title="Copy" aria-label="Copy it">${COPY}</button></div>`
+      + `<pre class="agent-code" id="agent-add">${esc(words.add)}</pre>`
+      + `<div class="grp-row"><span class="grp-k">To disconnect</span><code class="agent-undo">${esc(words.remove)}</code></div></div>`;
+  };
+  const agentsGroup = async (url: URL) => {
+    const q = url.searchParams;
+    const projects = await projectsNow();
+    const asked = q.get("project") ?? "";
+    const project = projects.some(([p]) => p === asked) ? asked : c.stream;
+    const agent = (q.get("agent") ?? "claude-code").trim();
+    const where = WHERE.find((w) => w === q.get("where")) ?? "user";
+    const nameProblem = agentNameProblem(agent);
+    const result = nameProblem === undefined ? commandBlock(connectWords(process.execPath, TIRA_SCRIPT, { project, agent, where }), where) : `<div class="grp-list" data-agent-problem>${problem(nameProblem)}</div>`;
+    const envFile = c.outside?.envFile ?? TIRA_ENV_FILE;
+    const db = databaseCheck(envFile, env);
+    const keep = c.stream === c.home ? "" : `<input type="hidden" name="w" value="${esc(c.stream)}">`;
+    return `<section class="grp" id="agents" data-int="agents"><h2 class="grp-h">Agents</h2><p class="grp-desc">${esc(DESC.agents)}</p>`
+      + `<form method="get" action="/settings#agents" class="grp-list" data-agents-form>${keep}`
+      + `<label class="grp-row"><span class="grp-k">Project</span><select name="project" aria-label="Project">${projects.map(([p, title]) => option(p, title, project)).join("")}</select></label>`
+      + `<label class="grp-row"><span class="grp-k">Agent's name</span><input type="text" name="agent" value="${esc(agent)}" maxlength="64" autocomplete="off" spellcheck="false" placeholder="claude-code" aria-label="Agent's name"></label>`
+      + `<label class="grp-row"><span class="grp-k">Where</span><select name="where" aria-label="Where the agent runs">${WHERE.map((w) => option(w, WHERE_SAID[w], where)).join("")}</select></label>`
+      + `<div class="grp-row"><span class="grp-k"></span><button class="act" type="submit">Show the command</button></div></form>`
+      + result + `<p class="agent-db${db === "ready" ? "" : " no"}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`
+      + `<div class="grp-foot">Nothing runs from this page: you run the command, and remove it the same way. Claude asks before each tool is first used.</div></section>`;
+  };
+
   // people: who may sign in (the admin changes it; everyone else sees who to ask)
   const memberRow = (m: string, t: string) => `<form method="post" action="/integrations/people" class="grp-row">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(m)}"><span class="grp-k">${esc(m)}</span><button class="how" type="submit">Remove</button></form>`;
   const peopleGroups = (login: string | undefined, ghName: string | undefined, t: string) => {
@@ -445,8 +493,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const account = group("account", "Account", accounts, me.login
       ? "Your changes are recorded under your GitHub login; the display name is only how you're shown. GitHub and Jira stay linked until you disconnect them here."
       : "GitHub sign-in isn't set up. Add it under Setup.");
-    const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + setupGroup(me.login, keys, t) + peopleGroups(me.login, ghAuth?.name, t) + appearanceGroup();
-    c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections: [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]] }, body, helpPanel(portOf(host), shown), scripts));
+    const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + account + await agentsGroup(url) + setupGroup(me.login, keys, t) + peopleGroups(me.login, ghAuth?.name, t) + appearanceGroup();
+    c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections: [["account", "Account"], ["agents", "Agents"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]] }, body, helpPanel(portOf(host), shown), scripts));
   };
 
   // Project settings (GET /integrations): this project's name, its GitHub repo, its Jira project,
@@ -814,6 +862,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 const DESC = {
   general: "What everyone sees this project called, everywhere in tira.",
   account: "Who you are here, and the GitHub and Jira accounts tira uses for you, in every project.",
+  agents: "Connect an AI agent (Claude Code, Claude Desktop) to a project through tira's MCP server. It sees what's next, starts, completes with proof, blocks, adds subtasks and files ideas, under its own name; cancelling, reopening and unblocking stay with people.",
   appearance: "How tira looks in this browser: it follows your computer unless you pick one.",
   people: "Who can sign in to this tira. The first person to sign in is its admin.",
   github: "This project's repository. A pull request that names a task links to it; a merged one is its proof.",
@@ -852,7 +901,7 @@ function helpPanel(port: string, name?: string): string {
     ["Where are my keys and tokens kept?", "In tira's private store, sealed, and never in the project's log. tira's own app keys show as dots in Setup; only the admin can show or copy them, one at a time.", "keys tokens secret stored kept saved private safe credentials password"],
     ["What does Sync do?", "It links pull requests that name a task, makes a Jira issue for each task, and brings moves made in Jira back as commands, which tira's rules may refuse. A merged pull request counts as proof of work.", "sync syncing pull request pr issue mirror update proof merge"],
     ["Who can sign in?", "The first person to sign in becomes the admin. After that, only the people the admin adds by GitHub username.", "sign signin login admin people access invite add user member team"],
-    ["How do my agents use tira?", "Through tira's MCP server, under each agent's own name. In a terminal: <code>claude mcp add tira -- node /path/to/tira/scripts/tira.ts mcp --stream PROJECT --actor claude-code</code>. Agents can see what's next, start, complete with proof, block, add subtasks and file ideas; tira's rules apply as they do to you, and cancelling or unblocking stays with people.", "agent agents claude mcp ai bot automation code assistant tools"],
+    ["How do my agents use tira?", "Through tira's MCP server, under each agent's own name. In Account settings → Agents, pick the project and the agent's name, copy the command and run it in a terminal (or add the entry to Claude Desktop): nothing connects until you do. Agents can see what's next, start, complete with proof, block, add subtasks and file ideas; tira's rules apply as they do to you, and cancelling or unblocking stays with people.", "agent agents claude mcp ai bot automation code assistant tools"],
     ["Why does Jira need localhost?", `Atlassian sends you back to tira's callback on localhost. Open tira at <code>http://localhost:${esc(port)}</code> to connect Jira.`, "localhost callback redirect connect address url port"],
   ];
   const hi = name ? `Hi ${esc(name)}! I'm tira's help.` : "Hi! I'm tira's help.";
