@@ -245,7 +245,8 @@ test("connecting an agent: Claude Code, Cursor and VS Code reach tira serve's ad
   const at = { url: "http://127.0.0.1:4772/mcp", launch: { node: "/n/node", script: "/t/scripts/tira.ts" } };
   const headers = { Authorization: "Bearer tira_ab12cd34_x" };
   const code = appSetup("claude-code", "factory-ui", at, "tira_ab12cd34_x");
-  assert.equal(code.code, "claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer tira_ab12cd34_x'");
+  assert.equal(code.code, "claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer tira_ab12cd34_x'"); // an earlier entry for the project replaced
+  assert.deepEqual(code.steps, ["Run this in a terminal. It replaces any earlier tira entry for this project in Claude Code.", "Open a new Claude Code session (one open before won't have tira) and ask it: what's next in tira?"]);
   assert.equal(code.remove, "claude mcp remove tira-factory-ui -s user");
   assert.equal(code.install, undefined);
   assert.match(appSetup("claude-code", "factory-ui", at, TOKEN_HERE).code, / --header 'Authorization: Bearer <your token>'$/);
@@ -409,6 +410,7 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.match(more, /<li><code>complete_task<\/code> done, with proof of work<\/li>/);
     assert.match(more, /Cancelling, reopening and unblocking stay with people\./);
     assert.match(more, /<p class="agent-db no" data-agent-database="missing">/);
+    assert.match(more, /<h4>Claude(?:'|&#39;)s Connectors<\/h4><p data-agent-connectors>Claude(?:'|&#39;)s own Connectors settings \(Add custom connector\) can(?:'|&#39;)t add tira yet: [^<]*public https address[^<]*That comes once tira is hosted\./);
     // step 2: Cursor chosen; its agent's name suggested
     agents = await settings("/integrations?app=cursor&from=agents");
     assert.match(agents, /<div class="agent-step done" data-agent-step="1"><h3><span class="agent-n">✓<\/span>Choose your app<\/h3><p class="agent-done"><b>Cursor<\/b> <a href="\/integrations\?from=agents#agents">Change<\/a>/);
@@ -455,6 +457,8 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.equal(setupIn(code), appSetup("claude-code", S, at, codeToken).code);
     assert.match(code, /<h3><span class="agent-n">3<\/span>Finish in Claude Code<\/h3><ol class="agent-steps"><li>Run this in a terminal/);
     assert.doesNotMatch(code, /data-agent-install|agent-hand/);
+    const codeAgent = (await tokens.list(S)).find((x) => x.agent === "claude-code");
+    assert.match((await http("POST", "/integrations/agents/test", `token=k&id=${codeAgent?.id ?? ""}&fragment=1`)).body, /Not yet: tira hasn(?:'|&#39;)t heard from claude-code\. Run the command above, then open a new Claude Code session and ask it &#34;what(?:'|&#39;)s next in tira\?&#34;, then test again\./);
     const desktop = await settings((await http("POST", "/integrations/agents/connect", "token=k&app=claude-desktop&name=claude-desktop")).location ?? "");
     assert.equal(JSON.parse(setupIn(desktop)).mcpServers["tira-demo"].args[2], "mcp");
     assert.match(desktop, /data-agent-step="3">(?:(?!data-agent-test)[^])*<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s \.env names no database, so Claude Desktop(?:'|&#39;)s agent couldn(?:'|&#39;)t reach this board/); // in step 3, before Test connection

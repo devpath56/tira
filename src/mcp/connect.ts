@@ -53,8 +53,9 @@ export function appSetup(app: App, project: string, at: Where, token: string): A
   const headers = { Authorization: bearer };
   if (app === "claude-code") {
     return {
-      steps: ["Run this in a terminal (it needs Claude Code's claude command).", "Start a new Claude Code session: tira's tools are in it."],
-      code: `claude mcp add --scope user --transport http ${name} ${sh(at.url)} --header ${sh("Authorization: " + bearer)}`,
+      steps: ["Run this in a terminal. It replaces any earlier tira entry for this project in Claude Code.", "Open a new Claude Code session (one open before won't have tira) and ask it: what's next in tira?"],
+      // the remove first: the server's name is the project's, so an earlier entry would block the add
+      code: `claude mcp remove ${name} -s user 2>/dev/null; claude mcp add --scope user --transport http ${name} ${sh(at.url)} --header ${sh("Authorization: " + bearer)}`,
       remove: `claude mcp remove ${name} -s user`,
     };
   }

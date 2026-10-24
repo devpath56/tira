@@ -893,6 +893,8 @@ const MUTANTS: Mutant[] = [
   { name: "mcp http: tira serve doesn't answer /mcp", file: "src/serve/server.ts", find: "    if (url.pathname === MCP_PATH) return mcp(req, res, url);", replace: "    if (false) return mcp(req, res, url);" },
   { name: "agents: the address isn't 127.0.0.1", file: "src/mcp/connect.ts", find: "return `http://127.0.0.1${port", replace: "return `http://localhost${port" },
   { name: "agents: Claude Code's command carries no token", file: "src/mcp/connect.ts", find: " --header ${sh(\"Authorization: \" + bearer)}`,", replace: "`," },
+  { name: "agents: Claude Code's command doesn't replace an older entry", file: "src/mcp/connect.ts", find: "code: `claude mcp remove ${name} -s user 2>/dev/null; claude mcp add", replace: "code: `claude mcp add" },
+  { name: "agents: no word on Claude's Connectors", file: "src/serve/integrations.ts", find: "    + morePart(\"Claude's Connectors\",", replace: "    + ((..._: string[]) => \"\")(\"Claude's Connectors\"," },
   { name: "agents: Cursor's config carries no token", file: "src/mcp/connect.ts", find: "    const server = { url: at.url, headers };", replace: "    const server = { url: at.url };" },
   { name: "agents: VS Code's config starts a program", file: "src/mcp/connect.ts", find: "const entry = { type: \"http\", url: at.url, headers };", replace: "const entry = { type: \"stdio\", url: at.url, headers };" },
   { name: "agents: a new token isn't shown", file: "src/serve/integrations.ts", find: "    return made && made.until >= Date.now() && made.project === c.stream && made.by === meAs(me) ? made : undefined;", replace: "    return undefined;" },

@@ -556,7 +556,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   // Test connection: has the app called tira since the agent was made? Its first call sets the
   // agent's last used (a call from this page would prove only that the token is new).
   const NOT_YET: Record<App, string> = {
-    "claude-code": "Run the command above, then start a new Claude Code session",
+    "claude-code": "Run the command above, then open a new Claude Code session and ask it \"what's next in tira?\"",
     cursor: "Add it to Cursor above and turn tira on in Cursor's settings, under MCP",
     vscode: "Add it to VS Code above and start tira from its MCP servers list",
     "claude-desktop": "Add the entry above to Claude Desktop's config and restart it",
@@ -646,6 +646,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     + morePart("Each app by hand", `<p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${APPS.map((app) => manualApp(app, at)).join("")}`)
     + morePart("What agents can do", `<ul class="agent-tools">${TOOLS_SAID.map(toolItem).join("")}</ul><p>Cancelling, reopening and unblocking stay with people.</p>`)
     + morePart("Claude Desktop's database", `<p class="${db === "ready" ? "agent-db" : "agent-db no"}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`)
+    + morePart("Claude's Connectors", `<p data-agent-connectors>Claude's own Connectors settings (Add custom connector) can't add tira yet: Anthropic's servers reach a connector over the internet, at a public https address, and tira answers on this computer only. That comes once tira is hosted. Until then, connect Claude Code by its command and Claude Desktop by its config entry, above.</p>`)
     + `</details>`;
   const agentsGroup = async (url: URL, me: { login?: string; actor?: string }, t: string, host: string) => {
     const head = `<section class="grp" id="agents" data-int="agents"><h2 class="grp-h">Connect agents</h2><p class="grp-desc">${esc(DESC.agents)}</p>`;
