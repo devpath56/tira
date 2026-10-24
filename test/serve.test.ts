@@ -206,9 +206,10 @@ test("a ticket is the work: Edit ticket saves its title, description, steps, est
       return { at, page: (await s.http("GET", at)).body };
     };
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
-    assert.match(ls, /<div class="ticket" data-ticket><p class="tk-none">No description, steps, estimate or assignee yet\.<\/p><details class="tk-edit" data-ticket-edit><summary>Edit ticket<\/summary><form method="post" action="\/tickets" class="tk-form">/);
+    assert.match(ls, /<div class="ticket" data-ticket><p class="tk-none">No description or steps yet\.<\/p><details class="tk-edit" data-ticket-edit><summary>Edit ticket<\/summary><form method="post" action="\/tickets" class="tk-form">/);
+    assert.match(ls, /<div class="prop" data-ticket-assignee><span class="lk">Assignee<\/span><div><span class="dim">Nobody yet<\/span><\/div><\/div><div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div><span class="dim">None yet<\/span><\/div><\/div>/);
     assert.match(ls, /<select name="assignee" aria-label="Assignee"><option value="">Nobody yet<\/option><optgroup label="Team"><option value="isha">isha<\/option><\/optgroup><\/select>/);
-    assert.match(ls, /<section class="comments" data-comments aria-label="Comments"><h3>Comments <span class="ev-seq">0<\/span><\/h3><p class="tk-none">No comments yet\.<\/p><form method="post" action="\/comments" class="cm-form" data-comment-form>/);
+    assert.match(ls, /<div class="comments" data-comments><h3>Comments <span class="ev-seq">0<\/span><\/h3><p class="tk-none">No comments yet\.<\/p><form method="post" action="\/comments" class="cm-form" data-comment-form>/);
     const back = /name="back" value="(#t\d+)"/.exec(ls)?.[1] ?? "";
     // saved: back to its dialog, which shows the work under its title
     const saved = await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\n\n  Test on 3G  ", estimate: "2h", assignee: "isha" }));
@@ -216,8 +217,15 @@ test("a ticket is the work: Edit ticket saves its title, description, steps, est
     assert.match(saved.page, /data-flash>Saved loading_state(?:'|&#39;)s ticket\.<\/div>/);
     ls = dialog(saved.page, "loading_state");
     assert.match(ls, /<h2>Loading state<\/h2><p class="tk-id">loading_state<\/p>/);
-    assert.match(ls, /<div class="tk-desc" data-ticket-description><p>A spinner while metrics load\.<\/p><p>No layout shift\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol aria-label="Steps" data-ticket-steps><li>Add the spinner<\/li><li>Test on 3G<\/li><\/ol><\/div><div class="tk-facts"><span data-ticket-estimate><span class="lk">Estimate<\/span>2h<\/span><span data-ticket-assignee><span class="lk">Assignee<\/span>isha<\/span><\/div>/);
+    assert.match(ls, /<div class="tk-desc" data-ticket-description><p>A spinner while metrics load\.<\/p><p>No layout shift\.<\/p><\/div><div class="tk-steps"><h3>Steps<\/h3><ol aria-label="Steps" data-ticket-steps><li>Add the spinner<\/li><li>Test on 3G<\/li><\/ol><\/div>/);
+    assert.match(ls, /<div class="prop" data-ticket-assignee><span class="lk">Assignee<\/span><div>isha<\/div><\/div><div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div>2h<\/div><\/div>/); // properties, beside
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
+    // its parent's row for it: its title (and id), estimate and who; the parent adds the estimates up
+    const parent = dialog(saved.page, "improve_visual");
+    assert.match(parent, /data-subtask="node:loading_state"><span class="sub-ico s-in_progress" aria-hidden="true"><\/span><span class="sub-name">Loading state<small>loading_state<\/small><\/span><span class="sub-est">2h<\/span><span class="who" title="isha" aria-label="Assigned to isha">IS<\/span><span class="state s-in_progress">/);
+    assert.match(parent, /<div class="prop" data-ticket-estimate><span class="lk">Estimate<\/span><div><span class="dim">None yet<\/span> <span class="dim">· subtasks 2h<\/span><\/div><\/div>/);
+    await post("/tickets", { task: "font", back, estimate: "1.5d" }); // a day is 8 hours
+    assert.match(dialog((await s.http("GET", "/")).body, "improve_visual"), /<span class="dim">· subtasks 1d 6h<\/span>/);
     // what a ticket can't say, and nothing written
     const n0 = (await s.store.readStream(S)).length;
     for (const [fields, why] of [

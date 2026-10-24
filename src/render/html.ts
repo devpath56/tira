@@ -417,6 +417,10 @@ body:has(.drawer:target){overflow:hidden}
 .drawer .close{position:absolute;right:14px;top:12px;width:28px;height:28px;display:grid;place-items:center;border-radius:999px;border:1px solid transparent;color:var(--mut);font-size:20px}
 .drawer .close:hover{background:var(--hover);border-color:var(--line);color:var(--fg)}
 .drawer h2{margin:4px 0 2px;font-size:20px;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere;padding-right:32px}
+.drawer .modal-box:has(.tk-view){width:min(1000px,100%)}.tk-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:0 40px 12px 0;margin:0 0 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim)}.tk-crumbs a{color:var(--accent)}.tk-crumbs a:hover{text-decoration:underline}.tk-crumbs [aria-current]{font-family:var(--mono);color:var(--fg)}.tk-sibs{margin-left:auto;display:flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}.tk-sibs a,.tk-sibs .off{display:grid;place-items:center;width:24px;height:24px;border-radius:var(--r);border:1px solid var(--line)}.tk-sibs a:hover{background:var(--hover)}.tk-sibs .off{opacity:.4}
+.tk-cols{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:24px;align-items:start;min-width:0}.tk-view,.tk-main{min-width:0}.tk-side{display:grid;gap:14px;padding:14px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--panel-2);position:sticky;top:0}.prop{display:grid;gap:4px;font-size:13px}.prop .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}.prop .badges{margin:0}.prop .drawer-acts{margin-top:8px}.prop .meter{margin:6px 0 2px}.tk-side .dim,.prop .dim{color:var(--mut)}.tk-side .links,.tk-side .task-links,.tk-side .proof{margin:0}.tk-side .locate{justify-self:start}
+.tk-of{margin:0 0 6px;font-size:12px;color:var(--mut)}.tk-of a{color:var(--accent);font-weight:600}.tk-main h3{margin:0;font-size:13px;font-weight:650}.tk-steps h3{margin-bottom:4px}.subtasks{margin-top:18px}.sub-head{display:flex;align-items:baseline;gap:10px}.sub-head span{font-size:12px;color:var(--mut)}.subtasks .meter{margin-top:8px}.sub-add{margin-top:8px}
+@media (max-width:760px){.tk-cols{grid-template-columns:minmax(0,1fr)}.tk-side{position:static;order:-1}}
 .path{color:var(--dim);font-size:12px;overflow-wrap:anywhere}
 .badges{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px}
 .locate{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font:550 13px var(--sans);color:var(--accent-text);background:none;border:1px solid transparent;border-radius:var(--r);padding:2px 8px;cursor:pointer}.locate:hover{background:var(--accent-bg)}.locate svg{width:14px;height:14px}
@@ -425,9 +429,10 @@ body:has(.drawer:target){overflow:hidden}
 .s-done{color:var(--loz-done-fg);background:var(--loz-done)}
 .mark{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--gone-bg);color:var(--mut)}
 .mark.cursor,.mark.tira{color:var(--accent-text);background:var(--accent-bg)}.mark.active{color:var(--prog);background:var(--prog-bg)}.mark.wait{color:var(--warn);background:var(--warn-bg)}
-.kids-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px}
-.kids-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}
-.kids-list a{font-weight:600;color:var(--accent);overflow-wrap:anywhere}.kids-list a:hover{text-decoration:underline}
+.kids-list{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}.kids-list li+li{border-top:1px solid var(--line)}
+.sub-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto 22px auto;align-items:center;gap:10px;padding:8px 12px;color:var(--fg);background:var(--panel-2)}.sub-row:hover,.sub-row:focus-visible{background:var(--hover)}.sub-name{overflow-wrap:anywhere;font-weight:600;font-size:14px}.sub-name small{margin-left:8px;font:12px var(--mono);font-weight:400;color:var(--dim)}.sub-est{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.sub-ico{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line-2)}.sub-ico.s-unstarted{border-style:dashed}.sub-ico.s-in_progress{border-color:var(--accent);background:conic-gradient(var(--accent) 0 50%,transparent 50% 100%)}.sub-ico.s-done{border-color:var(--done);background:var(--done)}.sub-ico.s-blocked{border-color:var(--block);border-width:2px}.sub-ico.s-cancelled{background:linear-gradient(var(--line-2),var(--line-2)) center/8px 1.5px no-repeat}
+.who{display:grid;place-items:center;width:22px;height:22px;border-radius:999px;background:var(--accent-bg);color:var(--accent-text);font-size:11px;font-weight:700}.who svg{width:12px;height:12px}.who.none{background:var(--panel);color:var(--dim);border:1px dashed var(--line-2)}
 .tk-id{margin:0 0 4px;font:12px var(--mono);color:var(--dim)}.ticket{display:grid;gap:10px;margin-top:12px}.tk-desc p{margin:0 0 6px;font-size:14px;line-height:1.55}.tk-steps ol{margin:4px 0 0;padding-left:20px;font-size:14px;line-height:1.55}
 .ticket .lk,.tk-steps .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-right:8px}.tk-facts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px}.tk-none{margin:0;font-size:13px;color:var(--mut)}.agent-chip{margin-left:6px}
 .tk-edit>summary{cursor:pointer;font-size:13px;color:var(--accent);width:max-content}.tk-form{display:grid;gap:10px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.tk-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -863,12 +868,14 @@ const SCRIM = `<a class="scrim" href="#_" tabindex="-1" aria-hidden="true"></a>`
 interface Proof { ref: string; actor: string; seq: number }
 
 // What a task's dialog offers under `tira serve`, by state. Each opens its confirm dialog.
+// (Add subtask is offered in its subtasks, where the new one will show.)
 const DIALOG_ACTIONS: Record<string, [string, string][]> = {
-  unstarted: [["START", "Start"], ["BLOCK", "Block"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
-  in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
-  blocked: [["UNBLOCK", "Unblock"], ["ADD_SUBTASK", "Add subtask"], ["CANCEL", "Cancel"]],
+  unstarted: [["START", "Start"], ["BLOCK", "Block"], ["CANCEL", "Cancel"]],
+  in_progress: [["COMPLETE", "Complete"], ["BLOCK", "Block"], ["CANCEL", "Cancel"]],
+  blocked: [["UNBLOCK", "Unblock"], ["CANCEL", "Cancel"]],
   done: [["REOPEN", "Reopen"]],
 };
+const TAKES_SUBTASKS = new Set(["unstarted", "in_progress", "blocked"]);
 
 interface DialogContext { indexOf: ReadonlyMap<string, number>; proof: Proof | undefined; live: boolean; q: string; links: Links; rowOf: ReadonlyMap<string, TreeRow>; ext: Ext }
 
@@ -889,14 +896,6 @@ function marksHtml(r: TreeRow): string {
   ].filter(Boolean).join("");
 }
 
-// which subtasks, not just how many: each with its state, one click to its own dialog
-function kidsHtml(r: TreeRow, ctx: DialogContext): string {
-  if (r.children.length === 0) return "";
-  const closedKids = r.children.filter((c) => CLOSED.has(c.state)).length;
-  const kidNoun = r.children.length === 1 ? "subtask" : "subtasks";
-  const kidsList = r.children.map((c) => `<li><a href="#t${ctx.indexOf.get(c.key)}">${esc(c.id)}</a>${stateBadge(c.state)}</li>`).join("");
-  return `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div><ul class="kids-list" aria-label="Subtasks">${kidsList}</ul>`;
-}
 
 // a done task's proof: one of its commits shows as its short id (a link to it on GitHub) and its message
 function proofHtml(r: TreeRow, ctx: DialogContext): string {
@@ -1012,17 +1011,102 @@ function ticketEditHtml(r: TreeRow, t: Ticket | undefined, form: NonNullable<Ext
     + `<div class="tk-row">${row}</div><button class="act primary" type="submit">Save ticket</button></form></details>`;
 }
 
+// the ticket's words: its description and steps (its estimate and assignee are properties, beside)
 function ticketHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
   const t = ext.tickets.get(r.id);
   const desc = t?.description ? `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>` : "";
-  const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><span class="lk">Steps</span><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
-  const facts = [
-    t?.estimate ? `<span data-ticket-estimate><span class="lk">Estimate</span>${esc(t.estimate)}</span>` : "",
-    t?.assignee ? `<span data-ticket-assignee><span class="lk">Assignee</span>${esc(t.assignee)}${agentChip(t.assignee)}</span>` : "",
-  ].join("");
-  const shown = desc + steps + (facts === "" ? "" : `<div class="tk-facts">${facts}</div>`);
-  const none = shown === "" ? `<p class="tk-none">No description, steps, estimate or assignee yet.</p>` : "";
-  return `<div class="ticket" data-ticket>${shown}${none}${ext.form ? ticketEditHtml(r, t, ext.form, back, q) : ""}</div>`;
+  const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><h3>Steps</h3><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
+  const none = desc + steps === "" ? `<p class="tk-none">No description or steps yet.</p>` : "";
+  return `<div class="ticket" data-ticket>${desc}${steps}${none}${ext.form ? ticketEditHtml(r, t, ext.form, back, q) : ""}</div>`;
+}
+
+// A time estimate in hours (a day is 8, a week 5 days), and back: 14 → "1d 6h".
+const HOURS: Record<string, number> = { m: 1 / 60, h: 1, d: 8, w: 40 };
+const hoursOf = (estimate: string | undefined) => {
+  const m = /^(\d+(?:\.\d+)?)\s?([mhdw])$/i.exec(estimate ?? "");
+  return m ? Number(m[1]) * (HOURS[(m[2] ?? "h").toLowerCase()] ?? 0) : 0;
+};
+const hoursSaid = (h: number) => {
+  const days = Math.floor(h / 8);
+  const rest = Math.round((h - days * 8) * 10) / 10;
+  return [days > 0 ? `${days}d` : "", rest > 0 ? `${rest}h` : ""].filter(Boolean).join(" ") || "0h";
+};
+// a ticket's name as people read it: its title, else its id
+const nameOf = (ext: Ext, row: TreeRow) => ext.tickets.get(row.id)?.title ?? row.id;
+// who it's assigned to, as a small mark: an agent's spark, a person's initials
+const whoMark = (name: string | undefined) => {
+  if (!name) return `<span class="who none" title="Nobody yet" aria-label="Nobody yet">–</span>`;
+  const mark = AGENT.test(name) ? ICON.spark : esc(name.replaceAll(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase());
+  return `<span class="who" title="${esc(name)}" aria-label="Assigned to ${esc(name)}">${mark}</span>`;
+};
+const closedOf = (rows: readonly TreeRow[]) => rows.filter((c) => CLOSED.has(c.state)).length;
+const subtaskNoun = (n: number) => (n === 1 ? "subtask" : "subtasks");
+
+// Its subtasks, each a row: its state, its name (and id), its estimate, who it's assigned to, one
+// click to its own dialog; over them how many are closed; under them, live, Add subtask.
+function subtaskRowHtml(c: TreeRow, ctx: DialogContext): string {
+  const t = ctx.ext.tickets.get(c.id);
+  const est = t?.estimate ? `<span class="sub-est">${esc(t.estimate)}</span>` : `<span class="sub-est"></span>`;
+  const id = t?.title ? `<small>${esc(c.id)}</small>` : "";
+  return `<li><a class="sub-row" href="#t${ctx.indexOf.get(c.key)}" data-subtask="${esc(c.key)}"><span class="sub-ico s-${esc(c.state)}" aria-hidden="true"></span><span class="sub-name">${esc(nameOf(ctx.ext, c))}${id}</span>${est}${whoMark(t?.assignee)}${stateBadge(c.state)}</a></li>`;
+}
+function subtasksHtml(r: TreeRow, ctx: DialogContext): string {
+  const add = ctx.live && TAKES_SUBTASKS.has(r.state) ? `<a class="act sub-add" href="${confirmHref(r, "ADD_SUBTASK", ctx.q)}" data-act="ADD_SUBTASK">+ Add subtask</a>` : "";
+  const n = r.children.length;
+  const count = n > 0 ? `<span>${closedOf(r.children)} of ${n} ${subtaskNoun(n)} closed</span>` : "";
+  const head = `<div class="sub-head"><h3>Subtasks</h3>${count}</div>`;
+  if (n === 0) return `<div class="subtasks" data-subtasks>${head}<p class="tk-none">No subtasks yet.</p>${add}</div>`;
+  const rows = r.children.map((c) => subtaskRowHtml(c, ctx)).join("");
+  return `<div class="subtasks" data-subtasks>${head}${meter(r.children.map((c) => c.state))}<ul class="kids-list" aria-label="Subtasks">${rows}</ul>${add}</div>`;
+}
+
+// Where it sits: its project (back to the board), the tickets above it, each one click away; for a
+// subtask, its place among its sister subtasks, with the one before and the one after.
+function siblingsHtml(n: Placed, ctx: DialogContext): string {
+  const sibs = n.parent ? n.parent.row.children : [];
+  const at = sibs.findIndex((c) => c.key === n.row.key);
+  if (at < 0) return "";
+  const step = (k: string | undefined, label: string, glyph: string) => (k === undefined ? `<span class="off" aria-hidden="true">${glyph}</span>` : `<a href="#t${ctx.indexOf.get(k)}" aria-label="${label}">${glyph}</a>`);
+  return `<span class="tk-sibs" data-siblings>${step(sibs[at - 1]?.key, "The subtask before", "↑")}<span>${at + 1} of ${sibs.length}</span>${step(sibs[at + 1]?.key, "The subtask after", "↓")}</span>`;
+}
+function crumbsHtml(n: Placed, ctx: DialogContext): string {
+  const up: Placed[] = [];
+  for (let p = n.parent; p; p = p.parent) up.unshift(p);
+  const sep = `<span class="sep" aria-hidden="true">›</span>`;
+  const project = ctx.ext.ws?.title ? `<a href="#_" class="tk-project">${esc(ctx.ext.ws.title)}</a>${sep}` : ""; // back to the board
+  const links = up.map((p) => `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${sep}`).join("");
+  return `<nav class="tk-crumbs" aria-label="Where it sits">${project}${links}<span aria-current="page">${esc(n.row.id)}</span>${siblingsHtml(n, ctx)}</nav>`;
+}
+
+// The ticket's properties, beside: its status (and what it allows), its progress, assignee,
+// estimate (and its subtasks' together), parent, what blocks it, its links out, its proof.
+const propHtml = (label: string, body: string, hook = "") => `<div class="prop"${hook}><span class="lk">${label}</span><div>${body}</div></div>`;
+function estimateHtml(r: TreeRow, ctx: DialogContext): string {
+  const own = ctx.ext.tickets.get(r.id)?.estimate;
+  const sum = r.children.reduce((h, c) => h + hoursOf(ctx.ext.tickets.get(c.id)?.estimate), 0);
+  const subtasks = sum > 0 ? ` <span class="dim">· subtasks ${hoursSaid(sum)}</span>` : "";
+  return (own ? esc(own) : `<span class="dim">None yet</span>`) + subtasks;
+}
+function parentHtml(n: Placed, ctx: DialogContext): string {
+  const p = n.parent;
+  if (!p) return `<span class="dim">Top level</span>`;
+  const sibs = p.row.children;
+  return `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${meter(sibs.map((c) => c.state))}<span class="dim">${closedOf(sibs)} of ${sibs.length} closed</span>`;
+}
+function propertiesHtml(n: Placed, ctx: DialogContext): string {
+  const r = n.row;
+  const who = ctx.ext.tickets.get(r.id)?.assignee;
+  const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
+  const kids = r.children.length;
+  return `<aside class="tk-side" aria-label="Properties">`
+    + propHtml("Status", `<div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>${acts}`)
+    + (kids > 0 ? propHtml("Subtasks closed", `${closedOf(r.children)} of ${kids}`) : "")
+    + propHtml("Assignee", who ? `${esc(who)}${agentChip(who)}` : `<span class="dim">Nobody yet</span>`, " data-ticket-assignee")
+    + propHtml("Estimate", estimateHtml(r, ctx), " data-ticket-estimate")
+    + propHtml("Parent", parentHtml(n, ctx), " data-parent")
+    + linksHtml(r, ctx) + taskLinksHtml(ctx.ext, r.id) + proofHtml(r, ctx) + locate(r.key, ctx.live)
+    + `</aside>`;
 }
 
 function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
@@ -1033,19 +1117,23 @@ function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
     ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}`
       + `<textarea name="text" rows="3" maxlength="2000" required placeholder="Feedback for whoever works on it: its agent reads it too" aria-label="Add a comment"></textarea><button class="act" type="submit">Comment</button></form>`
     : "";
-  return `<section class="comments" data-comments aria-label="Comments"><h3>Comments <span class="ev-seq">${list.length}</span></h3>${shown}${form}</section>`;
+  return `<div class="comments" data-comments><h3>Comments <span class="ev-seq">${list.length}</span></h3>${shown}${form}</div>`;
 }
 
-function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
+// A ticket's dialog: where it sits, then two columns. The work: (for a subtask, its parent first)
+// its title and id, its description and steps, its subtasks, its comments and its history. Beside:
+// its properties (on a phone, first: the status and what it allows lead).
+function drawerHtml(n: Placed, lines: TrailEntry[], ctx: DialogContext): string {
   const r = n.row;
-  const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
-  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
   const title = ctx.ext.tickets.get(r.id)?.title;
   const head = title ? `<h2>${esc(title)}</h2><p class="tk-id">${esc(r.id)}</p>` : `<h2>${esc(r.id)}</h2>`;
   const back = `#t${n.i}`;
+  const p = n.parent;
+  const of = p ? `<p class="tk-of" data-subtask-of>Subtask of <a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a> · ${closedOf(p.row.children)} of ${p.row.children.length} closed</p>` : "";
+  const history = `<details class="trail" open><summary>History (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details>`;
+  const main = `<div class="tk-main">${of}${head}${ticketHtml(r, ctx.ext, back, ctx.q)}${subtasksHtml(r, ctx)}${commentsHtml(r, ctx.ext, back, ctx.q)}${history}</div>`;
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div>${head}<div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${ticketHtml(r, ctx.ext, back, ctx.q)}${linksHtml(r, ctx)}${taskLinksHtml(ctx.ext, r.id)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
-    + `${commentsHtml(r, ctx.ext, back, ctx.q)}<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
+    + `<div class="tk-view">${crumbsHtml(n, ctx)}<div class="tk-cols">${main}${propertiesHtml(n, ctx)}</div></div></div></section>`;
 }
 
 // ---------- needs attention (the D1 UI brief, 2026-10-19) ----------
@@ -1536,7 +1624,7 @@ ${flashHtml(opts.live?.flash)}
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
 <section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : `<p class="empty board-empty">No tasks yet. Add the first with <code>tira create</code>; Sync then mirrors them to Jira and links their pull requests.</p>`}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
-${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], pathOf(n), { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
+${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${historyHtml(`${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}`)}
 ${guideHtml(dumpHash)}
