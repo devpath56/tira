@@ -36,9 +36,11 @@ export function serverName(project: string): string {
 export interface Launch { node: string; script: string }
 // where an app reaches tira: tira serve's address for MCP, and how to start tira mcp
 export interface Where { url: string; launch: Launch }
-// tira serve's MCP address, from the Host the page was asked for (tira serve listens on 127.0.0.1
-// only, so that's the address, whichever name the page was opened with)
-export function mcpUrl(host: string): string {
+// tira serve's MCP address: at its public address when it has one (src/serve/public.ts); else from
+// the Host the page was asked for (tira serve listens on 127.0.0.1 only, so that's the address,
+// whichever name the page was opened with)
+export function mcpUrl(host: string, publicOrigin?: string): string {
+  if (publicOrigin) return `${publicOrigin}/mcp`;
   const port = /:(\d+)$/.exec(host)?.[1];
   return `http://127.0.0.1${port ? ":" + port : ""}/mcp`;
 }

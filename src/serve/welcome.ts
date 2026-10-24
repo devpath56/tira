@@ -220,3 +220,31 @@ export function jiraTabPage(ok: boolean, text: string, back: string): string {
     + `<p class="land-foot" style="text-align:center">${ok ? "You can close this tab. " : ""}<a href="${esc(back)}">Back to tira</a></p></div></div>`;
   return page("Jira · tira", card, TABS);
 }
+
+export interface ConsentOpts {
+  token: string;
+  login: string;
+  // what Claude asked with, carried by the form
+  fields: { client_id: string; redirect_uri: string; state?: string; code_challenge: string };
+  projects: { stream: string; title?: string }[];
+  project: string; // the one picked first
+  agent: string;
+  flash?: Flash;
+}
+
+// Approving Claude's connection: which project it works in, and the agent's name. Who asked shows
+// plainly, by the address it goes back to (an app on this computer says so).
+export function consentPage(o: ConsentOpts): string {
+  const back = new URL(o.fields.redirect_uri);
+  const who = back.hostname === "claude.ai" ? "<b>Claude</b>" : `An app on this computer (<b>${esc(back.host)}</b>)`;
+  const hidden = Object.entries({ ...o.fields, code_challenge_method: "S256", response_type: "code" }).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
+  const options = o.projects.map((p) => `<option value="${esc(p.stream)}"${p.stream === o.project ? " selected" : ""}>${esc(p.title ?? p.stream)}</option>`).join("");
+  const form = `<form method="post" action="/oauth/authorize" data-consent>${hiddenToken(o.token)}${hidden}`
+    + `<label class="land-field"><span>Project</span><select name="project" required>${options}</select></label>`
+    + `<label class="land-field"><span>Agent's name</span><input type="text" name="agent" value="${esc(o.agent)}" maxlength="64" autocomplete="off" spellcheck="false" required></label>`
+    + `<button class="land-btn blue" type="submit" name="decision" value="allow" data-consent-allow>Allow</button>`
+    + `<button class="land-quiet" type="submit" name="decision" value="cancel" formnovalidate data-consent-cancel>Cancel</button></form>`;
+  const card = `<div class="land-mark">${BRAND_MARK}</div><h1>Connect to tira</h1><p class="land-foot" data-consent-who>${who} wants to work in tira as an agent.</p>${flashHtml(o.flash)}${form}`
+    + `<p class="land-foot">It works by tira's rules, under its own name. Disconnect it any time in Project settings. Signed in as ${esc(o.login)}.</p>`;
+  return page("Connect to tira", `<div class="land-card one" data-consent-page><section class="land-form">${card}</section></div>`);
+}

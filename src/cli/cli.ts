@@ -32,6 +32,7 @@ import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
 import { JiraCloud, type JiraClient } from "../sync/jira.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { lookedSaid, lookForCommits, proveWith } from "../sync/commits.ts";
+import { publicPageToken, publicProblem, publicSite } from "../serve/public.ts";
 import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from "../sync/credentials.ts";
 import { join } from "node:path";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, whatNext, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
@@ -847,26 +848,33 @@ async function importCmd(args: string[], values: Values, registry: Registry, io:
   }
 }
 
-// The page, live (src/serve/server.ts). Runs until Ctrl-C; the store closes on the way out.
+// The page, live (src/serve/server.ts). Runs until Ctrl-C; the store closes on the way out. At a
+// public address (TIRA_PUBLIC_URL: src/serve/public.ts) it listens on every address, at $PORT
+// unless --port says otherwise, and starts only once that address is safe to serve.
 async function serve(open: () => ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
   // without a name, everyone signs in with GitHub: the page starts at its landing
   const actor = values.actor ?? io.env.TIRA_ACTOR;
-  const port = values.port === undefined ? 4747 : Number(values.port);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${values.port}"`);
+  const problem = publicProblem(io.env, actor);
+  if (problem) throw new UsageError(problem);
+  const site = publicSite(io.env);
+  const asked = values.port ?? (site ? io.env.PORT : undefined);
+  const port = asked === undefined ? 4747 : Number(asked);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError(`--port must be 0-65535, got "${asked}"`);
   const store = open();
   const file = factoryFile(values, io);
   // the page token is kept in the private store: pages opened before a restart still work. The
   // divergence section only when there is a factory file to compare (a plain workspace has none;
   // tira render still says UNEVALUABLE, for the factory's own checkpoints)
   const server = tiraServer({
-    store, registry, stream, token: pageToken(io.env), ...(actor !== undefined ? { actor } : {}),
+    store, registry, stream, token: site ? publicPageToken(io.env.TIRA_SECRET_KEY ?? "") : pageToken(io.env), ...(actor !== undefined ? { actor } : {}), ...(site ? { site } : {}),
     ...(file !== undefined ? { divergence: (events: StoredEvent[]) => divergencePanel(file, events, stream) } : {}),
   });
   try {
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, site ? "0.0.0.0" : "127.0.0.1", resolve); });
     const at = server.address();
     const shown = typeof at === "object" && at ? at.port : port;
-    io.out(actor !== undefined
+    if (site) io.out(`tira: serving ${stream} at ${site.origin} (port ${shown}): people sign in with GitHub (Ctrl-C to stop)`);
+    else io.out(actor !== undefined
       ? `tira: serving ${stream} at http://127.0.0.1:${shown} as ${actor} (Ctrl-C to stop)`
       : `tira: serving ${stream} at http://localhost:${shown}: people sign in with GitHub (Ctrl-C to stop)`);
     await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });

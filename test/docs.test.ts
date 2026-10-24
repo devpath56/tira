@@ -17,6 +17,7 @@ import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
 import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
+import { clientId, CLAUDE_CALLBACK, s256 } from "../src/mcp/oauth.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { sync } from "../src/sync/sync.ts";
 import { FakeGitHub, FakeJira } from "./sync-fakes.ts";
@@ -106,6 +107,10 @@ async function pages(): Promise<string> {
   const getSignedIn = await ask(signedInServer, "tira_session=docs-session");
   const firstRunServer = tiraServer({ store, registry, stream: "t", token: "k", links: { githubAuth, env: { TIRA_HOME: firstHome } } });
   const getFirstRun = await ask(firstRunServer);
+  // at a public address (src/serve/public.ts): Claude's way in by its Connectors, and approving it
+  const hostedEnv = { ...env, TIRA_SECRET_KEY: "docs-secret-key-0123" };
+  const hostedServer = tiraServer({ store, registry, stream: "w", token: "k", site: { origin: "https://tira.example.com", host: "tira.example.com" }, links: { githubAuth, env: hostedEnv, agentTokens: new MemoryAgentTokens() } });
+  const getHosted = await ask(hostedServer, "tira_session=docs-session");
   try {
     // a ticket with its words, and a comment on it (src/tables/tickets.ts)
     await d.submit({ stream: "t", kind: "create", entity: { type: "ticket", id: "b", version: 1 }, actor: "isha", payload: { task: "b", title: "Task b, in words", description: "What b is.", steps: ["one", "two"], estimate: "2h", assignee: "claude-code" } });
@@ -135,13 +140,16 @@ async function pages(): Promise<string> {
     const flash = (await get("GET", acted.location ?? "/")).body;
     const noWorkspace = (await get("GET", "/?w=nope")).body; // a project the store doesn't hold
     const unlinked = (await get("GET", "/?w=busy")).body; // a board with nothing linked: Connect GitHub and Jira
+    const asking = new URLSearchParams({ response_type: "code", client_id: clientId(hostedEnv.TIRA_SECRET_KEY, { redirect_uris: [CLAUDE_CALLBACK] }), redirect_uri: CLAUDE_CALLBACK, code_challenge: s256("v".repeat(43)), code_challenge_method: "S256" });
+    const hosted = (await getHosted("GET", "/integrations")).body + (await getHosted("GET", `/oauth/authorize?${asking}`)).body;
     const script = ["app.mjs", "graph.mjs", "signin.mjs", "drag.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
-    return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, withCommit, flash, noWorkspace, script, unlinked].join("\n");
+    return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, withCommit, flash, noWorkspace, script, unlinked, hosted].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
     await new Promise<void>((r) => signInServer.close(() => r()));
     await new Promise<void>((r) => signedInServer.close(() => r()));
     await new Promise<void>((r) => firstRunServer.close(() => r()));
+    await new Promise<void>((r) => hostedServer.close(() => r()));
     rmSync(home, { recursive: true, force: true });
     rmSync(firstHome, { recursive: true, force: true });
   }
