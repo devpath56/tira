@@ -606,9 +606,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   };
   const APP_HOW: Record<App, string> = { "claude-code": "A command to run", cursor: "Adds in one click", vscode: "Adds in one click", "claude-desktop": "An entry for its config" };
   const TOOLS_SAID: [string, string][] = [
-    ["next_task", "what's in progress, what's next, how many are blocked"], ["list_tasks", "the tasks, in the board's order"], ["get_task", "one task, its history and proof"],
-    ["start_task", "start a task (one at a time)"], ["complete_task", "done, with proof of work"], ["block_task", "blocked, with a reason and what it waits on"],
-    ["add_subtask", "a new task under one"], ["file_idea", "an idea for later, for a person to approve"],
+    ["next_task", "what's in progress, what's next, what's assigned to it, feedback it hasn't answered"], ["list_tasks", "the tasks, in the board's order"], ["get_task", "one task: its ticket, comments, commits and history"],
+    ["start_task", "start a task (one at a time)"], ["complete_task", "done, with a commit or pull request as proof of work"], ["block_task", "blocked, with a reason and what it waits on"],
+    ["add_subtask", "a new task under one"], ["file_idea", "an idea for later, for a person to approve"], ["add_comment", "a reply on a task's comments"],
+    ["fill_ticket", "a ticket's title, description, steps and estimate"],
   ];
   const copyButton = (target: string, label: string) => `<button type="button" class="env-btn" data-copy-target="${target}" title="Copy" aria-label="Copy ${esc(label)}">${COPY}</button>`;
   const codeBlock = (id: string, code: string, label: string) => `<div class="agent-code-wrap">${copyButton(id, label)}<pre class="agent-code" id="${id}">${esc(code)}</pre></div>`;

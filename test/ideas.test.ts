@@ -298,15 +298,16 @@ test("approving an idea goes through the decision dialog: the work in a nutshell
     assert.match(fileDecision, /<h1>Approve file pagination\?<\/h1>/);
     assert.match(fileDecision, /<b>Decision:<\/b> Idea pagination: &#34;pagination would be good in table&#34;\. Why: &#34;long tables scroll forever&#34;\. Declared by claude at seq \d+\. Its file \(the summary and why\) waits for approval\. Approving files it; tira then proposes where it goes, and asks you again\. Recorded as isha\./);
     assert.match(fileDecision, /<p class="verdict ok">tira&#39;s check: allowed\.<\/p>/);
-    assert.match(fileDecision, /data-command>tira send idea pagination APPROVE_FILE<\/textarea>/);
+    assert.doesNotMatch(fileDecision, /data-command|data-you-part/); // nothing to fill in: approve it, or not
+    assert.match(fileDecision, /<button class="act primary" type="submit">Approve file<\/button>/);
     const filed = await s.run("pagination", "APPROVE_FILE", "tira send idea pagination APPROVE_FILE");
     assert.equal(await s.flash(filed), "Approve file pagination: done (seq 11). tira proposes it under table (its text names table): approve the placement next.");
     // the placement: tira's parent filled in, editable; no button for the one already filled in
     const place = (await s.http("GET", "/confirm?type=idea&id=pagination&event=APPROVE_NODE&fragment=1")).body;
     assert.match(place, /<b>Decision:<\/b> [^<]* tira proposes it under table: its text names table\. Approving makes it a task under the parent you name, to do\./);
     assert.match(place, /<b>Recommendation:<\/b> Approve it under table if that&#39;s where it fits; change parent_id to put it elsewhere\./);
-    assert.match(place, /data-command>tira send idea pagination APPROVE_NODE parent_id=&#34;table&#34;<\/textarea>/);
-    assert.match(place, /parent_id is tira&#39;s proposal: change it to put the task elsewhere\./);
+    assert.match(place, /data-nutshell>[^]*?<p class="verdict ok">[^]*?<b>Recommendation:<\/b>[^]*?<details class="why" data-why><summary>Why: tradeoffs, best practice, kind<\/summary>/); // the nutshell first, the rest folded
+    assert.match(place, /<label class="field" data-field="parent_id"><span>Goes under<\/span><input type="text" name="parent_id" value="table" placeholder="Parent task…"/); // tira's proposal, to change
     assert.doesNotMatch(place, /data-fill="parent_id"/);
     const born = await s.run("pagination", "APPROVE_NODE", 'tira send idea pagination APPROVE_NODE parent_id="table"');
     assert.equal(await s.flash(born), "Approve placement pagination: done (seq 13). It's a task now: pagination, under table.");
@@ -348,7 +349,7 @@ test("the placement's parent is checked before it's written: it must exist and t
     await s.send("idea", "views", "APPROVE_FILE");
     const pick = (await s.http("GET", "/confirm?type=idea&id=views&event=APPROVE_NODE&fragment=1")).body;
     assert.match(pick, /tira couldn&#39;t settle where it goes \(its text names filters and table\): you pick\. Candidates: filters, table\./);
-    assert.match(pick, /data-command>tira send idea views APPROVE_NODE parent_id=&#34;&#34;<\/textarea>/);
+    assert.match(pick, /<input type="text" name="parent_id" value=""/);
     assert.match(pick, /<button type="button" class="fill" data-fill="parent_id" data-value="filters">filters<\/button><button type="button" class="fill" data-fill="parent_id" data-value="table">table<\/button>/);
     const n0 = (await s.store.readStream(S)).length;
     const empty = await s.run("views", "APPROVE_NODE", 'tira send idea views APPROVE_NODE parent_id=""');
@@ -375,7 +376,8 @@ test("a reject needs a reason, and drops the idea", async () => {
     await s.idea("csv", { summary: "export to csv", why: "share it" });
     const decision = (await s.http("GET", "/confirm?type=idea&id=csv&event=REJECT_FILE&fragment=1")).body;
     assert.match(decision, /<b>Kind:<\/b> final \(a dropped idea can&#39;t come back\)\. The rule: event\.reason is a non-empty string\./);
-    assert.match(decision, /data-command>tira send idea csv REJECT_FILE reason=&#34;&#34;<\/textarea>/);
+    assert.match(decision, /<label class="field" data-field="reason"><span>Reason<\/span><input type="text" name="reason" value=""/);
+    assert.doesNotMatch(decision, /data-comment-field/); // an idea has no comments: its task will
     const bare = await s.run("csv", "REJECT_FILE", 'tira send idea csv REJECT_FILE reason="  "');
     assert.match(bare.body, /data-error>Add the reason: reason=&#34;…&#34; \(words, not only spaces\)\. Nothing was written\./);
     const ok = await s.run("csv", "REJECT_FILE", 'tira send idea csv REJECT_FILE reason="we export elsewhere"');

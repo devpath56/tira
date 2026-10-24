@@ -1,0 +1,10 @@
+{
+  "id": "comment",
+  "initial": "written",
+  "states": [
+    "written"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

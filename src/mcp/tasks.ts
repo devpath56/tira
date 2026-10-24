@@ -1,10 +1,11 @@
 // What tira's tools for agents read: the board's own views of one project (its task index, the
-// cursor and the task being worked on, each task's history and proof), in a few plain lines an
-// agent can act on.
+// cursor and the task being worked on, each task's ticket, comments, history and proof), in a few
+// plain lines an agent can act on.
 import { fold } from "../fold/fold.ts";
 import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
 import { attentionSince, proofsOf, trails } from "../render/html.ts";
 import { taskIndex, type TaskEntry } from "../serve/server.ts";
+import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import type { AgentContext } from "./server.ts";
 
 // A tool's answer: its text, and whether it did what was asked (false: the tool reports an error).
@@ -27,14 +28,22 @@ async function projectNow(c: AgentContext) {
   const r = fold(events, c.registry);
   const view = streamView(r, c.stream);
   const index = new Map(taskIndex(r, c.stream).map((t) => [t.key, t]));
-  return { events, r, view, rows: flatten(view.roots), index };
+  return { events, r, view, rows: flatten(view.roots), index, tickets: ticketsOf(r, c.stream), comments: commentsOf(r, c.stream), commits: commitsOf(r, c.stream) };
 }
+
+// comments since the agent's own last one, from someone else: the feedback it hasn't answered
+const unanswered = (list: readonly Comment[], actor: string) => {
+  const mine = Math.max(0, ...list.filter((x) => x.by === actor).map((x) => x.seq));
+  return list.filter((x) => x.by !== actor && x.seq > mine);
+};
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 const line = (t: TaskEntry) => `${t.id} (${where(t.path)})`;
 
-// what's next: the task being worked on, then the next one in order, and how many are blocked
+// what's next: the task being worked on, then the next one in order, how many are blocked, the open
+// tasks assigned to this agent, and feedback on them it hasn't answered
 export async function nextTask(c: AgentContext): Promise<ToolText> {
-  const { view, rows, index } = await projectNow(c);
+  const { view, rows, index, tickets, comments } = await projectNow(c);
   if (rows.length === 0) return { ok: true, text: `No tasks in ${c.stream} yet.` };
   const lines: string[] = [];
   for (const row of rows.filter((x) => x.active)) {
@@ -49,6 +58,13 @@ export async function nextTask(c: AgentContext): Promise<ToolText> {
   else if (!view.active.includes(next.key)) lines.push(`Next: ${line(next)}`);
   const blocked = rows.filter((x) => x.state === "blocked").length;
   if (blocked > 0) lines.push(`Blocked: ${blocked} (list_tasks with state "blocked" shows them)`);
+  const mine = rows.filter((x) => !CLOSED.has(x.state) && tickets.get(x.id)?.assignee === c.actor);
+  if (mine.length > 0) lines.push(`Assigned to you: ${mine.map((x) => x.id).join(", ")}`);
+  for (const row of rows.filter((x) => x.active || mine.includes(x))) {
+    const fresh = unanswered(comments.get(row.id) ?? [], c.actor);
+    const last = fresh.at(-1);
+    if (last) lines.push(`Feedback on ${row.id}: ${fresh.length} new, latest from ${last.by}: "${clip(last.text.replaceAll("\n", " "), 160)}" (get_task shows it; add_comment replies)`);
+  }
   return { ok: true, text: lines.join("\n") };
 }
 
@@ -59,10 +75,14 @@ const fits = (state: string, wanted: ListState) => {
 
 // the project's tasks, in the board's order: id, state, where it sits, and ◆ on the next one
 export async function listTasks(c: AgentContext, wanted: ListState = "open"): Promise<ToolText> {
-  const { index } = await projectNow(c);
+  const { index, tickets } = await projectNow(c);
   const tasks = [...index.values()].filter((t) => fits(t.state, wanted));
   if (tasks.length === 0) return { ok: true, text: `No ${wanted === "all" ? "" : stateWord(wanted) + " "}tasks in ${c.stream}.` };
-  const lines = tasks.slice(0, LIST_MAX).map((t) => `${t.id} · ${stateWord(t.state)} · ${where(t.path)}${t.next ? " · ◆ next" : ""}`);
+  const about = (t: TaskEntry) => {
+    const k = tickets.get(t.id);
+    return (k?.title ? ` "${k.title}"` : "") + (k?.assignee ? ` · assigned to ${k.assignee}` : "");
+  };
+  const lines = tasks.slice(0, LIST_MAX).map((t) => `${t.id} · ${stateWord(t.state)} · ${where(t.path)}${t.next ? " · ◆ next" : ""}${about(t)}`);
   if (tasks.length > LIST_MAX) lines.push(`…and ${tasks.length - LIST_MAX} more: narrow it with state.`);
   return { ok: true, text: lines.join("\n") };
 }
@@ -71,20 +91,43 @@ const kid = (k: TreeRow) => `${k.id} (${stateWord(k.state)})`;
 const kidsLine = (row: TreeRow) => (row.children.length === 0 ? [] : [`Subtasks: ${row.children.map(kid).join(", ")}`]);
 const bare = (key: string) => key.slice(key.indexOf(":") + 1);
 
-// one task: its state and place, its subtasks, why it's blocked and on what, its proof, its history
+// what a ticket says, in lines: its title, description, steps, estimate and assignee
+function ticketLines(k: Ticket | undefined): string[] {
+  if (!k) return ["Ticket: no description, steps, estimate or assignee yet (fill_ticket writes all but the assignee)."];
+  return [
+    ...(k.title ? [`Title: ${k.title}`] : []),
+    ...(k.description ? ["Description:", ...k.description.split("\n").map((x) => `  ${x}`)] : []),
+    ...(k.steps.length > 0 ? ["Steps:", ...k.steps.map((x, i) => `  ${i + 1}. ${x}`)] : []),
+    ...(k.estimate ? [`Estimate: ${k.estimate}`] : []),
+    ...(k.assignee ? [`Assignee: ${k.assignee}`] : []),
+  ];
+}
+const commentLines = (list: readonly Comment[]) =>
+  list.length === 0 ? ["Comments: none yet (add_comment writes one)."] : [`Comments (${list.length}, oldest first):`, ...list.map((x) => `  seq ${x.seq} · ${x.by}: ${x.text.replaceAll("\n", "\n    ")}`)];
+
+// the commits complete_task takes as proof (as the last sync found them)
+const commitLines = (id: string, list: readonly Commit[]) =>
+  list.length === 0
+    ? [`Commits: none yet (push to a branch named ${id}, or write "tira: ${id}" in a pull request; complete_task looks on GitHub first)`]
+    : ["Commits (complete_task takes one as proof):", ...list.slice(0, 10).map((x) => `  ${shortSha(x.sha)} ${firstLine(x.message)} (${whereFound(x)})`)];
+
+// one task: its state and place, its ticket, its subtasks, why it's blocked and on what, its proof,
+// its comments and its history
 export async function getTask(c: AgentContext, id: string): Promise<ToolText> {
-  const { events, r, rows, index } = await projectNow(c);
+  const { events, r, rows, index, tickets, comments, commits } = await projectNow(c);
   const row = rows.find((x) => x.id === id);
   const t = row ? index.get(row.key) : undefined;
   if (!row || !t) return { ok: false, text: `There is no task ${id} in ${c.stream}: list_tasks shows them.` };
   const skip = new Set(r.anomalies.map((a) => a.seq));
   const marks = [row.cursor && !row.active ? "◆ next" : "", row.discoveredDuring ? `found during ${bare(row.discoveredDuring)}` : ""].filter(Boolean);
-  const lines = [`${row.id} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...kidsLine(row)];
+  const lines = [`${row.id} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...ticketLines(tickets.get(row.id)), ...kidsLine(row)];
   const since = row.state === "blocked" ? attentionSince(events, c.stream, skip).blocked.get(row.key) : undefined;
   if (since?.reason) lines.push(`Blocked: ${since.reason}`);
   if (since?.blocker) lines.push(`Waiting on: ${bare(since.blocker)}`);
   const proof = proofsOf(events, c.stream, skip).get(row.key);
   if (proof) lines.push(`Proof: ${proof.ref} (from ${proof.actor}, seq ${proof.seq})`);
+  if (!CLOSED.has(row.state)) lines.push(...commitLines(row.id, commits.get(row.id) ?? []));
+  lines.push(...commentLines(comments.get(row.id) ?? []));
   lines.push("History:", ...(trails(events, c.stream).byKey.get(row.key) ?? []).map((e) => `  seq ${e.seq} · ${e.what} · ${e.actor}${e.detail ? " · " + e.detail : ""}`));
   return { ok: true, text: lines.join("\n") };
 }

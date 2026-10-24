@@ -1,5 +1,5 @@
 // What tira's tools for agents do: start a task, complete it with proof, block it (with a reason,
-// and what it waits on), add a subtask, file an idea. Each is written through the dispatcher under
+// and what it waits on), add a subtask, file an idea, comment, fill in a ticket. Each is written through the dispatcher under
 // the agent's own name, as the CLI's and the page's writes are, so the rules, the gates and the
 // proof of work are tira's own; a refusal comes back with the page's plain-words hint. A task that
 // doesn't exist, or a block that can't wait on what it names, is answered before anything is
@@ -14,6 +14,9 @@ import { Dispatcher } from "../write/dispatcher.ts";
 import type { Command } from "../write/write-path.ts";
 import type { AgentContext } from "./server.ts";
 import type { ToolText } from "./tasks.ts";
+import { randomBytes } from "node:crypto";
+import { COMMENT, MAX_COMMENT, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { commitsOf, firstLine, shortSha, ticketsOf, type Commit, type Ticket } from "../fold/tickets.ts";
 
 const NODE = "node";
 const IDEA_TEXT_MAX = 500;
@@ -47,10 +50,34 @@ export async function startTask(c: AgentContext, id: string): Promise<ToolText> 
 }
 
 // complete: done, with proof of work anyone can re-check (and a note for the history, if given)
+// complete: the proof of work is a commit or pull request of the project's repo: one of the task's own
+// commits (its sha, or 7 or more of its first characters; one tira hasn't seen yet makes it look on
+// GitHub for the task's newest first), else any other, checked on GitHub and kept for the task
 export async function completeTask(c: AgentContext, id: string, proof: string, note?: string): Promise<ToolText> {
+  const commitsNow = async () => commitsOf((await treeNow(c)).r, c.stream).get(id) ?? [];
   const row = (await treeNow(c)).rows.find((x) => x.id === id);
   if (!row) return missing(c, id);
-  return write(c, event(c, id, "COMPLETE", { evidenceRef: proof, ...(note ? { note } : {}) }), id, row);
+  const ref = proof.trim().toLowerCase();
+  const match = (list: Commit[]) => (ref.length >= 7 ? list.filter((x) => x.sha.startsWith(ref)) : []);
+  let commits = await commitsNow();
+  let synced: string | undefined;
+  if (match(commits).length !== 1 && c.fetchCommits) {
+    synced = await c.fetchCommits(id);
+    commits = await commitsNow();
+  }
+  const found = match(commits);
+  const done = (ref: string) => write(c, event(c, id, "COMPLETE", { evidenceRef: ref, ...(note ? { note } : {}) }), id, row);
+  if (found.length === 1) return done((found[0] as Commit).sha);
+  if (c.proveWith && found.length === 0) {
+    const got = await c.proveWith(id, proof).catch((err: unknown) => ({ why: `Couldn't reach GitHub (${(err as Error).message}).` }));
+    if ("ref" in got) return done(got.ref);
+    return { ok: false, text: `${got.why} Nothing was written.` };
+  }
+  const after = synced ? ` (${synced})` : "";
+  if (commits.length === 0) return { ok: false, text: `${id} has no commits yet${after}: push the work to a branch named after it (${id}), or write "tira: ${id}" in its pull request, then complete it with the commit's id. Nothing was written.` };
+  const list = commits.slice(0, 10).map((x) => `${shortSha(x.sha)} ${firstLine(x.message)}`).join("; ");
+  const why = found.length > 1 ? `${proof} matches more than one of ${id}'s commits` : `${proof} isn't one of ${id}'s commits`;
+  return { ok: false, text: `${why}${after}. Its commits: ${list}. Nothing was written.` };
 }
 
 // block: blocked, with the reason; what it waits on is an open task, or a new ticket created under
@@ -82,6 +109,47 @@ export async function addSubtask(c: AgentContext, under: string, name: string): 
   if (id === undefined) return { ok: false, text: "A subtask's name is 1 to 80 characters, with no control characters. Nothing was written." };
   const found = parent.state === "in_progress" || parent.state === "blocked" ? { kind: "discovered", discovered_during: under } : {};
   return write(c, birth(c, id, { parent_id: under, ...found }), `${id} under ${under}`, undefined);
+}
+
+// comment on a task: a reply to its feedback, a question or a note, shown on its ticket as the agent's
+export async function addComment(c: AgentContext, id: string, text: string): Promise<ToolText> {
+  const { rows } = await treeNow(c);
+  if (!rows.some((x) => x.id === id)) return missing(c, id);
+  const words = text.replaceAll("\r\n", "\n").trim();
+  if (words.length > MAX_COMMENT) return { ok: false, text: `Keep a comment to ${MAX_COMMENT} characters. Nothing was written.` };
+  const cmd: Command = { stream: c.stream, kind: "create", entity: { type: COMMENT, id: `c-${randomBytes(6).toString("hex")}` }, actor: c.actor, payload: { task: id, text: words } };
+  const r = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
+  if (r.status === "appended") return { ok: true, text: `Commented on ${id} (seq ${r.seq}): people see it on the ticket.` };
+  return { ok: false, text: `The comment wasn't written: ${r.status === "rejected" || r.status === "refused" ? r.detail : r.status}.` };
+}
+
+// fill in a ticket: its title, description, steps and estimate, as the agent, the whole ticket as its
+// next version (as the page's Edit saves it). What's left out stays as it is and an empty one is
+// cleared; who it's assigned to is a person's to say, so it stays as it is.
+export interface TicketFill { title?: string | undefined; description?: string | undefined; steps?: string[] | undefined; estimate?: string | undefined }
+// the ticket's words once filled: each given one, else what it says now, trimmed as the page trims them
+const filledWords = (fill: TicketFill, before: Ticket | undefined): TicketWords => ({
+  title: (fill.title ?? before?.title ?? "").trim().replace(/\s+/g, " "),
+  description: (fill.description ?? before?.description ?? "").replaceAll("\r\n", "\n").trim(),
+  steps: (fill.steps ?? before?.steps ?? []).map((x) => x.trim()).filter((x) => x !== ""),
+  estimate: (fill.estimate ?? before?.estimate ?? "").trim(),
+});
+export async function fillTicket(c: AgentContext, id: string, fill: TicketFill): Promise<ToolText> {
+  const { r, rows } = await treeNow(c);
+  if (!rows.some((x) => x.id === id)) return missing(c, id);
+  if (Object.values(fill).every((x) => x === undefined)) return { ok: false, text: "Give at least one of title, description, steps or estimate. Nothing was written." };
+  const before = ticketsOf(r, c.stream).get(id);
+  const { title, description, steps, estimate } = filledWords(fill, before);
+  const why = ticketWordsProblem({ title, description, steps, estimate });
+  if (why) return { ok: false, text: `${why} Nothing was written.` };
+  const assignee = before?.assignee;
+  const payload = { task: id, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
+  const same = JSON.stringify([before?.title, before?.description, before?.steps ?? [], before?.estimate]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate]);
+  if (same) return { ok: true, text: `Nothing changed: ${id}'s ticket already says that.` };
+  const cmd: Command = { stream: c.stream, kind: "create", entity: { type: TICKET, id, version: (before?.version ?? 0) + 1 }, actor: c.actor, payload };
+  const w = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
+  if (w.status === "appended") return { ok: true, text: `Filled in ${id}'s ticket (seq ${w.seq}): people see it on the ticket. get_task shows it.` };
+  return { ok: false, text: `The ticket wasn't written: ${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}.` };
 }
 
 // file an idea: its summary and why; tira drafts its file and proposes where it goes, and a person

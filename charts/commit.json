@@ -1,0 +1,10 @@
+{
+  "id": "commit",
+  "initial": "synced",
+  "states": [
+    "synced"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

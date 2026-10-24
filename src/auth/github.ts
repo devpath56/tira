@@ -4,7 +4,7 @@
 // flow: tira asks GitHub for a short code, the person approves it at github.com/login/device, and
 // tira polls until GitHub hands over a token. The token then lists the person's repos (to link one)
 // and reads pull requests (to sync), as them. https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
-import type { GitHubClient, Pull } from "../sync/github.ts";
+import { repoVia, taskCommitsVia, type GitHubClient, type Pull } from "../sync/github.ts";
 
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 const realFetch = fetch as unknown as Fetch;
@@ -99,16 +99,20 @@ export class GitHubDevice implements GitHubAuthApi {
 
   // Pull requests read with the person's own token (the sync's GitHub side once they've signed in).
   pullsAs(token: string, limit = 50): GitHubClient {
+    const get = (path: string) => this.get(token, `/${path}`);
     return {
+      taskCommits: (repo, task, linked) => taskCommitsVia(get, repo, task, linked),
+      ...repoVia(get),
       pulls: async (repo: string): Promise<Pull[]> => {
         const raw = (await this.get(token, `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=${limit}`)) as { number: number; title?: string; body?: string | null; html_url: string; state: string; merged_at?: string | null; head?: { ref?: string } }[];
         return Promise.all(raw.map(async (p) => {
-          const commits = (await this.get(token, `/repos/${repo}/pulls/${p.number}/commits?per_page=100`)) as { commit?: { message?: string } }[];
+          const commits = (await this.get(token, `/repos/${repo}/pulls/${p.number}/commits?per_page=100`)) as { sha?: string; commit?: { message?: string } }[];
           return {
             number: p.number, title: p.title ?? "", body: p.body ?? "", branch: p.head?.ref ?? "", url: p.html_url,
             state: p.state === "open" ? "open" as const : "closed" as const,
             ...(p.merged_at ? { mergedAt: p.merged_at } : {}),
             commits: commits.map((c) => c.commit?.message ?? ""),
+            shas: commits.map((c) => c.sha ?? ""),
           };
         }));
       },

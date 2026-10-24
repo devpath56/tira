@@ -37,8 +37,11 @@ import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
+import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { commitsOf, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
+import { access, appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
@@ -142,8 +145,9 @@ export function workspaceList(r: FoldResult, streams: readonly string[], home: s
 
 // waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
 // idea, the tasks tira found for it
-// proofs: to complete, the merged pull requests linked to the task (src/tables/links.ts)
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; proofs?: string[] }
+// ticket: what the task's ticket says (src/fold/tickets.ts), shown beside the move
+// closes: the finished parents tira closes first, citing the move
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; ticket?: Ticket; closes?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -241,9 +245,10 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   return {
     ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
-    ...(event === "COMPLETE" ? { proofs: (linksOf(r, stream).get(id)?.prs ?? []).filter((p) => p.state === "merged").map((p) => p.url) } : {}),
+    ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
+    ...(ticketsOf(r, stream).has(id) ? { ticket: ticketsOf(r, stream).get(id) as Ticket } : {}),
   };
 }
 
@@ -321,7 +326,8 @@ export function waitable(r: FoldResult, stream: string, id: string): string[] {
   return rows.filter((x) => x.id !== id && !above.has(x.id) && !CLOSED.has(x.state)).map((x) => x.id);
 }
 
-interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string }
+// values: what the dialog's fields held when it comes back (a value missing, a moved log)
+interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string; values?: Record<string, string> }
 
 // The decision: tira recommends (read-only) beside your action (the command, editable), then
 // the button. The same body serves the confirm page and, under `tira serve`, the dialog the
@@ -349,17 +355,36 @@ function noticesHtml(opts: ConfirmOpts): string {
   return moved + notice + error;
 }
 
-const NOTE_HELP = `Any command can take note="…": the history keeps it. The same command runs in a terminal.`;
-function helpText(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
-  if (!p.ok) return "tira would refuse this as it stands: edit it (another task or verb) and check again, or close.";
-  if (opts.event === "BLOCK" && fragment) return `Name what it waits on: a new ticket is created under ${opts.id} and linked as blocking it, or pick an open task. The command updates as you type and runs exactly as written.`;
-  if (opts.event === "COMPLETE" && fragment) return `Add the proof of work: a link, file or note anyone can re-check, or pick a merged pull request. The command updates as you type and runs exactly as written.`;
-  if (opts.event === "BLOCK") return `Name the new ticket on line 1 and as blocker= on line 2 (the reason defaults to "waiting on" it). To wait on an open task instead, delete line 1 and set blocker= to it.`;
-  if (opts.event === "APPROVE_NODE") return (p.command?.includes('parent_id=""') ? "Fill in parent_id: the task it goes under. " : "parent_id is tira's proposal: change it to put the task elsewhere. ") + NOTE_HELP;
-  return (PAGE_VERBS[opts.event]?.field ? "Fill in the empty quotes. " : "Ready to run as it is. ") + NOTE_HELP;
+// The ticket, beside the move: what the work is (its title, description, steps, estimate and
+// assignee), under tira's word when it would refuse, or when nothing would change, and what to do.
+const paragraph = (x: string) => `<p>${esc(x.trim()).replaceAll("\n", "<br>")}</p>`;
+const listItem = (x: string) => `<li>${esc(x)}</li>`;
+const factHtml = ([k, v]: [string, string | undefined]) => (v ? `<span><span class="lk">${k}</span>${esc(v)}</span>` : "");
+// what a ticket says, as the dialog shows it (the task's own dialog: src/render/html.ts)
+function ticketWordsHtml(t: Ticket | undefined): string {
+  if (!t) return "";
+  const facts = ([["Estimate", t.estimate], ["Assignee", t.assignee]] as [string, string | undefined][]).map(factHtml).join("");
+  return [
+    t.title ? `<p class="tk-title" data-ticket-title>${esc(t.title)}</p>` : "",
+    t.description ? `<div class="tk-desc">${t.description.split(/\n{2,}/).map(paragraph).join("")}</div>` : "",
+    t.steps.length > 0 ? `<div class="tk-steps"><span class="lk">Steps</span><ol>${t.steps.map(listItem).join("")}</ol></div>` : "",
+    facts === "" ? "" : `<div class="tk-facts">${facts}</div>`,
+  ].join("");
+}
+// tira's word, when there is one: what to do instead when it would refuse (its rule's own words when
+// it has no plainer ones), that nothing would change, or the finished parents it closes first
+function wordHtml(p: Packet): string {
+  if (!p.ok) return p.hint ? `<p class="verdict no" data-hint title="${esc(p.verdict)}">${esc(p.hint)}</p>` : `<p class="verdict no">${esc(p.verdict)}</p>`;
+  if (p.verdict.includes("nothing changes")) return `<p class="verdict ok">Nothing would change: it's already so.</p>`;
+  return p.closes && p.closes.length > 0 ? `<p class="hint" data-closes>Also closes ${esc(p.closes.join(", then "))}.</p>` : "";
+}
+function ticketSideHtml(p: Packet): string {
+  const body = ticketWordsHtml(p.ticket);
+  const none = body === "" ? `<p class="tk-none">No details yet.</p>` : "";
+  return `<section class="brief ticket-side" aria-label="The ticket" data-brief>${wordHtml(p)}<div class="ticket" data-ticket>${body}${none}</div></section>`;
 }
 
-// values the command can be filled with: buttons live, a plain list on the confirm page
+// values the move can take, as buttons that fill its field live, a plain list on the confirm page
 function choicesHtml(values: string[], fragment: boolean, caption: string, plainCaption: string, attrs: (v: string) => string): string {
   if (values.length === 0) return "";
   if (!fragment) return `<p class="cmd-help">${plainCaption}: ${values.map(esc).join(" · ")}</p>`;
@@ -367,30 +392,49 @@ function choicesHtml(values: string[], fragment: boolean, caption: string, plain
   return `<div class="fills" data-fills><span>${caption}</span>${buttons}</div>`;
 }
 
-// to block: what it waits on, a new ticket by name or an open task
-function blockedByHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
-  if (opts.event !== "BLOCK" || !p.ok) return "";
-  const open = (p.waitables ?? []).slice(0, 12);
-  const tasks = choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (v) => `data-fill-blocker="${esc(v)}"`);
-  if (!fragment) return tasks;
-  return `<label class="blocked-by" data-blocked-by="${esc(opts.id)}" data-type="${esc(opts.type)}"><span>Blocked by</span><input type="text" placeholder="a new ticket, e.g. design_tokens" autocomplete="off" spellcheck="false" aria-label="Blocked by: name a new ticket, or pick an open task"></label>` + tasks;
+// one field of the move: a label, an input with what it held
+function fieldHtml(name: string, label: string, value: string, placeholder: string, extra = ""): string {
+  return `<label class="field" data-field="${name}"><span>${label}</span><input type="text" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false"${extra}></label>`;
 }
 
-// to complete: the proof of work, in its own field; the command fills in as you type (app.mjs)
-function proofFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
-  if (opts.event !== "COMPLETE" || !p.ok || !fragment) return "";
-  return `<label class="proof-of-work" data-proof><span>Proof of work</span><input type="text" placeholder="a link, file or note anyone can re-check" autocomplete="off" spellcheck="false" aria-label="Proof of work: a link, file or note anyone can re-check"></label>`;
+// To complete: the proof of work, a commit or pull request of the project's repo, typed or pasted
+// (its id or link). The page's script checks it on GitHub as it's typed (POST /proof) and says what
+// it found; Complete checks it again, and keeps it for the task.
+function proofFieldHtml(opts: ConfirmOpts): string {
+  const check = ` data-proof-check="${esc(withQ("/proof", opts.q ?? ""))}"`;
+  return fieldHtml("proofRef", "Proof of work", opts.values?.proofRef ?? "", "Commit or pull request: id or link…", check) + `<p class="proof-said" data-proof-said role="status" aria-live="polite"></p>`;
 }
 
-function fillsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
-  if (!p.ok) return "";
-  const reasons = choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (v) => `data-fill="reason" data-value="${esc(v)}"`)
-    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (v) => `data-fill="parent_id" data-value="${esc(v)}"`)
-    + choicesHtml(p.proofs ?? [], fragment, "Proof from GitHub:", "Merged pull requests", (v) => `data-fill="evidenceRef" data-value="${esc(v)}"`);
-  const found = PAGE_VERBS[opts.event]?.creates && !p.found && fragment
-    ? `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`
-    : "";
-  return reasons + found;
+// To add a subtask: its name; under work already under way it's marked as found, elsewhere a chip marks it.
+function subtaskFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  const v = opts.values ?? {};
+  const proposed = p.found ? "1" : "";
+  const found = v.discovered ?? proposed;
+  const mark = found === "1" || !fragment ? "" : `<div class="fills" data-fills><button type="button" class="fill" data-fill-found="${esc(opts.id)}">Mark as found while working on ${esc(opts.id)}</button></div>`;
+  return fieldHtml("name", "Name", v.name ?? "", "Name…", " required maxlength=\"80\"") + `<input type="hidden" name="discovered" value="${found}">` + mark;
+}
+
+// What the move needs from you: to block, what it waits on (a new ticket by name, or an open task)
+// and why; to complete, the proof of work; to add a subtask, its name; a reason or a parent where
+// the move takes one.
+function moveFieldsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  const v = opts.values ?? {};
+  const verb = PAGE_VERBS[opts.event];
+  if (!p.ok || !verb) return "";
+  if (opts.event === "BLOCK") {
+    const open = (p.waitables ?? []).slice(0, 12);
+    return fieldHtml("blocker", "Blocked by", v.blocker ?? "", "New ticket or open task…", ` data-blocked-by="${esc(opts.id)}"`)
+      + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`)
+      + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
+  }
+  if (opts.event === "COMPLETE") return proofFieldHtml(opts);
+  if (verb.creates) return subtaskFieldHtml(p, opts, fragment);
+  if (!verb.field) return "";
+  const proposed = /parent_id="((?:[^"\\]|\\.)*)"/.exec(p.command ?? "")?.[1] ?? ""; // tira's proposal for an idea's parent
+  const label = verb.field.name === "parent_id" ? "Goes under" : "Reason";
+  return fieldHtml(verb.field.name, label, v[verb.field.name] ?? (verb.field.name === "parent_id" ? proposed : ""), verb.field.name === "parent_id" ? "Parent task…" : "Why…")
+    + choicesHtml(p.suggestions, fragment, "Used before:", "Reasons used before", (x) => `data-fill="reason" data-value="${esc(x)}"`)
+    + choicesHtml(p.parents ?? [], fragment, "Put it under:", "Tasks tira found for it", (x) => `data-fill="parent_id" data-value="${esc(x)}"`);
 }
 
 function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
@@ -398,16 +442,16 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const leave = (label: string) => (fragment ? `<button class="how" type="button" data-close-confirm>${label}</button>` : `<a class="how" href="${esc(withQ("/", opts.q ?? ""))}">${label}</a>`);
   const close = leave(fragment ? "Close" : "Back to the page");
   const head = `<div class="packet" data-packet data-ok="${p.ok && verb !== undefined}"><h1>${esc(p.title)}</h1>${noticesHtml(opts)}`;
-  // no such verb or task: nothing to edit from
-  if (!verb || p.brief === undefined) return `${head}<div class="split">${briefHtml(p)}</div><div class="run">${close}</div></div>`;
-  const command = opts.command ?? p.command ?? "";
-  const hidden = [["token", opts.token], ["type", opts.type], ["id", opts.id], ["event", opts.event], ["seen", String(p.seen)]]
+  const left = opts.type === IDEA ? briefHtml(p) : ticketSideHtml(p);
+  // no such verb or task: nothing to fill in
+  if (!verb || p.brief === undefined) return `${head}<div class="split">${left}</div><div class="run">${close}</div></div>`;
+  const hidden = [["token", opts.token], ["type", opts.type], ["id", opts.id], ["event", opts.event], ["seen", String(p.seen)], ["dialog", "1"]]
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v as string)}">`).join("");
-  const right = `<section class="your-action" aria-label="Your action, edit before sending"><h2>Your action — edit before sending</h2>`
-    + blockedByHtml(p, opts, fragment) + proofFieldHtml(p, opts, fragment) + `<textarea name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="The command tira will run: edit it before sending" data-command>${esc(command)}</textarea>`
-    + `<p class="cmd-help">${esc(helpText(p, opts, fragment))}</p>${fillsHtml(p, opts, fragment)}</section>`;
-  const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)} — run it</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
-  return `${head}<form method="post" action="${esc(withQ("/act", opts.q ?? ""))}" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${briefHtml(p)}${right}</div>`
+  const comment = opts.type === IDEA || !p.ok ? "" : `<label class="field comment-field" data-comment-field><span>Comment</span><textarea name="comment" rows="2" maxlength="2000" placeholder="Add a comment…">${esc(opts.values?.comment ?? "")}</textarea></label>`;
+  const fields = moveFieldsHtml(p, opts, fragment) + comment;
+  const right = fields === "" ? "" : `<section class="your-part" aria-label="Your part" data-you-part>${fields}</section>`;
+  const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)}</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
+  return `${head}<form method="post" action="${esc(withQ("/act", opts.q ?? ""))}" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${left}${right}</div>`
     + `<div class="run">${button}</div></form></div>`;
 }
 
@@ -545,6 +589,41 @@ function actionFrom(form: URLSearchParams, registry: Registry): PageAction | und
   return { type, id, event, payload };
 }
 
+// A decision's own form (the dialog, the confirm page): the move from its fields, never a command.
+// To block: what it waits on, an open task, else a new ticket made under the task (found while
+// working on it) first; the reason written, else it waits on that ticket.
+function fromDialog(form: URLSearchParams, registry: Registry, r: FoldResult, stream: string): { ask: PageAction; ticket?: PageAction } | { why: string } | undefined {
+  const type = form.get("type") ?? "";
+  const id = form.get("id") ?? "";
+  const event = form.get("event") ?? "";
+  const verb = PAGE_VERBS[event];
+  if (!verb || id === "" || !verbFits(verb, type, (t) => registry.get(t)?.tree !== undefined)) return undefined;
+  if (verb.creates) {
+    const child = subtaskName(form.get("name"));
+    if (child === undefined) return { why: "Name the new subtask: 1 to 80 characters." };
+    const found = form.get("discovered") !== "1" ? {} : { kind: "discovered", discovered_during: id };
+    return { ask: { type, id, event, child, payload: { parent_id: id, ...found } } };
+  }
+  if (event === "BLOCK") return blockFromDialog(form, type, id, r, stream);
+  const pasted = event === "COMPLETE" ? (form.get("proofRef") ?? "").trim() : ""; // a proof typed in, over one picked
+  const value = pasted || (verb.field ? form.get(verb.field.name) : null);
+  return { ask: { type, id, event, payload: verb.field && value !== null ? { [verb.field.name]: value } : {} } };
+}
+// to block: on an open task, or on a new ticket by name (made under the task first)
+function blockFromDialog(form: URLSearchParams, type: string, id: string, r: FoldResult, stream: string): { ask: PageAction; ticket?: PageAction } | { why: string } {
+  const blocker = (form.get("blocker") ?? "").trim();
+  const reason = (form.get("reason") ?? "").trim();
+  const ask: PageAction = { type, id, event: "BLOCK", payload: { ...(blocker ? { blocker } : {}), ...(reason ? { reason } : {}) } };
+  if (blocker === "" || r.entities.some((e) => e.stream === stream && e.type === type && e.id === blocker)) return { ask };
+  const child = subtaskName(blocker);
+  if (child === undefined) return { why: "Name what it waits on: a new ticket (1 to 80 characters), or an open task." };
+  return { ask, ticket: { type, id, event: "ADD_SUBTASK", child, payload: { parent_id: id, kind: "discovered", discovered_during: id } } };
+}
+
+// what a decision's fields held, to show them again when it comes back
+const DIALOG_FIELDS = ["blocker", "reason", "evidenceRef", "proofRef", "name", "discovered", "parent_id", "comment"];
+const valuesOf = (form: URLSearchParams) => Object.fromEntries(DIALOG_FIELDS.flatMap((k) => (form.get(k) === null ? [] : [[k, form.get(k) as string]])));
+
 export function tiraServer(opts: ServeOptions): Server & { token: string } {
   if (opts.actor !== undefined && isReservedActor(opts.actor)) throw new Error(`"${opts.actor}" is reserved for tira's, the dispatcher's and the sync's own writes: serve as a person`);
   const token = opts.token ?? randomBytes(24).toString("hex");
@@ -604,7 +683,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     flashes.delete(rk); // a result shows once
     const divergence = opts.divergence?.(events);
     const name = me.actor ? displayName(me.actor, linkEnv) : undefined; // as they chose to be shown
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves };
+    const { people, agents } = await assignees(ws.stream, me.actor);
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
@@ -646,11 +726,23 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     await decide(res, ws, at, { moved: url.searchParams.get("moved") === "1" }, url.searchParams.get("fragment") === "1");
   };
 
+  // POST /proof: the Complete dialog's check of a proof as it's typed: what tira found on GitHub, or
+  // why it can't be one ({ok, text}). Nothing is written: Complete checks it again, and keeps it.
+  const proofPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    if (actorNow() === undefined) return send(res, 401, "application/json; charset=utf-8", JSON.stringify({ ok: false, text: "Sign in with GitHub first." }));
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify(await proofSaid(opts.store, opts.registry, ws.stream, acc.githubOf(who(req).login), form.get("proofRef") ?? "")));
+  };
+
   // POST /act, in stages: the form (from this page only), what it asks for, what stops it
   // before anything is written, then the write and back to the page with its result. The
   // dialog's own posts (fragment=1) get the decision back to show in place, or where to go next.
   interface Target { type: string; id: string; event: string }
-  interface Asked { ws: Workspace; fragment: boolean; typed: string | null; seen: string | null; ask: PageAction; ticket: PageAction | undefined; target: Target }
+  // dialog: from a decision's own fields (shown again with what's wrong, as a typed command is)
+  // login: who's signed in with GitHub (a proof named by its id is looked up as them)
+  interface Asked { ws: Workspace; fragment: boolean; typed: string | null; seen: string | null; ask: PageAction; ticket: PageAction | undefined; target: Target; dialog?: boolean; values?: Record<string, string>; login?: string }
+  const shown = (a: Asked) => a.typed !== null || a.dialog === true;
   const targetOf = (a: PageAction): Target => ({ type: a.type, id: a.id, event: a.event });
 
   // the same origin, within the size cap, with this process's token
@@ -673,6 +765,16 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const fragment = form.get("fragment") === "1";
     const seen = form.get("seen");
     const typed = form.get("command");
+    if (form.get("dialog") === "1") {
+      const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
+      const values = valuesOf(form);
+      const got = fromDialog(form, opts.registry, (await now(ws.stream)).r, ws.stream);
+      if (!got) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
+      const long = (values.comment ?? "").trim().length > MAX_COMMENT ? `Keep the comment to ${MAX_COMMENT} characters.` : undefined;
+      const why = "why" in got ? got.why : long;
+      if (why !== undefined || "why" in got) { await decide(res, ws, opened, { error: why ?? "", values }, fragment, 422); return undefined; }
+      return { ws, fragment, typed: null, seen, ask: withDefaults(got.ask), ticket: got.ticket, target: targetOf(got.ask), dialog: true, values };
+    }
     if (typed === null) {
       const ask = actionFrom(form, opts.registry);
       if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
@@ -693,33 +795,54 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // what stops it before anything is written (true: it answered): a value missing, a blocker
   // that can't be, a moved log, or, for a typed command, tira's refusal of the ticket or the move
   const heldBack = async (res: ServerResponse, a: Asked, cmd: Command, first: Command | undefined): Promise<boolean> => {
-    const back = async (o: Partial<ConfirmOpts>, status?: number) => { await decide(res, a.ws, a.target, { command: a.typed ?? "", ...o }, a.fragment, status); return true; };
+    const back = async (o: Partial<ConfirmOpts>, status?: number) => { await decide(res, a.ws, a.target, { command: a.typed ?? "", ...(a.values ? { values: a.values } : {}), ...o }, a.fragment, status); return true; };
     const lacking = missing(a.ask);
-    if (lacking !== undefined && a.typed === null) { send(res, 400, text, `${lacking}\n`); return true; }
+    if (lacking !== undefined && !shown(a)) { send(res, 400, text, `${lacking}\n`); return true; }
     if (lacking !== undefined) return back({ error: lacking }, 422);
     const problem = await waitProblem(a);
     if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
+    const atStart = String((await now(a.ws.stream)).r.lastSeq);
+    const proof = await commitProblem(a);
+    if (proof.why && !shown(a)) { send(res, 409, text, `${proof.why}\n`); return true; }
+    if (proof.why) return back({ error: proof.why }, 422);
+    if (proof.kept && a.seen === atStart) a.seen = String((await now(a.ws.stream)).r.lastSeq); // its own keeping moved the log
     const misplaced = await placeCheck(a);
-    if (misplaced && a.typed === null) { send(res, 409, text, `tira can't run that: ${misplaced}\n`); return true; }
+    if (misplaced && !shown(a)) { send(res, 409, text, `tira can't run that: ${misplaced}\n`); return true; }
     if (misplaced) return back({ error: `tira can't run that: ${misplaced}.` }, 422);
     // decided on one log, written on another? show the decision again instead
     // (a post without `seen` didn't come from a decision: it gets one first)
     if (a.seen !== String((await now(a.ws.stream)).r.lastSeq)) {
-      if (a.typed !== null) return back({ moved: a.seen !== null }, 409);
+      if (shown(a)) return back({ moved: a.seen !== null }, 409);
       const again = withQ(`/confirm?type=${encodeURIComponent(a.ask.type)}&id=${encodeURIComponent(a.ask.id)}&event=${encodeURIComponent(a.ask.event)}`, a.ws.q);
       send(res, 303, text, "", { Location: a.seen === null ? again : again + "&moved=1" });
       return true;
     }
-    if (a.typed === null) return false;
+    if (!shown(a)) return false;
     const refused = await refusal(a, cmd, first);
     if (refused) return back({ error: refused }, 409);
     return false;
   };
 
+  // Completing a task from the page: its proof of work is a commit or a pull request of the project's
+  // repo: one kept for it already, or one named now, checked on GitHub and kept for it (its whole id
+  // or link is what's written). Why not, if it can't be; whether keeping it wrote to the log.
+  const commitProblem = async (a: Asked): Promise<{ why?: string; kept: boolean }> => {
+    if (a.ask.event !== "COMPLETE" || opts.registry.get(a.ask.type)?.tree === undefined) return { kept: false };
+    const ref = typeof a.ask.payload.evidenceRef === "string" ? a.ask.payload.evidenceRef.trim() : "";
+    const { r } = await now(a.ws.stream);
+    const commits = commitsOf(r, a.ws.stream).get(a.ask.id) ?? [];
+    const prs = linksOf(r, a.ws.stream).get(a.ask.id)?.prs ?? [];
+    if (commits.some((c) => c.sha === ref) || prs.some((p) => p.url === ref)) return { kept: false };
+    const got = await proveWith(opts.store, opts.registry, a.ws.stream, a.ask.id, acc.githubOf(a.login), ref).catch((err: unknown) => ({ why: `Couldn't reach GitHub (${(err as Error).message}).` }));
+    if ("why" in got) return { why: got.why, kept: false };
+    a.ask.payload.evidenceRef = got.ref;
+    return { kept: true };
+  };
+
   // a typed block on an open task: why it can't wait on that task, if it can't
   const waitProblem = async (a: Asked): Promise<string | undefined> => {
     const blocker = blockerOf(a.ask);
-    if (a.typed === null || blocker === undefined || a.ticket !== undefined) return undefined;
+    if (!shown(a) || blocker === undefined || a.ticket !== undefined) return undefined;
     return blockerProblem((await now(a.ws.stream)).r, a.ws.stream, a.ask, blocker);
   };
 
@@ -775,11 +898,96 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     }
   };
 
+  // Who a ticket can be assigned to: the project's people (this tira's admin and members, and
+  // whoever is acting) and its connected agents (Project settings → Connect agents).
+  const assignees = async (stream: string, actor: string | undefined): Promise<{ people: string[]; agents: string[] }> => {
+    const a = access(linkEnv);
+    const people = [...new Set([a.admin, ...(a.members ?? []), actor].filter((x): x is string => typeof x === "string" && x !== ""))];
+    const tokens = opts.links?.agentTokens ?? agentTokensFor(linkEnv);
+    const agents = tokens ? (await tokens.list(stream)).map((x) => x.agent) : [];
+    return { people, agents };
+  };
+  // a ticket's own forms come back to its dialog (#t<i>), with what happened
+  const toTicket = (res: ServerResponse, ws: Workspace, form: URLSearchParams, f: { ok: boolean; text: string }, task?: string) => {
+    const key = String(++flashSeq);
+    flashes.set(key, task && f.ok ? { ...f, changed: [entityKey({ type: "node", id: task })] } : f);
+    if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+    const back = /^#t\d+$/.test(form.get("back") ?? "") ? form.get("back") ?? "" : "";
+    send(res, 303, text, "", { Location: withQ(`/?r=${key}`, ws.q) + back });
+  };
+  // the task a ticket form is about, if it's one in this project
+  const taskIn = async (ws: Workspace, id: string) => {
+    const { r } = await now(ws.stream);
+    return r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id) ? r : undefined;
+  };
+  // a ticket's Edit form, read: each field trimmed, the steps one per line
+  type TicketAsked = TicketWords & { assignee: string };
+  const ticketAsked = (form: URLSearchParams): TicketAsked => ({
+    title: (form.get("title") ?? "").trim().replace(/\s+/g, " "),
+    description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
+    steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
+    estimate: (form.get("estimate") ?? "").trim(),
+    assignee: (form.get("assignee") ?? "").trim(),
+  });
+  // what a ticket can't say, if anything: `allowed`, who it can be assigned to
+  const assigneeProblem = (assignee: string, allowed: (string | undefined)[]) =>
+    assignee !== "" && (!ASSIGNEE.test(assignee) || !allowed.includes(assignee)) ? `${assignee} isn't on this project's team or one of its agents.` : undefined;
+  const ticketProblem = (asked: TicketAsked, allowed: (string | undefined)[]): string | undefined => ticketWordsProblem(asked) ?? assigneeProblem(asked.assignee, allowed);
+
+  // POST /tickets: a ticket's Edit form (its title, description, steps, estimate and assignee), the
+  // whole ticket as a new version, written as the person saving it.
+  const saveTicket = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const said = (f: { ok: boolean; text: string }, task?: string) => toTicket(res, ws, form, f, task);
+    const actor = actorNow();
+    if (actor === undefined) return said({ ok: false, text: "Sign in with GitHub first, so tira knows who writes the ticket." });
+    const task = form.get("task") ?? "";
+    const r = await taskIn(ws, task);
+    if (!r) return said({ ok: false, text: `There is no task ${task}.` });
+    const asked = ticketAsked(form);
+    const before = ticketsOf(r, ws.stream).get(task);
+    const { people, agents } = await assignees(ws.stream, actor);
+    const why = ticketProblem(asked, [...people, ...agents, before?.assignee]);
+    if (why) return said({ ok: false, text: `The ticket wasn't saved: ${why}` });
+    const { title, description, steps, estimate, assignee } = asked;
+    const payload = { task, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
+    const same = before && JSON.stringify([before.title, before.description, before.steps, before.estimate, before.assignee]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate, payload.assignee]);
+    if (same || (!before && Object.keys(payload).length === 1)) return said({ ok: true, text: "Nothing changed." });
+    const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
+    if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
+    said({ ok: true, text: "Saved." }, task);
+  };
+
+  // POST /comments: a comment on a ticket (feedback its agent reads), written as the person commenting.
+  const addComment = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const said = (f: { ok: boolean; text: string }, task?: string) => toTicket(res, ws, form, f, task);
+    const actor = actorNow();
+    if (actor === undefined) return said({ ok: false, text: "Sign in with GitHub first, so tira knows who comments." });
+    const task = form.get("task") ?? "";
+    if (!(await taskIn(ws, task))) return said({ ok: false, text: `There is no task ${task}.` });
+    const words = (form.get("text") ?? "").replaceAll("\r\n", "\n").trim();
+    if (words === "" || words.length > MAX_COMMENT || !NO_CONTROL.test(words)) return said({ ok: false, text: `A comment is 1 to ${MAX_COMMENT} characters.` });
+    const w = await writeComment(ws.stream, task, words, actor);
+    if (w !== undefined) return said({ ok: false, text: `The comment wasn't added (${w}).` });
+    said({ ok: true, text: "Comment added." }, task);
+  };
+  // a comment on a task, as `actor`: undefined when it was written, else why not
+  const writeComment = async (stream: string, task: string, words: string, actor: string): Promise<string | undefined> => {
+    const w = (await dispatcher.submit({ stream, kind: "create", entity: { type: COMMENT, id: `c-${randomBytes(6).toString("hex")}` }, actor, payload: { task, text: words } })).result;
+    if (w.status === "appended") return undefined;
+    return w.status === "rejected" || w.status === "refused" ? w.detail : w.status;
+  };
+
   const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
     const a = await askedOf(res, form, ws);
     if (a === undefined) return;
+    const login = who(req).login;
+    if (login) a.login = login;
     const ask = a.ask;
     const ticket = a.ticket;
     const actor = actorNow();
@@ -787,10 +995,16 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const cmd = commandOf(ask, ws.stream, actor);
     const first = ticket === undefined ? undefined : commandOf(ticket, ws.stream, actor);
     if (await heldBack(res, a, cmd, first)) return;
-    const flash = await inOrder([
+    let flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
       () => write(ask, cmd),
     ]);
+    // the decision's comment, on the ticket, once the move is written
+    const comment = (a.values?.comment ?? "").replaceAll("\r\n", "\n").trim();
+    if (flash.ok && comment !== "" && ask.type !== IDEA) {
+      const why = await writeComment(ws.stream, ask.id, comment, actor);
+      flash = { ...flash, text: why === undefined ? `${flash.text} Comment added.` : `${flash.text} The comment wasn't added (${why}).` };
+    }
     const key = String(++flashSeq);
     flashes.set(key, flash.ok ? { ...flash, changed: changedBy(ask, ticket) } : flash);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
@@ -803,6 +1017,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // Cancel and the tira mark go back to. It offers what your accounts hold: your GitHub repos, and
   // your Jira's projects (or a way to connect it). No one who can act yet: the landing first.
   const acc = accounts(opts.links);
+  // A task's newest commits, looked up on GitHub (only that task's) and kept: what the look said.
+  const commitsSaid = (stream: string, task: string, login: string | undefined) =>
+    lookedSaid(task, () => lookForCommits(opts.store, opts.registry, stream, task, acc.githubOf(login)));
   // the page's Jira: your connected site's projects, else a way to sign in, else that it isn't set up
   const newProjectJira = async (login: string | undefined, host: string, ws: Workspace): Promise<NewProject["jira"]> => {
     if (login) return acc.jira(login, host, withQ("/projects/new", ws.q));
@@ -942,9 +1159,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       return f;
     },
   }, who);
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, ...integrations };
+  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
-  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env) });
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (stream, task) => commitsSaid(stream, task, undefined), proofFor: (stream, task, ref) => proveWith(opts.store, opts.registry, stream, task, acc.githubOf(undefined), ref) });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");

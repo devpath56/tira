@@ -107,8 +107,8 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   // tokens was found while working on colors, its sibling: a dotted line joins them, and its node says so
   assert.deepEqual([...html.matchAll(/<path class="e found" data-from="node:colors" data-found="([^"]+)"/g)].map((m) => m[1]), ["node:tokens"]);
   assert.match(html, /data-key="node:tokens"[^>]*>[^]*?<span class="gm">done · ✦ found<\/span>/);
-  assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?3 of 3 subtasks closed/);
-  assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?1 of 3 subtasks closed/);
+  assert.match(html, /aria-label="improve_visual" role="dialog" aria-modal="true">[^]*?<span title="closed of all">3\/3<\/span>/);
+  assert.match(html, /aria-label="dashboard" role="dialog" aria-modal="true">[^]*?<span title="closed of all">1\/3<\/span>/);
   // Kanban holds the work (leaves), with the cursor's card marked next; no strip of parents above
   // every ticket but an untouched grouping (dashboard: to do, with subtasks); tira's closes are Done cards;
   // the open idea waits in Ideas, first; Done is newest first (tira closed metrics_card last)
@@ -597,14 +597,20 @@ test("a task (or an idea) opens as a dialog over the page, never a side panel or
   assert.doesNotMatch(html, /translateX\(100%\)/); // no side panel sliding in
 });
 
-test("a task's dialog lists its subtasks with their states, shows proof of work on a done task, and offers actions only on the live page", async () => {
+test("a task's dialog lists its subtasks as rows (state, name, estimate, assignee), shows where it sits and proof of work on a done task, and offers actions only on the live page", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
   const dialog = (id: string, page = html) => new RegExp(`<section class="drawer" id="t\\d+" aria-label="${id}"[^]*?</section>`).exec(page)?.[0] ?? "";
   const parent = dialog("improve_visual");
-  const kids = [...parent.matchAll(/<li><a href="#(t\d+)">([^<]+)<\/a><span class="state s-([a-z_]+)">/g)].map((m) => [m[2], m[3]]);
+  const kids = [...parent.matchAll(/<li><a class="sub-row" href="#(t\d+)" data-subtask="node:[^"]+"><span class="sub-ico s-([a-z_]+)" aria-hidden="true"><\/span><span class="sub-name">([^<]+)<\/span><span class="sub-est"><\/span><span class="who none"[^>]*>–<\/span><span class="state s-\2">/g)].map((m) => [m[3], m[2]]);
   assert.deepEqual(kids, [["colors", "done"], ["font", "cancelled"], ["tokens", "done"]]);
-  for (const [, href] of parent.matchAll(/<li><a href="#(t\d+)">/g)) assert.match(html, new RegExp(`<section class="drawer" id="${href}"`));
+  for (const [, href] of parent.matchAll(/<a class="sub-row" href="#(t\d+)"/g)) assert.match(html, new RegExp(`<section class="drawer" id="${href}"`));
+  assert.match(parent, /<div class="sub-head"><h3>Subtasks<\/h3><span title="closed of all">3\/3<\/span><\/div>/);
+  // where it sits: the tickets above it, and its place among its sister subtasks
+  const colors = dialog("colors");
+  assert.match(colors, /<nav class="tk-crumbs" aria-label="Where it sits"><a href="#t\d+">dashboard<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+">metrics_card<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+">improve_visual<\/a><span class="sep" aria-hidden="true">›<\/span><span aria-current="page">colors<\/span><span class="tk-sibs" data-siblings><span class="off" aria-hidden="true">↑<\/span><span>1 of 3<\/span><a href="#t\d+" aria-label="The subtask after">↓<\/a><\/span><\/nav>/);
+  assert.match(colors, /<div class="prop" data-parent><span class="lk">Parent<\/span><div><a href="#t\d+">improve_visual<\/a><span class="meter"/);
+  assert.match(dialog("dashboard"), /<div class="prop" data-parent><span class="lk">Parent<\/span><div><span class="dim">—<\/span><\/div><\/div>/);
   // proof: the evidence on the completion, for a done task; none for open work
   assert.match(dialog("colors"), /<div class="proof" data-proof><span class="proof-k">Proof of work<\/span><span class="proof-v">[^<]+<\/span><span class="ev-seq">isha · seq \d+<\/span><\/div>/);
   assert.doesNotMatch(dialog("table"), /data-proof/);
@@ -612,9 +618,13 @@ test("a task's dialog lists its subtasks with their states, shows proof of work 
   assert.doesNotMatch(html, /data-dialog-acts/);
   const live = renderHtml(r, S, "h", events, { live: {} });
   const acts = (id: string) => [...(/data-dialog-acts>(.*?)<\/div>/.exec(dialog(id, live))?.[1] ?? "").matchAll(/data-act="([A-Z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(acts("table"), ["COMPLETE", "BLOCK", "ADD_SUBTASK", "CANCEL"]); // in progress
+  assert.deepEqual(acts("table"), ["COMPLETE", "BLOCK", "CANCEL"]); // in progress
   assert.deepEqual(acts("colors"), ["REOPEN"]); // done
-  assert.deepEqual(acts("filters"), ["START", "BLOCK", "ADD_SUBTASK", "CANCEL"]); // unstarted
+  assert.deepEqual(acts("filters"), ["START", "BLOCK", "CANCEL"]); // unstarted
+  // Add subtask sits under its subtasks, while it can take one
+  assert.match(dialog("table", live), /<a class="act sub-add" href="\/confirm\?type=node&#38;id=table&#38;event=ADD_SUBTASK" data-act="ADD_SUBTASK">\+ Add subtask<\/a>/);
+  assert.doesNotMatch(dialog("colors", live), /sub-add/); // done: re-open it first
+  assert.doesNotMatch(dialog("table"), /sub-add/); // a rendered file offers nothing
 });
 
 test("Lanes shows only when the stream has something for it; the whole log is called History, a dialog from under the project's name", async () => {

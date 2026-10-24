@@ -8,11 +8,19 @@ import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
-import { addSubtask, blockTask, completeTask, fileIdea, startTask } from "./actions.ts";
+import { addComment, addSubtask, blockTask, completeTask, fileIdea, fillTicket, startTask } from "./actions.ts";
+import { MAX_DESCRIPTION, MAX_STEP, MAX_STEPS } from "../tables/tickets.ts";
 
-// What every tool works in: the project's stream, the agent it acts as, and (from tira mcp) whether
-// that agent is still connected: revoked in Project settings, its next call is refused.
-export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string; stillConnected?: () => Promise<boolean> }
+// What every tool works in: the project's stream, the agent it acts as, (from tira mcp) whether
+// that agent is still connected: revoked in Project settings, its next call is refused; and how to
+// look on GitHub for a task's newest commits (to complete it with one), and check any commit or pull
+// request of the project's repo named as proof (keeping it for the task), when it can.
+export interface AgentContext {
+  store: EventStore; registry: Registry; stream: string; actor: string
+  stillConnected?: () => Promise<boolean>
+  fetchCommits?: (task: string) => Promise<string | undefined>
+  proveWith?: (task: string, ref: string) => Promise<{ ref: string } | { why: string }>
+}
 
 export { agentNameProblem } from "./names.ts";
 
@@ -60,8 +68,8 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ id }) => answer(await guarded(ctx, () => startTask(ctx, id))));
   server.registerTool("complete_task", {
     title: "Complete a task",
-    description: "Mark a task Done, with proof of work anyone can re-check: a link (a pull request, a report), a file path, or a short note of what was checked. tira refuses without proof, before the task is started, or while its subtasks are open.",
-    inputSchema: z.object({ id: taskId, proof: words("the proof of work: a link, file or note anyone can re-check"), note: words("optional: a note for the task's history").optional() }),
+    description: "Mark a task Done. The proof of work is a commit or a pull request of the project's GitHub repo: the task's own (get_task lists them; tira looks on GitHub for its newest first) or any other, which tira checks on GitHub. tira refuses anything else, before the task is started, or while its subtasks are open.",
+    inputSchema: z.object({ id: taskId, proof: words("a commit (its id, or its first 7 or more characters) or a pull request (#12, or its link) of the project's repo"), note: words("optional: a note for the task's history").optional() }),
     annotations: { ...WRITES, idempotentHint: true },
   }, async ({ id, proof, note }) => answer(await guarded(ctx, () => completeTask(ctx, id, proof, note))));
   server.registerTool("block_task", {
@@ -87,5 +95,23 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
     inputSchema: z.object({ summary: words("the idea, in a sentence"), why: words("why it's worth doing"), under: z.string().trim().min(1).optional().describe("optional: the task it belongs under, if you know") }),
     annotations: { ...WRITES, idempotentHint: false },
   }, async ({ summary, why, under }) => answer(await guarded(ctx, () => fileIdea(ctx, summary, why, under))));
+  server.registerTool("add_comment", {
+    title: "Comment on a task",
+    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. People see it on the ticket, under your name.",
+    inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
+    annotations: { ...WRITES, idempotentHint: false },
+  }, async ({ id, text }) => answer(await guarded(ctx, () => addComment(ctx, id, text))));
+  server.registerTool("fill_ticket", {
+    title: "Fill in a ticket",
+    description: "Write what a task's ticket says: its title, description, steps and estimate (get_task shows them). Only what you give changes, and an empty one clears it. Who it's assigned to is a person's to say: it stays as it is. People see it on the ticket, and the history says you wrote it.",
+    inputSchema: z.object({
+      id: taskId,
+      title: z.string().max(120).optional().describe("optional: a short title, up to 120 characters"),
+      description: z.string().max(MAX_DESCRIPTION).optional().describe("optional: what the work is and why, in a few sentences"),
+      steps: z.array(z.string().max(MAX_STEP)).max(MAX_STEPS).optional().describe(`optional: the steps to do it, in order, up to ${MAX_STEPS} (these replace the ticket's steps)`),
+      estimate: z.string().max(12).optional().describe("optional: how long it should take: a number and a unit, e.g. 30m, 2h, 1d (8 hours) or 1w"),
+    }),
+    annotations: { ...WRITES, idempotentHint: true },
+  }, async ({ id, ...fill }) => answer(await guarded(ctx, () => fillTicket(ctx, id, fill))));
   return server;
 }

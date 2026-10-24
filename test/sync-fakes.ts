@@ -73,7 +73,21 @@ export class FakeJira implements JiraClient {
 
 export class FakeGitHub implements GitHubClient {
   readonly pullsByNumber = new Map<number, Pull>();
+  repoCommits: { sha: string; message: string }[] = []; // commits on the default branch, no pull request's
   fail?: string | undefined;
+  private pullOf(p: Pull) {
+    return { number: p.number, title: p.title, url: p.url, state: p.state, merged: !!p.mergedAt, branch: p.branch };
+  }
+  async commit(_repo: string, sha: string) {
+    if (this.fail) throw new Error(this.fail);
+    const all = [...this.repoCommits, ...[...this.pullsByNumber.values()].flatMap((p) => (p.shas ?? []).map((s, i) => ({ sha: s, message: p.commits[i] ?? "" })))];
+    return all.find((c) => c.sha.startsWith(sha));
+  }
+  async pull(_repo: string, number: number) {
+    if (this.fail) throw new Error(this.fail);
+    const p = this.pullsByNumber.get(number);
+    return p ? this.pullOf(p) : undefined;
+  }
   add(p: Partial<Pull> & { number: number }) {
     this.pullsByNumber.set(p.number, { title: "", body: "", branch: "", url: `https://github.com/acme/app/pull/${p.number}`, state: "open", commits: [], ...p });
   }
