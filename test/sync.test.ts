@@ -22,6 +22,7 @@ import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, s
 import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
 import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
+import { landingPage } from "../src/serve/welcome.ts";
 import { LINK_GUARDS } from "../src/tables/links.ts";
 import { tint } from "../src/serve/layout.mjs";
 import { renderHtml } from "../src/render/html.ts";
@@ -587,6 +588,8 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);
   try {
+    // the first run's steps name the address tira sends GitHub back to, exactly
+    assert.match(landingPage({ token: "k", githubReady: false, port: "4772" }), /callback <code>http:\/\/localhost:4772\/signin\/github\/callback<\/code> \(the address tira sends, exactly\)/);
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", github_secret: "gh-secret" });
     // the way in has no theme switch (that's Account settings'); it follows the computer, or this browser's choice
     const landing = (await s.http("GET", "/welcome")).body;
@@ -1109,7 +1112,7 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 7);
     // agents: tira mcp, under each agent's own name
     assert.match(help, /How do my agents use tira\?<\/summary><p class="bubble">Through tira(?:'|&#39;)s MCP server, under each agent(?:'|&#39;)s own name\. In a terminal: <code>claude mcp add tira -- node \/path\/to\/tira\/scripts\/tira\.ts mcp --stream PROJECT --actor claude-code<\/code>/);
-    assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>/);
+    assert.match(help, /How do I make tira&#39;s GitHub app\?<\/summary><p class="bubble">On GitHub: Settings → Developer settings → OAuth Apps → New\. Homepage <code>http:\/\/localhost:\d+<\/code>, callback <code>http:\/\/localhost:\d+\/signin\/github\/callback<\/code>, exactly/);
     assert.match(help, /<div class="hc-bottom" data-help-bottom hidden><form class="hc-compose" data-help-ask><input name="q" aria-label="Ask a question" placeholder="Ask a question…"[^>]*><button class="hc-send" type="submit" aria-label="Send" disabled>/);
     assert.match(page, /<script type="module" src="\/help\.mjs"><\/script>/);
     assert.equal((await s.http("GET", "/help.mjs")).status, 200);

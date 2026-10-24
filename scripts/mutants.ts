@@ -859,6 +859,8 @@ const MUTANTS: Mutant[] = [
   { name: "mcp: tira mcp serves another project", file: "src/cli/cli.ts", find: "tiraMcpServer({ store, registry, stream, actor })", replace: "tiraMcpServer({ store, registry, stream: \"tasktree-main\", actor })", needs: "postgres" },
   { name: "mcp: tira mcp starts under any name", file: "src/cli/cli.ts", find: "  if (problem !== undefined || actor === undefined) throw new UsageError(problem ?? \"\");", replace: "  if (actor === undefined) throw new UsageError(problem ?? \"\");" },
   { name: "help: no answer for agents", file: "src/serve/integrations.ts", find: "    [\"How do my agents use tira?\",", replace: "    [\"How do my agents use it?\"," },
+  { name: "help: GitHub's callback without tira's address", file: "src/serve/integrations.ts", find: "callback <code>http://localhost:${esc(port)}/signin/github/callback</code>, exactly", replace: "callback <code>http://localhost:${esc(port)}/</code>, exactly" },
+  { name: "welcome: GitHub's callback without tira's address", file: "src/serve/welcome.ts", find: "callback <code>http://localhost:${esc(o.port)}/signin/github/callback</code>", replace: "callback <code>http://localhost:${esc(o.port)}/</code>" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
