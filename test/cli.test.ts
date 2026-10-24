@@ -570,11 +570,12 @@ test("divergence wiring: no page reads a stored report — a poisoned run log ch
   }
 });
 
-test("tira serve keeps its page token in the private store: a page opened before a restart still works after it (on Postgres, as it runs live)", { skip: needsPg }, async () => {
+test("tira serve keeps its page token in the private store: a page opened before a restart still works after it; stopped, it exits at once (on Postgres, as it runs live)", { skip: needsPg }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tira-serve-token-"));
   const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
   const env = { ...process.env, TIRA_DATABASE_URL: freshPgDb(), TIRA_HOME: join(dir, "home"), TIRA_FACTORY: "" };
   spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "t", "create", "node", "a", "--actor", "isha"], { encoding: "utf8", env });
+  const stops: number[] = []; // ms from SIGTERM to exit, each time
   const tokenOnce = async () => {
     const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "t", "serve", "--actor", "isha", "--port", "0"], { env });
     try {
@@ -587,14 +588,18 @@ test("tira serve keeps its page token in the private store: a page opened before
       return /name="token" value="([0-9a-f]+)"/.exec(page)?.[1];
     } finally {
       const exited = new Promise((r) => child.once("exit", r));
+      const t = performance.now();
       child.kill("SIGTERM");
       await exited;
+      stops.push(performance.now() - t);
     }
   };
   try {
     const first = await tokenOnce();
     assert.match(first ?? "", /^[0-9a-f]{48}$/);
     assert.equal(await tokenOnce(), first);
+    // no connection left open to wait out (a Postgres pool idles 10 s before it lets go)
+    for (const ms of stops) assert.ok(ms < 5000, `tira serve took ${Math.round(ms)} ms to exit after SIGTERM`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
