@@ -43,6 +43,8 @@ import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 import { CSP } from "./csp.ts";
+import { MCP_PATH, mcpRoute } from "../mcp/http.ts";
+import { agentTokensFor } from "../mcp/tokens.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 export { CSP } from "./csp.ts";
@@ -941,10 +943,13 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     },
   }, who);
   const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, ...integrations };
+  // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env) });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
     const url = new URL(req.url ?? "/", `http://${host}`);
+    if (url.pathname === MCP_PATH) return mcp(req, res, url); // agents, by their own token: no page, no sign-in
     const asset = req.method === "GET" ? ASSETS[url.pathname] : undefined;
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
     const route = routes[`${req.method} ${url.pathname}`];
@@ -955,7 +960,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return current.run({ ...who(req), ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
-    handle(req, res).catch((err: unknown) => send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`));
+    handle(req, res).catch((err: unknown) => (res.headersSent ? res.destroy() : send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`)));
   });
+  server.on("close", () => void mcp.close());
   return Object.assign(server, { token });
 }

@@ -8,11 +8,12 @@ import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
 
-export interface AgentToken { id: string; project: string; agent: string; createdBy: string; createdAt: string; lastUsedAt?: string }
+export interface AgentToken { id: string; project: string; agent: string; app?: string; createdBy: string; createdAt: string; lastUsedAt?: string }
 
 export interface AgentTokens {
-  // a new token for this agent in this project: the token itself (shown once) and its row
-  create(project: string, agent: string, createdBy: string): Promise<{ token: string; row: AgentToken }>;
+  // a new token for this agent in this project (and the app it's for, when it was chosen): the
+  // token itself (shown once) and its row
+  create(project: string, agent: string, createdBy: string, app?: string): Promise<{ token: string; row: AgentToken }>;
   // the project's agents still connected, oldest first
   list(project: string): Promise<AgentToken[]>;
   // the agent a token belongs to, unless it was revoked (or never made here)
@@ -42,9 +43,9 @@ export function freeName(base: string, taken: readonly string[]): string {
 // In memory: for tests, and tira run without Postgres.
 export class MemoryAgentTokens implements AgentTokens {
   private readonly rows = new Map<string, AgentToken & { hash: string; revoked: boolean }>();
-  async create(project: string, agent: string, createdBy: string) {
+  async create(project: string, agent: string, createdBy: string, app?: string) {
     const { id, token } = newToken();
-    const row = { id, project, agent, createdBy, createdAt: new Date().toISOString() };
+    const row = { id, project, agent, ...(app ? { app } : {}), createdBy, createdAt: new Date().toISOString() };
     this.rows.set(id, { ...row, hash: tokenHash(token), revoked: false });
     return { token, row };
   }
@@ -71,8 +72,9 @@ export class MemoryAgentTokens implements AgentTokens {
 }
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
-type Row = { id: string; project: string; agent: string; created_by: string; created_at: Date; last_used_at: Date | null };
-const rowOf = (r: Row): AgentToken => ({ id: r.id, project: r.project, agent: r.agent, createdBy: r.created_by, createdAt: r.created_at.toISOString(), ...(r.last_used_at ? { lastUsedAt: r.last_used_at.toISOString() } : {}) });
+type Row = { id: string; project: string; agent: string; app: string | null; created_by: string; created_at: Date; last_used_at: Date | null };
+const rowOf = (r: Row): AgentToken => ({ id: r.id, project: r.project, agent: r.agent, ...(r.app ? { app: r.app } : {}), createdBy: r.created_by, createdAt: r.created_at.toISOString(), ...(r.last_used_at ? { lastUsedAt: r.last_used_at.toISOString() } : {}) });
+const COLUMNS = "id, project, agent, app, created_by, created_at, last_used_at";
 
 export class PostgresAgentTokens implements AgentTokens {
   private readonly pool: pg.Pool;
@@ -90,25 +92,26 @@ export class PostgresAgentTokens implements AgentTokens {
   private ready(): Promise<void> {
     this.made ??= (async () => {
       await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${this.schema}`);
-      await this.pool.query(`CREATE TABLE IF NOT EXISTS ${this.table} (id text PRIMARY KEY, hash text NOT NULL UNIQUE, project text NOT NULL, agent text NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), last_used_at timestamptz, revoked_at timestamptz)`);
+      await this.pool.query(`CREATE TABLE IF NOT EXISTS ${this.table} (id text PRIMARY KEY, hash text NOT NULL UNIQUE, project text NOT NULL, agent text NOT NULL, app text, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), last_used_at timestamptz, revoked_at timestamptz)`);
+      await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS app text`); // made before agents had their app
       await this.pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS agent_tokens_connected ON ${this.table} (project, agent) WHERE revoked_at IS NULL`);
     })();
     return this.made;
   }
-  async create(project: string, agent: string, createdBy: string) {
+  async create(project: string, agent: string, createdBy: string, app?: string) {
     await this.ready();
     const { id, token } = newToken();
-    const r = await this.pool.query<Row>(`INSERT INTO ${this.table} (id, hash, project, agent, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id, project, agent, created_by, created_at, last_used_at`, [id, tokenHash(token), project, agent, createdBy]);
+    const r = await this.pool.query<Row>(`INSERT INTO ${this.table} (id, hash, project, agent, app, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`, [id, tokenHash(token), project, agent, app ?? null, createdBy]);
     return { token, row: rowOf(r.rows[0] as Row) };
   }
   async list(project: string) {
     await this.ready();
-    const r = await this.pool.query<Row>(`SELECT id, project, agent, created_by, created_at, last_used_at FROM ${this.table} WHERE project = $1 AND revoked_at IS NULL ORDER BY created_at, id`, [project]);
+    const r = await this.pool.query<Row>(`SELECT ${COLUMNS} FROM ${this.table} WHERE project = $1 AND revoked_at IS NULL ORDER BY created_at, id`, [project]);
     return r.rows.map(rowOf);
   }
   async find(token: string) {
     await this.ready();
-    const r = await this.pool.query<Row>(`SELECT id, project, agent, created_by, created_at, last_used_at FROM ${this.table} WHERE hash = $1 AND revoked_at IS NULL`, [tokenHash(token)]);
+    const r = await this.pool.query<Row>(`SELECT ${COLUMNS} FROM ${this.table} WHERE hash = $1 AND revoked_at IS NULL`, [tokenHash(token)]);
     return r.rows[0] ? rowOf(r.rows[0]) : undefined;
   }
   async used(id: string) {

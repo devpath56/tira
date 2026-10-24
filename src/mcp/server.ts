@@ -1,8 +1,8 @@
-// tira for agents: an MCP server that Claude Code or Claude Desktop starts on this computer
-// (`tira mcp`), for one project, under one agent's own name. It speaks the 2026-07-28 spec, and
-// 2025-era clients too (serveStdio), over stdio to the program that started it: never over the
-// network. Every tool reads or writes through tira's own rules, so an agent can do nothing a
-// person couldn't, and the history says which agent did it.
+// tira for agents: an MCP server for one project, under one agent's own name, on this computer
+// only: at tira serve's /mcp (src/mcp/http.ts) for Claude Code, Cursor and VS Code, or over stdio
+// to the program that started it (`tira mcp`, for Claude Desktop). It speaks the 2026-07-28 spec,
+// and 2025-era clients too. Every tool reads or writes through tira's own rules, so an agent can
+// do nothing a person couldn't, and the history says which agent did it.
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";

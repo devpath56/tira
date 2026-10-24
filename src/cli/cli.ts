@@ -107,9 +107,10 @@ Usage:
                                                   written as NAME; without --actor, people sign in with GitHub
                                                   first (a landing page, then connect a repo and, optionally,
                                                   a Jira project); the divergence section is recomputed on every
-                                                  page load. Ctrl-C stops it
-  tira mcp                                        tira for agents: an MCP server on stdio, for Claude Code,
-                                                  Cursor, VS Code or Claude Desktop to start, with the agent's
+                                                  page load. It also answers agents' MCP at /mcp, each with its
+                                                  own token (Project settings → Connect agents). Ctrl-C stops it
+  tira mcp                                        tira for agents: an MCP server on stdio, for an app that can
+                                                  only start a program (Claude Desktop), with the agent's
                                                   own token in TIRA_AGENT_TOKEN (Project settings → Connect
                                                   agents): it names the project and the agent, and a revoked
                                                   one is refused. Tools: what's next, list tasks, show a task,
@@ -875,8 +876,8 @@ async function serve(open: () => ClosableStore, registry: Registry, stream: stri
   }
 }
 
-// tira for agents (src/mcp): an MCP server on stdio for Claude Code, Cursor, VS Code or Claude
-// Desktop to start, with the agent's own token (TIRA_AGENT_TOKEN, from Project settings → Connect
+// tira for agents (src/mcp): an MCP server on stdio for an app that can only start a program
+// (Claude Desktop; the others reach tira serve's /mcp), with the agent's own token (TIRA_AGENT_TOKEN, from Project settings → Connect
 // agents): the token names the project and the agent it acts as, and a revoked one is refused, at
 // the start and at every call. It runs until the program that started it closes its end, or
 // Ctrl-C; the store closes on the way out. Nothing goes to stdout: that's the protocol's.

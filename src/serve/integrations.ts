@@ -24,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import type { FoldResult } from "../fold/fold.ts";
 import { agentNameProblem } from "../mcp/names.ts";
-import { APP_AGENT, APP_NAME, APPS, appSetup, databaseCheck, TIRA_ENV_FILE, TIRA_SCRIPT, TOKEN_HERE, type App, type AppSetup, type DatabaseCheck, type Launch } from "../mcp/connect.ts";
+import { APP_AGENT, APP_NAME, APPS, appSetup, databaseCheck, mcpUrl, TIRA_ENV_FILE, TIRA_SCRIPT, TOKEN_HERE, type App, type AppSetup, type DatabaseCheck, type Launch, type Where } from "../mcp/connect.ts";
 import { agentTokensFor, freeName, type AgentToken, type AgentTokens } from "../mcp/tokens.ts";
 import { workspaceOf, type WorkspaceLink } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
@@ -331,10 +331,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     return `<section class="grp" id="${id}" data-int="${id}"><h2 class="grp-h">${title}</h2>${desc}<div class="grp-list">${rows}</div>${footer}</section>`;
   };
   const problem = (text: string) => (text ? `<div class="grp-row"><span class="grp-k no">${esc(text)}</span></div>` : "");
+  const flashLine = (f: Flash) => `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>`;
   const flashOf = (url: URL) => {
     const f = c.takeFlash(url.searchParams.get("r") ?? "");
-    if (!f) return "";
-    return `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>`;
+    return f ? flashLine(f) : "";
   };
   const scripts = `<script type="module" src="/tabs.mjs"></script><script type="module" src="/help.mjs"></script><script type="module" src="/secrets.mjs"></script><script type="module" src="/agents.mjs"></script>`;
   const signedOut = (res: ServerResponse, url: URL) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/welcome${url.search}` }); // a result goes along
@@ -492,57 +492,58 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   };
 
   // ---------- Connect agents (Project settings) ----------
-  // An agent connects to this project with a token of its own (src/mcp/tokens.ts): in one click
-  // (the token, then the app's install link, or its command or config to copy) or by the manual
-  // steps. A new token is shown once, on the page the connect lands on (a one-time key in the
-  // address, never the token); only its fingerprint is kept. Whoever connected it, or the admin,
-  // revokes it.
+  // Three steps, for someone doing it the first time: choose your app; name your agent (its own
+  // token is made then, for this project only, src/mcp/tokens.ts); finish in that app with one
+  // action (its install link, a command or a config entry), then Test connection: has tira heard
+  // from it yet? Each step is its own address (?app=, ?made=), so it all works without the page's
+  // script. The new token shows only inside step 3, for 10 minutes, to whoever made it (a one-time
+  // key in the address, never the token); tira keeps only its fingerprint. Connected agents are
+  // listed below, with Revoke (whoever connected it, or the admin); the rest folds under More.
   const tokensNow = (): AgentTokens | undefined => c.outside?.agentTokens ?? agentTokensFor(env);
   const launch: Launch = { node: process.execPath, script: TIRA_SCRIPT };
-  const justMade = new Map<string, { token: string; agent: string; project: string; app?: App; until: number }>();
+  const MADE_FOR_MS = 10 * 60_000;
+  type Made = { token: string; id: string; agent: string; project: string; app: App; by: string; until: number };
+  const justMade = new Map<string, Made>();
+  const MADE_KEY = /^[0-9a-f]{24}$/;
   const meAs = (me: { login?: string; actor?: string }) => me.login ?? me.actor ?? "";
   const mayRevoke = (me: { login?: string; actor?: string }, row: AgentToken) => meAs(me) === row.createdBy || !appKeys(env).github || (!!me.login && isAdmin(access(env), me.login));
   // where an agents action lands: the section, with the project kept (and its result shown there)
   const agentsAt = (query: string) => {
-    const w = c.stream === c.home ? "" : "&w=" + encodeURIComponent(c.stream);
-    return `/integrations?${query}${w}&from=agents#agents`;
+    const w = c.stream === c.home ? "" : "w=" + encodeURIComponent(c.stream);
+    const q = [query, w, "from=agents"].filter(Boolean).join("&");
+    return `/integrations?${q}#agents`;
   };
-  const toAgents = (res: ServerResponse, fragment: boolean, query: string, open?: string) => {
-    const go = agentsAt(query);
-    if (!fragment) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: go });
-    const opens = open ? ` data-open="${esc(open)}"` : "";
-    c.send(res, 200, html, `<div data-go="${esc(go)}"${opens}></div>`);
-  };
+  const toAgents = (res: ServerResponse, query: string) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: agentsAt(query) });
   const agentName = (asked: string, taken: string[]): { name: string } | { why: string } => {
     const why = agentNameProblem(asked);
     if (why) return { why };
     if (taken.includes(asked)) return { why: `${asked} is already connected to this project: revoke it first, or pick another name.` };
     return { name: asked };
   };
+  // step 2's Connect: the agent's token, for the app chosen in step 1
   const agentConnect = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
     if (form === undefined) return;
-    const fragment = form.get("fragment") === "1";
-    const said = (f: Flash) => toAgents(res, fragment, "r=" + c.flash(f));
+    const app = APPS.find((a) => a === form.get("app"));
+    const said = (f: Flash) => toAgents(res, (app ? `app=${app}&` : "") + "r=" + c.flash(f));
     const me = who(req);
     if (!me.actor) return said({ ok: false, text: "Sign in first." });
+    if (!app) return said({ ok: false, text: "Choose your app first." });
     const tokens = tokensNow();
     if (!tokens) return said({ ok: false, text: "Connecting agents needs tira's Postgres database." });
-    const app = APPS.find((a) => a === form.get("app"));
-    const taken = (await tokens.list(c.stream)).map((x) => x.agent);
-    const named = app ? { name: freeName(APP_AGENT[app], taken) } : agentName((form.get("name") ?? "").trim(), taken);
+    const named = agentName((form.get("name") ?? "").trim(), (await tokens.list(c.stream)).map((x) => x.agent));
     if ("why" in named) return said({ ok: false, text: named.why });
-    const { token } = await tokens.create(c.stream, named.name, meAs(me));
+    const { token, row } = await tokens.create(c.stream, named.name, meAs(me), app);
     const now = Date.now();
     for (const [k, v] of justMade) if (v.until < now) justMade.delete(k);
     const key = randomBytes(12).toString("hex");
-    justMade.set(key, { token, agent: named.name, project: c.stream, until: now + 10 * 60_000, ...(app ? { app } : {}) });
-    toAgents(res, fragment, "made=" + key, app ? appSetup(app, c.stream, launch, token).install : undefined);
+    justMade.set(key, { token, id: row.id, agent: row.agent, project: c.stream, app, by: meAs(me), until: now + MADE_FOR_MS });
+    toAgents(res, "made=" + key);
   };
   const agentRevoke = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
     if (form === undefined) return;
-    const said = (f: Flash) => toAgents(res, false, "r=" + c.flash(f));
+    const said = (f: Flash) => toAgents(res, "r=" + c.flash(f));
     const me = who(req);
     const tokens = tokensNow();
     if (!me.actor || !tokens) return said({ ok: false, text: "Sign in first." });
@@ -552,19 +553,52 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     await tokens.revoke(row.id);
     said({ ok: true, text: `Revoked ${row.agent}: its next call is refused.` });
   };
-  // the page's own: a just-made token, once
-  const takeMade = (key: string | null) => {
+  // Test connection: has the app called tira since the agent was made? Its first call sets the
+  // agent's last used (a call from this page would prove only that the token is new).
+  const NOT_YET: Record<App, string> = {
+    "claude-code": "Run the command above, then start a new Claude Code session",
+    cursor: "Add it to Cursor above and turn tira on in Cursor's settings, under MCP",
+    vscode: "Add it to VS Code above and start tira from its MCP servers list",
+    "claude-desktop": "Add the entry above to Claude Desktop's config and restart it",
+  };
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA"); // YYYY-MM-DD, on this computer's calendar
+  const ago = (iso: string) => {
+    const min = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
+    if (min < 1) return "just now";
+    if (min < 60) return `${min} min ago`;
+    return `on ${day(iso)}`;
+  };
+  const heardFrom = (row: AgentToken): Flash => {
+    const app = APPS.find((a) => a === row.app);
+    const where = app ? APP_NAME[app] : row.agent;
+    if (row.lastUsedAt) return { ok: true, text: `${where} is connected: tira heard from ${row.agent} ${ago(row.lastUsedAt)}. Ask it "what's next in tira?"` };
+    return { ok: false, text: `Not yet: tira hasn't heard from ${row.agent}. ${app ? NOT_YET[app] : "Finish the step above in its app"}, then test again.` };
+  };
+  const agentTest = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await c.formOf(req, res, host);
+    if (form === undefined) return;
+    const key = form.get("made") ?? "";
+    const answer = (f: Flash) => {
+      if (form.get("fragment") === "1") return c.send(res, 200, html, flashLine(f)); // the page's script shows it in place
+      toAgents(res, (MADE_KEY.test(key) ? `made=${key}&` : "") + "r=" + c.flash(f));
+    };
+    const tokens = tokensNow();
+    if (!who(req).actor || !tokens) return answer({ ok: false, text: "Sign in first." });
+    const row = (await tokens.list(c.stream)).find((x) => x.id === form.get("id"));
+    answer(row ? heardFrom(row) : { ok: false, text: "That agent isn't connected to this project any more." });
+  };
+  // a just-made agent's setup, for whoever made it, while it shows
+  const madeFor = (key: string | null, me: { login?: string; actor?: string }) => {
     const made = key ? justMade.get(key) : undefined;
-    if (key) justMade.delete(key);
-    return made && made.until >= Date.now() && made.project === c.stream ? made : undefined;
+    return made && made.until >= Date.now() && made.project === c.stream && made.by === meAs(me) ? made : undefined;
   };
 
   const DB_SAID: Record<DatabaseCheck, (file: string) => string> = {
-    ready: () => "Agents will work on this tira's database: tira's .env names it.",
-    missing: (file) => `tira's .env names no database, so an agent couldn't reach this board. Add TIRA_DATABASE_URL (and TIRA_SCHEMA, if this tira uses one) to <code>${esc(file)}</code>, the same as this tira's.`,
-    different: (file) => `tira's .env names a different database or schema than this tira uses, so an agent would work somewhere else. Make <code>${esc(file)}</code> match this tira's.`,
+    ready: () => "Claude Desktop's agent will work on this tira's database: tira's .env names it.",
+    missing: (file) => `tira's .env names no database, so Claude Desktop's agent couldn't reach this board. Add TIRA_DATABASE_URL (and TIRA_SCHEMA, if this tira uses one) to <code>${esc(file)}</code>, the same as this tira's.`,
+    different: (file) => `tira's .env names a different database or schema than this tira uses, so Claude Desktop's agent would work somewhere else. Make <code>${esc(file)}</code> match this tira's.`,
   };
-  const APP_HOW: Record<App, string> = { "claude-code": "One command to copy", cursor: "Installs in Cursor (it asks first)", vscode: "Installs in VS Code (it asks first)", "claude-desktop": "An entry for its config" };
+  const APP_HOW: Record<App, string> = { "claude-code": "A command to run", cursor: "Adds in one click", vscode: "Adds in one click", "claude-desktop": "An entry for its config" };
   const TOOLS_SAID: [string, string][] = [
     ["next_task", "what's in progress, what's next, how many are blocked"], ["list_tasks", "the tasks, in the board's order"], ["get_task", "one task, its history and proof"],
     ["start_task", "start a task (one at a time)"], ["complete_task", "done, with proof of work"], ["block_task", "blocked, with a reason and what it waits on"],
@@ -573,50 +607,81 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const copyButton = (target: string, label: string) => `<button type="button" class="env-btn" data-copy-target="${target}" title="Copy" aria-label="Copy ${esc(label)}">${COPY}</button>`;
   const codeBlock = (id: string, code: string, label: string) => `<div class="agent-code-wrap">${copyButton(id, label)}<pre class="agent-code" id="${id}">${esc(code)}</pre></div>`;
   const stepItem = (step: string) => `<li>${esc(step)}</li>`;
+  const steps = (setup: AppSetup) => `<ol class="agent-steps">${setup.steps.map(stepItem).join("")}</ol>`;
   const installLink = (app: App, url: string) => {
     const away = url.startsWith("https:") ? ` target="_blank" rel="noopener noreferrer"` : "";
     return `<a class="act primary" href="${esc(url)}"${away} data-agent-install>Add to ${APP_NAME[app]}</a>`;
   };
-  const appBlock = (app: App, setup: AppSetup, prefix: string) => {
-    const id = prefix + "-" + app;
-    const install = setup.install && prefix === "made" ? installLink(app, setup.install) : ""; // a link only with a real token in it
-    return `<div class="agent-app" data-agent-app="${app}"><div class="agent-app-h"><b>${APP_NAME[app]}</b>${install}</div><ol class="agent-steps">${setup.steps.map(stepItem).join("")}</ol>`
-      + codeBlock(id, setup.code, APP_NAME[app]) + `<p class="agent-undo">To remove it: <code>${esc(setup.remove)}</code></p></div>`;
+  const step = (n: number, title: string, state: "now" | "done" | "later", body: string) =>
+    `<div class="agent-step ${state}" data-agent-step="${n}"><h3><span class="agent-n">${state === "done" ? "✓" : n}</span>${title}</h3>${body}</div>`;
+  const tile = (app: App) => `<a class="agent-tile" href="${esc(agentsAt("app=" + app))}" data-agent-tile="${app}"><b>${APP_NAME[app]}</b><small>${APP_HOW[app]}</small></a>`;
+  const startOver = (label: string) => `<a href="${esc(agentsAt(""))}">${label}</a>`;
+  const testForm = (made: Made, key: string, t: string, said: string) =>
+    `<form method="post" action="/integrations/agents/test" class="agent-test" data-agent-test>${t}<input type="hidden" name="id" value="${esc(made.id)}"><input type="hidden" name="made" value="${esc(key)}"><button class="act" type="submit">Test connection</button><span class="agent-test-said">Checks that ${APP_NAME[made.app]} has called tira.</span></form>`
+    + `<div class="agent-tested" data-agent-tested>${said}</div>`;
+  // step 3: the one thing to do in the app (the setup by hand, folded, where an install link opens it)
+  const finish = (made: Made, at: Where, db: DatabaseCheck, envFile: string) => {
+    const setup = appSetup(made.app, made.project, at, made.token);
+    const byHand = steps(setup) + codeBlock("agent-setup", setup.code, APP_NAME[made.app]);
+    const dbWarn = made.app === "claude-desktop" && db !== "ready" ? `<p class="agent-db no" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>` : "";
+    if (!setup.install) return byHand + dbWarn;
+    return `<p>${APP_NAME[made.app]} shows tira's server and asks before it adds it.</p><p class="agent-go">${installLink(made.app, setup.install)}</p>`
+      + `<details class="agent-hand"><summary>Doesn't open? Add it by hand</summary>${byHand}</details>`;
   };
-  const madePanel = (made: { token: string; agent: string; project: string; app?: App }) => {
-    const apps = made.app ? [made.app] : [...APPS];
-    const blocks = apps.map((app) => appBlock(app, appSetup(app, made.project, launch, made.token), "made")).join("");
-    return `<div class="agent-ready" data-agent-ready><p><b>${esc(made.agent)}</b> is connected to this project. Its token is shown this once: it goes in the app's settings, and tira keeps only its fingerprint.</p>`
-      + codeBlock("agent-token", made.token, "the token") + blocks + `</div>`;
-  };
-  const connectChoice = (app: App, t: string) => `<form method="post" action="/integrations/agents/connect" data-agent-connect>${t}<input type="hidden" name="app" value="${app}"><button type="submit" class="agent-choice"><b>${APP_NAME[app]}</b><small>${APP_HOW[app]}</small></button></form>`;
   const agentRow = (row: AgentToken, me: { login?: string; actor?: string }, t: string) => {
-    const used = row.lastUsedAt ? "last used " + row.lastUsedAt.slice(0, 10) : "not used yet";
+    const app = APPS.find((a) => a === row.app);
+    const used = row.lastUsedAt ? "last used " + day(row.lastUsedAt) : "not used yet";
+    const about = [app ? APP_NAME[app] : "", `tira_${esc(row.id)}…`, `connected by ${esc(row.createdBy)} on ${day(row.createdAt)}`, used].filter(Boolean).join(" · ");
     const revoke = mayRevoke(me, row) ? `<form method="post" action="/integrations/agents/revoke">${t}<input type="hidden" name="id" value="${esc(row.id)}"><button class="how" type="submit">Revoke</button></form>` : "";
-    return `<div class="agent-row" data-agent="${esc(row.agent)}"><span class="agent-who"><b>${esc(row.agent)}</b><small>tira_${esc(row.id)}… · connected by ${esc(row.createdBy)} on ${row.createdAt.slice(0, 10)} · ${used}</small></span>${revoke}</div>`;
+    return `<div class="agent-row" data-agent="${esc(row.agent)}"><span class="agent-who"><b>${esc(row.agent)}</b><small>${about}</small></span>${revoke}</div>`;
   };
   const toolItem = ([tool, said]: [string, string]) => `<li><code>${tool}</code> ${esc(said)}</li>`;
-  const agentsGroup = async (url: URL, me: { login?: string; actor?: string }, t: string) => {
+  const manualApp = (app: App, at: Where) => {
+    const setup = appSetup(app, c.stream, at, TOKEN_HERE);
+    return `<div class="agent-app" data-agent-app="${app}"><b>${APP_NAME[app]}</b>${steps(setup)}${codeBlock("manual-" + app, setup.code, APP_NAME[app])}<p class="agent-undo">To remove it: <code>${esc(setup.remove)}</code></p></div>`;
+  };
+  const morePart = (title: string, body: string) => `<div class="agent-more-part"><h4>${title}</h4>${body}</div>`;
+  const more = (at: Where, db: DatabaseCheck, envFile: string) => `<details class="agent-more" data-agent-more><summary>More</summary>`
+    + morePart("tira's MCP address", `<p>For any app that speaks MCP over HTTP: this address, with the agent's token in the header <code>Authorization: Bearer ${esc(TOKEN_HERE)}</code>. It answers while tira serve runs.</p>${codeBlock("agent-url", at.url, "the address")}`)
+    + morePart("Each app by hand", `<p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${APPS.map((app) => manualApp(app, at)).join("")}`)
+    + morePart("What agents can do", `<ul class="agent-tools">${TOOLS_SAID.map(toolItem).join("")}</ul><p>Cancelling, reopening and unblocking stay with people.</p>`)
+    + morePart("Claude Desktop's database", `<p class="${db === "ready" ? "agent-db" : "agent-db no"}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`)
+    + `</details>`;
+  const agentsGroup = async (url: URL, me: { login?: string; actor?: string }, t: string, host: string) => {
     const head = `<section class="grp" id="agents" data-int="agents"><h2 class="grp-h">Connect agents</h2><p class="grp-desc">${esc(DESC.agents)}</p>`;
     const said = url.searchParams.get("from") === "agents" ? flashOf(url) : "";
     const tokens = tokensNow();
-    if (!tokens) return head + `<div class="grp-list">${row("Agents", '<span class="grp-v">Connecting agents needs tira\'s Postgres database</span>')}</div></section>`;
-    const made = takeMade(url.searchParams.get("made"));
+    if (!tokens) return head + said + `<div class="grp-list">${row("Agents", '<span class="grp-v">Connecting agents needs tira\'s Postgres database</span>')}</div></section>`;
     const rows = await tokens.list(c.stream);
-    const list = rows.length === 0 ? '<p class="agent-none">No agents connected yet.</p>' : rows.map((x) => agentRow(x, me, t)).join("");
+    const key = url.searchParams.get("made");
+    const shown = madeFor(key, me);
+    const made = shown && rows.some((x) => x.id === shown.id) ? shown : undefined; // not once it's revoked
+    const app = made?.app ?? APPS.find((a) => a === url.searchParams.get("app"));
+    const at: Where = { url: mcpUrl(host), launch };
     const envFile = c.outside?.envFile ?? TIRA_ENV_FILE;
     const db = databaseCheck(envFile, env);
-    const dbClass = db === "ready" ? "agent-db" : "agent-db no";
-    return head + said + (made ? madePanel(made) : "")
-      + `<div class="agent-quick" data-agent-quick><div><b>Quick setup: connect an agent</b><p>One click makes the agent its own token and adds tira to your app.</p></div>`
-      + `<details class="agent-menu"><summary class="act primary">Connect</summary><div class="agent-menu-list">${APPS.map((app) => connectChoice(app, t)).join("")}</div></details></div>`
-      + `<p class="agent-or">or set up manually</p>`
-      + `<div class="agent-step"><h3><span class="agent-n">1</span>Name your agent</h3><p>Each agent gets its own token, for this project only. Its name is how its moves show on the board, never a person's.</p>`
-      + `<form method="post" action="/integrations/agents/connect" class="agent-name-form" data-agent-name>${t}<input type="text" name="name" maxlength="64" required autocomplete="off" spellcheck="false" placeholder="e.g. claude-code, research-agent" aria-label="Agent's name"><button class="act primary" type="submit">Make its token</button></form>`
-      + `<p class="agent-list-h">Connected agents</p><div class="agent-list" data-agents>${list}</div></div>`
-      + `<div class="agent-step"><h3><span class="agent-n">2</span>Add it to your app</h3><p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${APPS.map((app) => appBlock(app, appSetup(app, c.stream, launch, TOKEN_HERE), "manual")).join("")}</div>`
-      + `<div class="agent-step"><h3><span class="agent-n">3</span>Check</h3><p class="${dbClass}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p></div>`
-      + `<div class="agent-step"><h3>What agents can do</h3><ul class="agent-tools">${TOOLS_SAID.map(toolItem).join("")}</ul><p>Cancelling, reopening and unblocking stay with people.</p></div>`
+    const gone = key && !made ? `<div class="flash no" role="status">That setup isn't shown any more (it shows for 10 minutes, to whoever made it). Its agent is in the list below: revoke it and connect it again for a new token.</div>` : "";
+    let one: string, two: string, three: string;
+    if (made) {
+      one = step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[made.app]}</b></p>`);
+      two = step(2, "Name your agent", "done", `<p class="agent-done"><b>${esc(made.agent)}</b> is connected to this project, with a token of its own.</p>`);
+      three = step(3, `Finish in ${APP_NAME[made.app]}`, "now", finish(made, at, db, envFile) + testForm(made, key ?? "", t, said) + `<p class="agent-again">${startOver("Connect another agent")}</p>`);
+    } else if (app) {
+      const suggested = freeName(APP_AGENT[app], rows.map((x) => x.agent));
+      one = step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[app]}</b> ${startOver("Change")}</p>`);
+      two = step(2, "Name your agent", "now", `<p>Its name is how its moves show on the board, never a person's. It gets a token of its own, for this project only.</p>`
+        + `<form method="post" action="/integrations/agents/connect" class="agent-name-form" data-agent-name>${t}<input type="hidden" name="app" value="${app}"><input type="text" name="name" value="${esc(suggested)}" maxlength="64" required autocomplete="off" spellcheck="false" aria-label="Agent's name"><button class="act primary" type="submit">Connect</button></form>` + said);
+      three = step(3, `Finish in ${APP_NAME[app]}`, "later", `<p>One thing to do in ${APP_NAME[app]}, then test the connection.</p>`);
+    } else {
+      one = step(1, "Choose your app", "now", `<p>Which app will your agent work in?</p><div class="agent-tiles">${APPS.map(tile).join("")}</div>`);
+      two = step(2, "Name your agent", "later", "<p>Its name is how its moves show on the board.</p>");
+      three = step(3, "Finish in your app", "later", "<p>One thing to do in your app, then test the connection.</p>");
+    }
+    const top = made || app ? gone : said + gone; // a step's own result shows in that step
+    const list = rows.length === 0 ? '<p class="agent-none">No agents connected yet.</p>' : rows.map((x) => agentRow(x, me, t)).join("");
+    return head + top + one + two + three
+      + `<h3 class="agent-list-h">Connected agents</h3><div class="agent-list" data-agents>${list}</div>`
+      + more(at, db, envFile)
       + `<div class="grp-foot">A token works for this project only. Revoke it here and the agent's next call is refused.</div></section>`;
   };
 
@@ -653,7 +718,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
           + `<div class="grp-row"><span class="grp-k"></span><button class="act danger" type="submit">Delete this project</button></div></form></section>`);
 
     const fromAgents = url.searchParams.get("from") === "agents"; // its result shows in the section
-    const agents = await agentsGroup(url, me, t);
+    const agents = await agentsGroup(url, me, t, host);
     const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${name}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + github + jira + syncCard + agents + remove;
     c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]] }, body, helpPanel(portOf(host), me.actor), scripts));
   };
@@ -930,6 +995,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/setup/reveal": revealPost,
     "POST /integrations/agents/connect": agentConnect,
     "POST /integrations/agents/revoke": agentRevoke,
+    "POST /integrations/agents/test": agentTest,
     "POST /integrations/link": linkPost,
     "POST /integrations/people": peoplePost,
     "POST /integrations/profile": profilePost,
@@ -991,7 +1057,7 @@ function helpPanel(port: string, name?: string): string {
     ["Where are my keys and tokens kept?", "In tira's private store, sealed, and never in the project's log. tira's own app keys show as dots in Setup; only the admin can show or copy them, one at a time.", "keys tokens secret stored kept saved private safe credentials password"],
     ["What does Sync do?", "It links pull requests that name a task, makes a Jira issue for each task, and brings moves made in Jira back as commands, which tira's rules may refuse. A merged pull request counts as proof of work.", "sync syncing pull request pr issue mirror update proof merge"],
     ["Who can sign in?", "The first person to sign in becomes the admin. After that, only the people the admin adds by GitHub username.", "sign signin login admin people access invite add user member team"],
-    ["How do my agents use tira?", "Through tira's MCP server, each with its own token and name. In Project settings → Connect agents, pick your app (Claude Code, Cursor, VS Code or Claude Desktop): tira makes the agent its token and adds tira there, or follow the manual steps. Agents can see what's next, start, complete with proof, block, add subtasks and file ideas; tira's rules apply as they do to you, and cancelling or unblocking stays with people. Revoke an agent there to stop it.", "agent agents claude mcp ai bot automation code assistant tools"],
+    ["How do my agents use tira?", "Through tira's MCP server, each with its own token and name. In Project settings → Connect agents: choose your app (Claude Code, Cursor, VS Code or Claude Desktop), name your agent, then do the one thing it shows in that app and test the connection. Agents can see what's next, start, complete with proof, block, add subtasks and file ideas; tira's rules apply as they do to you, and cancelling or unblocking stays with people. Revoke an agent there to stop it.", "agent agents claude mcp ai bot automation code assistant tools"],
     ["Why does Jira need localhost?", `Atlassian sends you back to tira's callback on localhost. Open tira at <code>http://localhost:${esc(port)}</code> to connect Jira.`, "localhost callback redirect connect address url port"],
   ];
   const hi = name ? `Hi ${esc(name)}! I'm tira's help.` : "Hi! I'm tira's help.";

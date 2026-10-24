@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { run } from "../src/cli/cli.ts";
 import { agentNameProblem, DISCONNECTED, tiraMcpServer } from "../src/mcp/server.ts";
@@ -20,9 +20,11 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { freshPgDb, needsPg } from "./test-stores.ts";
 import { openStore } from "../src/store/open.ts";
-import { APPS, appSetup, databaseCheck, serverName, TIRA_SCRIPT, TOKEN_HERE } from "../src/mcp/connect.ts";
+import { APPS, appSetup, databaseCheck, mcpUrl, serverName, TIRA_SCRIPT, TOKEN_HERE } from "../src/mcp/connect.ts";
+import { NO_TOKEN, NOT_CONNECTED } from "../src/mcp/http.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
+import pg from "pg";
 
 const S = "demo";
 
@@ -206,15 +208,24 @@ test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, wi
   }
 });
 
-test("agents' tokens on Postgres: one per agent and project, kept as a tokenHash; listed with who and when; revoked, it's gone", { skip: needsPg }, async () => {
-  const tokens = agentTokensFor({ TIRA_DATABASE_URL: freshPgDb() });
+test("agents' tokens on Postgres: one per agent and project, kept as a tokenHash; listed with its app, who and when; revoked, it's gone; a table made before agents had their app gets the column", { skip: needsPg }, async () => {
+  const url = freshPgDb();
+  const u = new URL(url);
+  const schema = u.searchParams.get("schema") ?? "";
+  u.searchParams.delete("schema");
+  const before = new pg.Pool({ connectionString: u.toString(), max: 1 }); // the table as the first version of Connect agents made it
+  await before.query(`CREATE SCHEMA ${schema}`);
+  await before.query(`CREATE TABLE ${schema}.agent_tokens (id text PRIMARY KEY, hash text NOT NULL UNIQUE, project text NOT NULL, agent text NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), last_used_at timestamptz, revoked_at timestamptz)`);
+  await before.end();
+  const tokens = agentTokensFor({ TIRA_DATABASE_URL: url });
   assert.ok(tokens);
   try {
-    const a = await tokens.create("p", "claude-code", "isha");
+    const a = await tokens.create("p", "claude-code", "isha", "claude-code");
     await tokens.create("q", "claude-code", "isha"); // another project: its own
     assert.match(a.token, /^tira_[0-9a-f]{8}_[0-9a-f]{48}$/);
     assert.deepEqual((await tokens.find(a.token))?.agent, "claude-code");
-    assert.deepEqual((await tokens.list("p")).map((x) => [x.agent, x.createdBy]), [["claude-code", "isha"]]);
+    assert.deepEqual((await tokens.list("p")).map((x) => [x.agent, x.app, x.createdBy]), [["claude-code", "claude-code", "isha"]]);
+    assert.equal((await tokens.list("q"))[0]?.app, undefined); // made without one
     await assert.rejects(tokens.create("p", "claude-code", "isha")); // the same name, still connected
     assert.equal(await tokens.revoke(a.row.id), true);
     assert.equal(await tokens.find(a.token), undefined);
@@ -225,32 +236,90 @@ test("agents' tokens on Postgres: one per agent and project, kept as a tokenHash
   }
 });
 
-test("connecting an agent: each app's setup with the agent's token and this tira's Node and script; Cursor's and VS Code's install links; quoted for a shell; how to remove it", () => {
+test("connecting an agent: Claude Code, Cursor and VS Code reach tira serve's address with the agent's token in a header (Cursor's and VS Code's install links carry it); Claude Desktop starts tira mcp with this tira's Node and script; quoted for a shell; how to remove it", () => {
   assert.equal(serverName("factory-ui"), "tira-factory-ui");
   assert.equal(serverName("Isha Portfolio"), "tira-isha-portfolio");
   assert.equal(serverName("***"), "tira-project");
-  const l = { node: "/n/node", script: "/t/scripts/tira.ts" };
-  const server = { command: "/n/node", args: ["--disable-warning=ExperimentalWarning", "/t/scripts/tira.ts", "mcp"], env: { TIRA_AGENT_TOKEN: "tira_ab12cd34_x" } };
-  const code = appSetup("claude-code", "factory-ui", l, "tira_ab12cd34_x");
-  assert.equal(code.code, "claude mcp add --scope user --env TIRA_AGENT_TOKEN=tira_ab12cd34_x --transport stdio tira-factory-ui -- /n/node --disable-warning=ExperimentalWarning /t/scripts/tira.ts mcp");
+  assert.equal(mcpUrl("localhost:4772"), "http://127.0.0.1:4772/mcp"); // tira serve listens on 127.0.0.1, whatever the page was opened as
+  assert.equal(mcpUrl("127.0.0.1"), "http://127.0.0.1/mcp");
+  const at = { url: "http://127.0.0.1:4772/mcp", launch: { node: "/n/node", script: "/t/scripts/tira.ts" } };
+  const headers = { Authorization: "Bearer tira_ab12cd34_x" };
+  const code = appSetup("claude-code", "factory-ui", at, "tira_ab12cd34_x");
+  assert.equal(code.code, "claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer tira_ab12cd34_x'");
   assert.equal(code.remove, "claude mcp remove tira-factory-ui -s user");
   assert.equal(code.install, undefined);
-  assert.match(appSetup("claude-code", "factory-ui", l, TOKEN_HERE).code, /--env TIRA_AGENT_TOKEN='<your token>' --transport stdio/);
-  const cursor = appSetup("cursor", "factory-ui", l, "tira_ab12cd34_x");
-  assert.deepEqual(JSON.parse(cursor.code), { mcpServers: { "tira-factory-ui": server } });
+  assert.match(appSetup("claude-code", "factory-ui", at, TOKEN_HERE).code, / --header 'Authorization: Bearer <your token>'$/);
+  const cursor = appSetup("cursor", "factory-ui", at, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(cursor.code), { mcpServers: { "tira-factory-ui": { url: at.url, headers } } });
   const link = new URL(cursor.install ?? "");
   assert.equal(link.protocol + "//" + link.host + link.pathname, "cursor://anysphere.cursor-deeplink/mcp/install");
   assert.equal(link.searchParams.get("name"), "tira-factory-ui");
-  assert.deepEqual(JSON.parse(Buffer.from(link.searchParams.get("config") ?? "", "base64").toString()), server);
-  const vscode = appSetup("vscode", "factory-ui", l, "tira_ab12cd34_x");
-  assert.deepEqual(JSON.parse(vscode.code), { servers: { "tira-factory-ui": { type: "stdio", ...server } } });
+  assert.deepEqual(JSON.parse(Buffer.from(link.searchParams.get("config") ?? "", "base64").toString()), { url: at.url, headers });
+  const vscode = appSetup("vscode", "factory-ui", at, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(vscode.code), { servers: { "tira-factory-ui": { type: "http", url: at.url, headers } } });
   const vlink = new URL(vscode.install ?? "");
   assert.equal(vlink.origin + vlink.pathname, "https://insiders.vscode.dev/redirect/mcp/install");
-  assert.deepEqual(JSON.parse(vlink.searchParams.get("config") ?? ""), { type: "stdio", ...server });
-  const desktop = appSetup("claude-desktop", "factory-ui", l, "tira_ab12cd34_x");
-  assert.deepEqual(JSON.parse(desktop.code), { mcpServers: { "tira-factory-ui": server } });
+  assert.deepEqual(JSON.parse(vlink.searchParams.get("config") ?? ""), { type: "http", url: at.url, headers });
+  const desktop = appSetup("claude-desktop", "factory-ui", at, "tira_ab12cd34_x");
+  assert.deepEqual(JSON.parse(desktop.code), { mcpServers: { "tira-factory-ui": { command: "/n/node", args: ["--disable-warning=ExperimentalWarning", "/t/scripts/tira.ts", "mcp"], env: { TIRA_AGENT_TOKEN: "tira_ab12cd34_x" } } } });
   assert.equal(desktop.install, undefined);
-  assert.deepEqual(desktop.steps, ["In Claude Desktop: Settings → Developer → Edit Config.", "Add the entry below under mcpServers and save.", "Restart Claude Desktop."]);
+  assert.deepEqual(desktop.steps, ["In Claude Desktop: Settings → Developer → Edit Config.", "Add this under mcpServers and save.", "Restart Claude Desktop."]);
+});
+
+test("tira serve answers MCP at /mcp, as Claude Code, Cursor and VS Code reach it: the agent's token names the project and the agent; no token, a revoked one, a web page elsewhere or another Host is refused; 2025-era clients too", async () => {
+  const w = await world();
+  const tokens = new MemoryAgentTokens();
+  const { token, row } = await tokens.create(S, "cursor-agent", "isha", "cursor");
+  const elsewhere = await tokens.create("elsewhere", "claude-code", "isha", "claude-code");
+  const server = tiraServer({ store: w.store, registry: w.registry, stream: S, actor: "isha", token: "k", links: { env: {}, agentTokens: tokens } });
+  const bare = tiraServer({ store: w.store, registry: w.registry, stream: S, actor: "isha", token: "k", links: { env: {} } }); // no Postgres: no tokens
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  await new Promise<void>((r) => bare.listen(0, "127.0.0.1", r));
+  const port = (server.address() as AddressInfo).port;
+  const url = new URL(`http://127.0.0.1:${port}/mcp`);
+  const post = (body: unknown, headers: Record<string, string> = {}, to: URL = url) => fetch(to, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers }, body: JSON.stringify(body) });
+  const refused = async (headers: Record<string, string>, to: URL = url) => {
+    const r = await post({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, headers, to);
+    return [r.status, r.headers.get("www-authenticate"), ((await r.json()) as { error: { message: string } }).error.message];
+  };
+  const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "older-app", version: "1" } } };
+  try {
+    const client = new Client({ name: "tira-tests", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    assert.deepEqual((await client.listTools()).tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea"]);
+    const said = async (name: string, args: Record<string, unknown> = {}) => ((await client.callTool({ name, arguments: args })).content as { text?: string }[]).map((c) => c.text ?? "").join("\n");
+    assert.match(await said("next_task"), /^In progress: nothing\.\nNext: header \(under site\)/);
+    assert.match(await said("start_task", { id: "header" }), /^Start header: done/);
+    const started = (await w.store.readStream(S)).at(-1);
+    assert.deepEqual([started?.metadata.actor, started?.stream], ["cursor-agent", S]); // as the token's agent, in its project
+    assert.ok((await tokens.list(S))[0]?.lastUsedAt, "last used");
+    await client.close();
+    // a 2025-era client: initialize, then a call, each its own request
+    const old = await post(initialize, { authorization: `Bearer ${token}` });
+    assert.equal(old.status, 200);
+    assert.match(await old.text(), /"protocolVersion":"2025-06-18"[^]*"description":"tira tasks for the project demo, as cursor-agent"/);
+    assert.match(await (await post({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "next_task", arguments: {} } }, { authorization: `Bearer ${token}` })).text(), /In progress: header/);
+    // another project's token: that project, that agent
+    assert.match(await (await post(initialize, { authorization: `Bearer ${elsewhere.token}` })).text(), /"description":"tira tasks for the project elsewhere, as claude-code"/);
+    // refused, before any tool runs
+    assert.deepEqual(await refused({}), [401, 'Bearer realm="tira"', NO_TOKEN]);
+    assert.deepEqual(await refused({ authorization: `Bearer tira_00000000_${"0".repeat(48)}` }), [401, 'Bearer realm="tira"', NOT_CONNECTED]);
+    assert.deepEqual(await refused({ authorization: `Bearer ${token}`, origin: "https://example.com" }), [403, null, "tira answers MCP only to apps on this computer, not to a web page."]);
+    assert.equal((await post({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { authorization: `Bearer ${token}`, origin: `http://localhost:${port}` })).status, 200); // a page on this computer may
+    assert.deepEqual(await refused({ authorization: `Bearer ${token}` }, new URL(`http://127.0.0.1:${(bare.address() as AddressInfo).port}/mcp`)), [503, null, "Connecting agents needs tira's Postgres database."]);
+    const rebound = await new Promise<number>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, method: "POST", path: "/mcp", headers: { host: "tira.example.com", authorization: `Bearer ${token}` } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.on("error", reject);
+      req.end("{}");
+    });
+    assert.equal(rebound, 403); // the page's own Host rule, before anything else
+    await tokens.revoke(row.id);
+    assert.deepEqual(await refused({ authorization: `Bearer ${token}` }), [401, 'Bearer realm="tira"', NOT_CONNECTED]); // its next request
+    assert.equal((await w.store.readStream(S)).filter((e) => e.metadata.actor === "cursor-agent").length, 1); // the one start, nothing since
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => bare.close(() => r()));
+  }
 });
 
 test("agents' tokens: random, kept as a tokenHash, found until revoked; a new agent's name is free in its project", async () => {
@@ -298,7 +367,7 @@ test("connecting an agent: whether it would reach this tira's database, from tir
   }
 });
 
-test("Project settings → Connect agents, after Forge's Connect IDE: one click makes the agent its token and installs it; or by hand, name it and copy the app's setup; connected agents listed with Revoke; the tools; the database check", async () => {
+test("Project settings → Connect agents, in three steps: choose your app, name your agent (its token made then), finish in that app with one action and Test connection; connected agents below; the rest under More", async () => {
   const w = await world();
   const dir = mkdtempSync(join(tmpdir(), "tira-agents-"));
   const envFile = join(dir, ".env");
@@ -317,67 +386,94 @@ test("Project settings → Connect agents, after Forge's Connect IDE: one click 
   });
   const section = (page: string) => /<section class="grp" id="agents"[^]*?<\/section>/.exec(page)?.[0] ?? "";
   const settings = async (path = "/integrations") => section((await http("GET", path)).body);
+  const unesc = (s: string) => s.replaceAll(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)));
+  const setupIn = (agents: string) => unesc(/<pre class="agent-code" id="agent-setup">([^<]+)<\/pre>/.exec(agents)?.[1] ?? "");
+  const at = { url: `http://127.0.0.1:${port}/mcp`, launch: { node: process.execPath, script: TIRA_SCRIPT } };
   try {
     const page = (await http("GET", "/integrations")).body;
     assert.match(page, /<a class="set-link" href="#sync">Sync<\/a><a class="set-link" href="#agents">Connect agents<\/a><a class="set-link" href="#delete">Delete<\/a>/);
-    assert.doesNotMatch((await http("GET", "/settings")).body, /id="agents"|data-agent/); // not in Account settings any more
+    assert.doesNotMatch((await http("GET", "/settings")).body, /id="agents"|data-agent/); // not in Account settings
     let agents = section(page);
     assert.match(agents, /<h2 class="grp-h">Connect agents<\/h2><p class="grp-desc">Connect your AI agents \(Claude Code, Cursor, VS Code, Claude Desktop\) to this project/);
-    // quick setup: one Connect, four apps
-    assert.match(agents, /<div class="agent-quick" data-agent-quick>[^]*?<details class="agent-menu"><summary class="act primary">Connect<\/summary>/);
-    assert.deepEqual([...agents.matchAll(/<input type="hidden" name="app" value="([a-z-]+)">/g)].map((m) => m[1]), [...APPS]);
-    // by hand: name it, the apps' setups with the token's place, the check, the tools
-    assert.match(agents, /<p class="agent-or">or set up manually<\/p>/);
-    assert.match(agents, /<form method="post" action="\/integrations\/agents\/connect" class="agent-name-form" data-agent-name>/);
-    assert.match(agents, /<p class="agent-none">No agents connected yet\.<\/p>/);
-    assert.ok(agents.includes(esc(appSetup("claude-code", S, { node: process.execPath, script: TIRA_SCRIPT }, TOKEN_HERE).code)), "Claude Code's command, its token's place marked");
-    assert.equal((agents.match(/data-agent-app="/g) ?? []).length, 4); // each app's setup, once: no agent just made
-    assert.doesNotMatch(agents, /data-agent-install/); // no install link without a real token in it
-    assert.match(agents, /<p class="agent-db no" data-agent-database="missing">/);
-    assert.match(agents, /<li><code>complete_task<\/code> done, with proof of work<\/li>/);
-    assert.match(agents, /Cancelling, reopening and unblocking stay with people\./);
-    // one click, Cursor: the agent's token made, and the app's install link to open (here, and for the script)
-    const quick = await http("POST", "/integrations/agents/connect", "token=k&app=cursor&fragment=1");
-    const go = /data-go="([^"]+)"/.exec(quick.body)?.[1]?.replaceAll("&#38;", "&") ?? "";
-    const open = /data-open="([^"]+)"/.exec(quick.body)?.[1]?.replaceAll("&#38;", "&") ?? "";
-    assert.match(go, /^\/integrations\?made=[0-9a-f]{24}&from=agents#agents$/);
-    assert.match(open, /^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=tira-demo&config=/);
+    // step 1: the four apps, each its own address; steps 2 and 3 wait their turn
+    assert.deepEqual([...agents.matchAll(/<a class="agent-tile" href="([^"]+)" data-agent-tile="([a-z-]+)">/g)].map((m) => [m[2], unesc(m[1] ?? "")]), APPS.map((app) => [app, `/integrations?app=${app}&from=agents#agents`]));
+    assert.match(agents, /<div class="agent-step now" data-agent-step="1"><h3><span class="agent-n">1<\/span>Choose your app<\/h3>/);
+    assert.match(agents, /<div class="agent-step later" data-agent-step="2">[^]*<div class="agent-step later" data-agent-step="3"><h3><span class="agent-n">3<\/span>Finish in your app<\/h3>/);
+    assert.match(agents, /<h3 class="agent-list-h">Connected agents<\/h3><div class="agent-list" data-agents><p class="agent-none">No agents connected yet\.<\/p>/);
+    assert.doesNotMatch(agents, /data-agent-install|id="agent-setup"|data-agent-test/); // no token yet
+    // More: the address, each app by hand with the token's place, what agents can do, Claude Desktop's database
+    const more = /<details class="agent-more" data-agent-more><summary>More<\/summary>[^]*?<\/details>/.exec(agents)?.[0] ?? "";
+    assert.ok(more.includes(`<pre class="agent-code" id="agent-url">http://127.0.0.1:${port}/mcp</pre>`), "the address, as 127.0.0.1");
+    assert.ok(more.includes(esc(appSetup("claude-code", S, at, TOKEN_HERE).code)), "Claude Code's command, its token's place marked");
+    assert.equal((more.match(/data-agent-app="/g) ?? []).length, 4);
+    assert.match(more, /<li><code>complete_task<\/code> done, with proof of work<\/li>/);
+    assert.match(more, /Cancelling, reopening and unblocking stay with people\./);
+    assert.match(more, /<p class="agent-db no" data-agent-database="missing">/);
+    // step 2: Cursor chosen; its agent's name suggested
+    agents = await settings("/integrations?app=cursor&from=agents");
+    assert.match(agents, /<div class="agent-step done" data-agent-step="1"><h3><span class="agent-n">✓<\/span>Choose your app<\/h3><p class="agent-done"><b>Cursor<\/b> <a href="\/integrations\?from=agents#agents">Change<\/a>/);
+    assert.match(agents, /<div class="agent-step now" data-agent-step="2">[^]*?<input type="hidden" name="app" value="cursor"><input type="text" name="name" value="cursor-agent"[^>]*><button class="act primary" type="submit">Connect<\/button>/);
+    assert.match(agents, /<div class="agent-step later" data-agent-step="3"><h3><span class="agent-n">3<\/span>Finish in Cursor<\/h3>/);
+    // a person's name is caught, said in step 2; an app must be chosen
+    const person = await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=isha");
+    assert.match(person.location ?? "", /^\/integrations\?app=cursor&r=\d+&from=agents#agents$/);
+    const caught = await settings(person.location ?? "");
+    assert.match(caught, /data-agent-step="2">[^]*?&#34;isha&#34; reads as a person(?:'|&#39;)s name[^]*?data-agent-step="3"/);
+    assert.equal(caught.match(/data-flash/g)?.length, 1, "said in step 2 only");
+    assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&name=x-agent")).location ?? ""), /<div class="flash no" role="status" data-flash>Choose your app first\.<\/div><div class="agent-step now" data-agent-step="1">/);
+    // Connect: the agent's token, for Cursor; step 3: Add to Cursor (the token in its link), the setup by hand folded under it
+    const made = await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent");
+    const key = /^\/integrations\?made=([0-9a-f]{24})&from=agents#agents$/.exec(made.location ?? "")?.[1] ?? "";
+    assert.ok(key, made.location);
     const [cursorAgent] = await tokens.list(S);
-    assert.deepEqual([cursorAgent?.agent, cursorAgent?.createdBy], ["cursor-agent", "isha"]);
-    const made = await settings(go.replace("#agents", ""));
-    const shownToken = /<pre class="agent-code" id="agent-token">(tira_[0-9a-f_]+)<\/pre>/.exec(made)?.[1] ?? "";
-    assert.equal((await tokens.find(shownToken))?.agent, "cursor-agent", "the token, shown once");
-    assert.match(made, /<div class="agent-ready" data-agent-ready><p><b>cursor-agent<\/b> is connected to this project\./);
-    assert.match(made, /<a class="act primary" href="cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=tira-demo&#38;config=[^"]+" data-agent-install>Add to Cursor<\/a>/);
-    assert.doesNotMatch(await settings(go.replace("#agents", "")), /data-agent-ready/); // once
-    // by hand: a person's name is caught; an agent's makes its token, with every app's setup filled in
-    const person = await http("POST", "/integrations/agents/connect", "token=k&name=isha");
-    assert.match(await settings(person.location ?? ""), /&#34;isha&#34; reads as a person(?:'|&#39;)s name/);
-    const named = await http("POST", "/integrations/agents/connect", "token=k&name=research-agent");
-    const filled = await settings(named.location ?? "");
-    const token2 = /id="agent-token">(tira_[0-9a-f_]+)</.exec(filled)?.[1] ?? "";
-    assert.equal((await tokens.find(token2))?.agent, "research-agent");
-    assert.ok(filled.includes(esc(appSetup("vscode", S, { node: process.execPath, script: TIRA_SCRIPT }, token2).code)), "VS Code's config, its token in it");
-    assert.match((await settings((await http("POST", "/integrations/agents/connect", "token=k&name=research-agent")).location ?? "")), /research-agent is already connected to this project: revoke it first/);
-    // a second one-click Claude Code: numbered if taken
-    await http("POST", "/integrations/agents/connect", "token=k&app=claude-code");
-    await http("POST", "/integrations/agents/connect", "token=k&app=claude-code");
-    agents = await settings();
-    assert.deepEqual([...agents.matchAll(/<div class="agent-row" data-agent="([^"]+)">/g)].map((m) => m[1]), ["cursor-agent", "research-agent", "claude-code", "claude-code-2"]);
-    assert.match(agents, /<small>tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · not used yet<\/small>/);
-    // revoke: gone from the list, its token no longer found
+    assert.deepEqual([cursorAgent?.agent, cursorAgent?.app, cursorAgent?.createdBy], ["cursor-agent", "cursor", "isha"]);
+    agents = await settings(`/integrations?made=${key}&from=agents`);
+    const token = (JSON.parse(setupIn(agents)) as { mcpServers: Record<string, { headers: { Authorization: string } }> }).mcpServers["tira-demo"]?.headers.Authorization.replace("Bearer ", "") ?? "";
+    assert.equal((await tokens.find(token))?.agent, "cursor-agent");
+    assert.equal(agents.split(token).length, 2, "the token, once, in the setup"); // (and in the install link, base64)
+    assert.match(agents, /<p class="agent-done"><b>Cursor<\/b><\/p>[^]*?<p class="agent-done"><b>cursor-agent<\/b> is connected to this project, with a token of its own\.<\/p>/);
+    assert.ok(agents.includes(`<p class="agent-go"><a class="act primary" href="${esc(appSetup("cursor", S, at, token).install ?? "")}" data-agent-install>Add to Cursor</a></p><details class="agent-hand"><summary>Doesn't open? Add it by hand</summary>`), "Add to Cursor, the setup by hand under it");
+    assert.match(agents, /<a href="\/integrations\?from=agents#agents">Connect another agent<\/a>/);
+    assert.ok((await settings(`/integrations?made=${key}&from=agents`)).includes(token), "still shown on a reload, for 10 minutes");
+    // Test connection: not yet (the plain post comes back to step 3, the answer in it); after the app's first call, connected
+    const notYet = await http("POST", "/integrations/agents/test", `token=k&id=${cursorAgent?.id ?? ""}&made=${key}`);
+    assert.match(notYet.location ?? "", new RegExp(`^/integrations\\?made=${key}&r=\\d+&from=agents#agents$`));
+    assert.match(await settings(notYet.location ?? ""), /<div class="agent-tested" data-agent-tested><div class="flash no" role="status" data-flash>Not yet: tira hasn(?:'|&#39;)t heard from cursor-agent\. Add it to Cursor above and turn tira on in Cursor(?:'|&#39;)s settings, under MCP, then test again\.<\/div><\/div>/);
+    const setup = JSON.parse(setupIn(agents)) as { mcpServers: Record<string, { url: string; headers: Record<string, string> }> };
+    const cursor = setup.mcpServers["tira-demo"];
+    assert.equal((await fetch(cursor?.url ?? "", { method: "POST", headers: { ...cursor?.headers, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) })).status, 200); // Cursor, with what the page gave it
+    const tested = await http("POST", "/integrations/agents/test", `token=k&id=${cursorAgent?.id ?? ""}&made=${key}&fragment=1`);
+    assert.match(tested.body, /^<div class="flash ok" role="status" data-flash>Cursor is connected: tira heard from cursor-agent just now\. Ask it &#34;what(?:'|&#39;)s next in tira\?&#34;<\/div>$/);
+    // connected agents: its app, last used
+    assert.match(await settings(), /<div class="agent-row" data-agent="cursor-agent"><span class="agent-who"><b>cursor-agent<\/b><small>Cursor · tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · last used \d{4}-\d{2}-\d{2}<\/small><\/span><form method="post" action="\/integrations\/agents\/revoke">/);
+    // the name taken: the next one suggested; the same again is refused
+    assert.match(await settings("/integrations?app=cursor&from=agents"), /name="name" value="cursor-agent-2"/);
+    assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? ""), /cursor-agent is already connected to this project: revoke it first/);
+    // Claude Code: its one command; Claude Desktop: its entry, and the database it needs
+    const code = await settings((await http("POST", "/integrations/agents/connect", "token=k&app=claude-code&name=claude-code")).location ?? "");
+    const codeToken = /Bearer (tira_[0-9a-f_]+)/.exec(setupIn(code))?.[1] ?? "";
+    assert.equal(setupIn(code), appSetup("claude-code", S, at, codeToken).code);
+    assert.match(code, /<h3><span class="agent-n">3<\/span>Finish in Claude Code<\/h3><ol class="agent-steps"><li>Run this in a terminal/);
+    assert.doesNotMatch(code, /data-agent-install|agent-hand/);
+    const desktop = await settings((await http("POST", "/integrations/agents/connect", "token=k&app=claude-desktop&name=claude-desktop")).location ?? "");
+    assert.equal(JSON.parse(setupIn(desktop)).mcpServers["tira-demo"].args[2], "mcp");
+    assert.match(desktop, /data-agent-step="3">(?:(?!data-agent-test)[^])*<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s \.env names no database, so Claude Desktop(?:'|&#39;)s agent couldn(?:'|&#39;)t reach this board/); // in step 3, before Test connection
+    // revoke: gone from the list; its step 3 no longer shows its token
     const revoked = await http("POST", "/integrations/agents/revoke", `token=k&id=${encodeURIComponent(cursorAgent?.id ?? "")}`);
     assert.match(await settings(revoked.location ?? ""), /Revoked cursor-agent: its next call is refused\./);
-    assert.equal(await tokens.find(shownToken), undefined);
-    assert.doesNotMatch(await settings(), /data-agent="cursor-agent"/);
+    assert.equal(await tokens.find(token), undefined);
+    const gone = await settings(`/integrations?made=${key}&from=agents`);
+    assert.ok(!gone.includes(token));
+    assert.match(gone, /That setup isn(?:'|&#39;)t shown any more/);
+    assert.deepEqual([...(await settings()).matchAll(/<div class="agent-row" data-agent="([^"]+)">/g)].map((m) => m[1]), ["claude-code", "claude-desktop"]);
     // the database: ready once tira's .env names this tira's
     writeFileSync(envFile, "TIRA_DATABASE_URL=postgres://u@h/db\n");
-    assert.match(await settings(), /<p class="agent-db" data-agent-database="ready">Agents will work on this tira(?:'|&#39;)s database/);
-    // the page's script: Connect makes the token from the page, then opens the app's link while the click still counts
+    assert.match(await settings(), /<p class="agent-db" data-agent-database="ready">Claude Desktop(?:'|&#39;)s agent will work on this tira(?:'|&#39;)s database/);
+    // the page's script: Test connection asks from the page and shows the answer in place
     const script = readFileSync(new URL("../src/serve/agents.mjs", import.meta.url), "utf8");
-    assert.match(script, /for \(const form of document\.querySelectorAll\("form\[data-agent-connect\]"\)\)/);
-    assert.match(script, /if \(open\?\.startsWith\("https:\/\/"\)\) window\.open\(open, "_blank", "noopener"\);/);
-    assert.match(script, /else if \(open\) \{\n        const a = document\.createElement\("a"\);/); // an app's own link: opened by a click on it
+    assert.match(script, /for \(const form of document\.querySelectorAll\("form\[data-agent-test\]"\)\)/);
+    assert.match(script, /body\.set\("fragment", "1"\);/);
+    assert.match(script, /if \(!said \|\| !slot\) return form\.submit\(\);\n      slot\.replaceChildren\(said\);/);
     assert.match(page, /<script type="module" src="\/agents\.mjs"><\/script>/);
     // Copy, on the settings pages' own script (Setup's): any button with data-copy-target
     assert.match(readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8"), /for \(const b of document\.querySelectorAll\("button\[data-copy-target\]"\)\) \{\n  const target = document\.getElementById\(b\.dataset\.copyTarget \?\? ""\);/);

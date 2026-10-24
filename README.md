@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 791 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 813 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -644,12 +644,14 @@ Calls made here, for the PM:
 - **A task born from an idea shows as hollow in the sweep** (no `definition` or
   `done_criteria`): the idea's file is a summary and a why, not those two fields.
 
-## Agents through MCP: `tira mcp`
+## Agents through MCP: `/mcp` and `tira mcp`
 
-Claude Code, Claude Desktop or any MCP client can work a project's tasks directly. `tira mcp` is an MCP server on stdio, started by the client on the same computer, with the agent's own token (`TIRA_AGENT_TOKEN`), which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, **Connect ▾** makes an agent its own token in one click and adds tira to Claude Code, Cursor, VS Code or Claude Desktop (Cursor and VS Code through their install links, which ask first; the others by a command or config to copy), or follow the manual steps there. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call. `tira mcp` reads the database as every tira command does (tira's own `.env`), and the section says whether agents would reach it. Claude Code's, for example:
+Claude Code, Cursor, VS Code, Claude Desktop or any MCP client can work a project's tasks directly, each agent with its own token, which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, three steps: choose your app, name your agent (its token is made then), and do the one thing step 3 shows in that app (Cursor's and VS Code's **Add to** button, which asks first; Claude Code's command; Claude Desktop's config entry), then **Test connection**. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call.
+
+Claude Code, Cursor and VS Code reach `tira serve` itself, at `http://127.0.0.1:<port>/mcp`, with the token in an `Authorization: Bearer` header: it answers on 127.0.0.1 only, while `tira serve` runs. Claude Desktop can only start a program, so it starts `tira mcp`, an MCP server on stdio with the token in `TIRA_AGENT_TOKEN`, which reads the database as every tira command does (tira's own `.env`; the section says whether it would reach this board). Claude Code's, for example:
 
 ```bash
-claude mcp add --scope user --env TIRA_AGENT_TOKEN=<token> --transport stdio tira-factory-ui -- /path/to/node --disable-warning=ExperimentalWarning /path/to/tira/scripts/tira.ts mcp
+claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer <token>'
 ```
 
 | Tool | What it does |

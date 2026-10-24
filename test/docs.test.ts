@@ -118,7 +118,9 @@ async function pages(): Promise<string> {
     const signin = (await getSignedOut("GET", (await getSignedOut("POST", "/signin/start", "token=k")).location ?? "/")).body; // the code, at its own address
     const signedIn = (await getSignedIn("GET", "/integrations")).body + (await getSignedIn("GET", "/")).body + (await getSignedIn("GET", "/connect")).body
       + (await getSignedIn("GET", "/projects/new")).body + (await getSignedIn("POST", "/projects", "token=k&name=-bad&repo=a%2Fb")).body // + New project's page, and a name it refuses
-      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body; // Account settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body // Account settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/integrations?app=cursor&from=agents")).body // Connect agents' step 2, then step 3 with its agent made
+      + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body;
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const seen = String((await store.readStream("t")).at(-1)?.seq);
