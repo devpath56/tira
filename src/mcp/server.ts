@@ -10,6 +10,7 @@ import { isReservedActor } from "../write/write-path.ts";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
+import { addSubtask, blockTask, completeTask, fileIdea, startTask } from "./actions.ts";
 
 // What every tool works in: the project's stream, and the agent it acts as.
 export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string }
@@ -30,6 +31,10 @@ export function agentNameProblem(name: string | undefined): string | undefined {
 // A tool's answer as MCP carries it: its text, marked an error when it didn't do what was asked.
 const answer = (t: ToolText) => ({ content: [{ type: "text" as const, text: t.text }], ...(t.ok ? {} : { isError: true }) });
 const READS = { readOnlyHint: true, openWorldHint: false };
+// writes change a task's state the board shows; none deletes anything (dropping a task is a person's)
+const WRITES = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+const taskId = z.string().trim().min(1).describe("the task's id, as list_tasks shows it");
+const words = (what: string) => z.string().trim().min(1).max(500).describe(what);
 
 // The server for one connection (serveStdio builds one per client): the tools, each reading the
 // project's log as it is when called.
@@ -52,5 +57,40 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
     inputSchema: z.object({ id: z.string().min(1).describe("the task's id, as list_tasks shows it") }),
     annotations: READS,
   }, async ({ id }) => answer(await getTask(ctx, id)));
+  server.registerTool("start_task", {
+    title: "Start a task",
+    description: "Move a task to In progress, as you. One task can be in progress at a time: tira refuses a second and says which to finish or block first.",
+    inputSchema: z.object({ id: taskId }),
+    annotations: { ...WRITES, idempotentHint: true },
+  }, async ({ id }) => answer(await startTask(ctx, id)));
+  server.registerTool("complete_task", {
+    title: "Complete a task",
+    description: "Mark a task Done, with proof of work anyone can re-check: a link (a pull request, a report), a file path, or a short note of what was checked. tira refuses without proof, before the task is started, or while its subtasks are open.",
+    inputSchema: z.object({ id: taskId, proof: words("the proof of work: a link, file or note anyone can re-check"), note: words("optional: a note for the task's history").optional() }),
+    annotations: { ...WRITES, idempotentHint: true },
+  }, async ({ id, proof, note }) => answer(await completeTask(ctx, id, proof, note)));
+  server.registerTool("block_task", {
+    title: "Block a task",
+    description: "Mark a task Blocked, with the reason. Say what it waits on: an open task (waits_on), or a new ticket tira creates under it (new_ticket), not both. A person unblocks it.",
+    inputSchema: z.object({
+      id: taskId,
+      reason: words("why it's blocked"),
+      waits_on: z.string().trim().min(1).optional().describe("optional: the id of an open task it waits on"),
+      new_ticket: z.string().trim().min(1).optional().describe("optional: a name for a new ticket, created under this task, that it waits on"),
+    }),
+    annotations: { ...WRITES, idempotentHint: true },
+  }, async ({ id, reason, waits_on, new_ticket }) => answer(await blockTask(ctx, id, reason, waits_on, new_ticket)));
+  server.registerTool("add_subtask", {
+    title: "Add a subtask",
+    description: "Add a new task under one (marked as found while working on it when that task is under way).",
+    inputSchema: z.object({ under: taskId, name: z.string().trim().min(1).max(80).describe("the new task's id: a short name, e.g. login_copy") }),
+    annotations: { ...WRITES, idempotentHint: false },
+  }, async ({ under, name }) => answer(await addSubtask(ctx, under, name)));
+  server.registerTool("file_idea", {
+    title: "File an idea",
+    description: "File an idea for later, not a task yet: one sentence and why it's worth doing. tira drafts its file and proposes where it goes; a person approves both before it becomes a task.",
+    inputSchema: z.object({ summary: words("the idea, in a sentence"), why: words("why it's worth doing"), under: z.string().trim().min(1).optional().describe("optional: the task it belongs under, if you know") }),
+    annotations: { ...WRITES, idempotentHint: false },
+  }, async ({ summary, why, under }) => answer(await fileIdea(ctx, summary, why, under)));
   return server;
 }

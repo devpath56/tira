@@ -1,0 +1,99 @@
+// What tira's tools for agents do: start a task, complete it with proof, block it (with a reason,
+// and what it waits on), add a subtask, file an idea. Each is written through the dispatcher under
+// the agent's own name, as the CLI's and the page's writes are, so the rules, the gates and the
+// proof of work are tira's own; a refusal comes back with the page's plain-words hint. A task that
+// doesn't exist, or a block that can't wait on what it names, is answered before anything is
+// written; a refusal by the rules is in the log, as from the CLI.
+import { fold } from "../fold/fold.ts";
+import { IDEA, ideaId, placement, whatNext } from "../fold/ideas.ts";
+import { makeView } from "../fold/view.ts";
+import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
+import { subtaskName } from "../serve/command.ts";
+import { blockerProblem, flashFor, hintFor, inOrder } from "../serve/server.ts";
+import { Dispatcher } from "../write/dispatcher.ts";
+import type { Command } from "../write/write-path.ts";
+import type { AgentContext } from "./server.ts";
+import type { ToolText } from "./tasks.ts";
+
+const NODE = "node";
+const IDEA_TEXT_MAX = 500;
+
+// The project's tree as it stands, and one task in it (undefined: no such task).
+async function treeNow(c: AgentContext) {
+  const r = fold(await c.store.readStream(c.stream), c.registry);
+  return { r, rows: flatten(streamView(r, c.stream).roots) };
+}
+const missing = (c: AgentContext, id: string): ToolText => ({ ok: false, text: `There is no task ${id} in ${c.stream}: list_tasks shows them. Nothing was written.` });
+
+// Writes one command as the agent, and says what happened in the page's words, with the page's
+// hint when the rules refused it.
+async function write(c: AgentContext, cmd: Command, label: string, row: TreeRow | undefined): Promise<ToolText> {
+  const event = cmd.kind === "event" ? cmd.event : "ADD_SUBTASK";
+  const r = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
+  const said = flashFor(event, label, r);
+  if (said.ok || (r.status !== "rejected" && r.status !== "refused")) return said;
+  const hint = hintFor(r.code, r.detail, event, label, row?.state ?? "");
+  return { ok: false, text: hint ? `${said.text} What to do: ${hint}` : said.text };
+}
+
+const event = (c: AgentContext, id: string, name: string, payload: Record<string, unknown> = {}): Command => ({ stream: c.stream, kind: "event", entity: { type: NODE, id }, event: name, actor: c.actor, payload });
+const birth = (c: AgentContext, id: string, payload: Record<string, unknown>): Command => ({ stream: c.stream, kind: "create", entity: { type: NODE, id }, actor: c.actor, payload });
+
+// start: the task moves to in progress (one at a time: the gate says which to finish first)
+export async function startTask(c: AgentContext, id: string): Promise<ToolText> {
+  const row = (await treeNow(c)).rows.find((x) => x.id === id);
+  if (!row) return missing(c, id);
+  return write(c, event(c, id, "START"), id, row);
+}
+
+// complete: done, with proof of work anyone can re-check (and a note for the history, if given)
+export async function completeTask(c: AgentContext, id: string, proof: string, note?: string): Promise<ToolText> {
+  const row = (await treeNow(c)).rows.find((x) => x.id === id);
+  if (!row) return missing(c, id);
+  return write(c, event(c, id, "COMPLETE", { evidenceRef: proof, ...(note ? { note } : {}) }), id, row);
+}
+
+// block: blocked, with the reason; what it waits on is an open task, or a new ticket created under
+// it first (found while working on it), as the page's Block does
+export async function blockTask(c: AgentContext, id: string, reason: string, waitsOn?: string, newTicket?: string): Promise<ToolText> {
+  const { r, rows } = await treeNow(c);
+  const row = rows.find((x) => x.id === id);
+  if (!row) return missing(c, id);
+  if (waitsOn !== undefined && newTicket !== undefined) return { ok: false, text: "Name what it waits on once: an open task (waits_on) or a new ticket (new_ticket), not both. Nothing was written." };
+  if (newTicket !== undefined) {
+    const name = subtaskName(newTicket);
+    if (name === undefined) return { ok: false, text: "A new ticket's name is 1 to 80 characters, with no control characters. Nothing was written." };
+    return inOrder([
+      () => write(c, birth(c, name, { parent_id: id, kind: "discovered", discovered_during: id }), `${name} under ${id}`, undefined),
+      () => write(c, event(c, id, "BLOCK", { reason, blocker: name }), id, row),
+    ]);
+  }
+  if (waitsOn !== undefined && !rows.some((x) => x.id === waitsOn)) return { ok: false, text: `There is no task ${waitsOn} for ${id} to wait on: to wait on a new ticket, name it in new_ticket instead. Nothing was written.` };
+  const problem = waitsOn === undefined ? undefined : blockerProblem(r, c.stream, { type: NODE, id }, waitsOn);
+  if (problem) return { ok: false, text: `${id} can't wait on that: ${problem}. Nothing was written.` };
+  return write(c, event(c, id, "BLOCK", { reason, ...(waitsOn === undefined ? {} : { blocker: waitsOn }) }), id, row);
+}
+
+// add a subtask: a new task under one, marked found while working on it when that one is under way
+export async function addSubtask(c: AgentContext, under: string, name: string): Promise<ToolText> {
+  const parent = (await treeNow(c)).rows.find((x) => x.id === under);
+  if (!parent) return missing(c, under);
+  const id = subtaskName(name);
+  if (id === undefined) return { ok: false, text: "A subtask's name is 1 to 80 characters, with no control characters. Nothing was written." };
+  const found = parent.state === "in_progress" || parent.state === "blocked" ? { kind: "discovered", discovered_during: under } : {};
+  return write(c, birth(c, id, { parent_id: under, ...found }), `${id} under ${under}`, undefined);
+}
+
+// file an idea: its summary and why; tira drafts its file and proposes where it goes, and a person
+// approves both before it becomes a task (the CLI's tira idea)
+export async function fileIdea(c: AgentContext, summary: string, why: string, under?: string): Promise<ToolText> {
+  if (summary.length > IDEA_TEXT_MAX || why.length > IDEA_TEXT_MAX) return { ok: false, text: `Keep the summary and the why to ${IDEA_TEXT_MAX} characters each. Nothing was written.` };
+  const { r } = await treeNow(c);
+  const view = makeView(new Map(r.entities.filter((e) => e.stream === c.stream).map((e) => [e.key, e])));
+  const place = placement(view, c.registry, { summary, why }, under);
+  const id = ideaId(view, summary, place.parent);
+  const cmd: Command = { stream: c.stream, kind: "create", entity: { type: IDEA, id }, actor: c.actor, payload: { summary, why, ...(under === undefined ? {} : { under }) } };
+  const said = flashFor("File idea", id, (await new Dispatcher(c.store, c.registry).submit(cmd)).result); // not a page verb: its label as given
+  if (!said.ok) return said;
+  return { ok: true, text: `${said.text}\nidea ${id}: "${summary}"\nparent: ${place.parent ?? "not settled"} (${place.basis})\nnext: ${whatNext(place)}` };
+}

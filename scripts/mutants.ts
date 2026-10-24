@@ -842,6 +842,18 @@ const MUTANTS: Mutant[] = [
   { name: "mcp: a task forgets its proof", file: "src/mcp/tasks.ts", find: "  if (proof) lines.push(`Proof: ${proof.ref} (from ${proof.actor}, seq ${proof.seq})`);\n", replace: "" },
   { name: "mcp: an unknown task reads as found", file: "src/mcp/tasks.ts", find: "if (!row || !t) return { ok: false,", replace: "if (!row || !t) return { ok: true," },
   { name: "mcp: a reading tool says it writes", file: "src/mcp/server.ts", find: "const READS = { readOnlyHint: true, openWorldHint: false };", replace: "const READS = { readOnlyHint: false, openWorldHint: false };" },
+  { name: "mcp: an agent's writes go in under no name", file: "src/mcp/actions.ts", find: "event: name, actor: c.actor, payload });", replace: "event: name, payload });" },
+  { name: "mcp: a refusal comes back without what to do", file: "src/mcp/actions.ts", find: "  return { ok: false, text: hint ? `${said.text} What to do: ${hint}` : said.text };", replace: "  return { ok: false, text: said.text };" },
+  { name: "mcp: a refusal reads as done", file: "src/mcp/actions.ts", find: "  return { ok: false, text: hint ? `${said.text} What to do: ${hint}` : said.text };", replace: "  return { ok: true, text: hint ? `${said.text} What to do: ${hint}` : said.text };" },
+  { name: "mcp: starting a task that isn't there writes anyway", file: "src/mcp/actions.ts", find: "  if (!row) return missing(c, id);\n  return write(c, event(c, id, \"START\"), id, row);", replace: "  return write(c, event(c, id, \"START\"), id, row);" },
+  { name: "mcp: a block waits on two things", file: "src/mcp/actions.ts", find: "  if (waitsOn !== undefined && newTicket !== undefined) return", replace: "  if (false) return" },
+  { name: "mcp: a block's new ticket isn't found while working", file: "src/mcp/actions.ts", find: "birth(c, name, { parent_id: id, kind: \"discovered\", discovered_during: id })", replace: "birth(c, name, { parent_id: id })" },
+  { name: "mcp: a block waits on a task that isn't there", file: "src/mcp/actions.ts", find: "  if (waitsOn !== undefined && !rows.some((x) => x.id === waitsOn)) return", replace: "  if (false) return" },
+  { name: "mcp: a block waits on what it's part of", file: "src/mcp/actions.ts", find: "  if (problem) return { ok: false, text: `${id} can't wait on that:", replace: "  if (false) return { ok: false, text: `${id} can't wait on that:" },
+  { name: "mcp: a subtask under work isn't found while working", file: "src/mcp/actions.ts", find: "const found = parent.state === \"in_progress\" || parent.state === \"blocked\" ?", replace: "const found = false ?" },
+  { name: "mcp: a subtask is found while working on a task not under way", file: "src/mcp/actions.ts", find: "const found = parent.state === \"in_progress\" || parent.state === \"blocked\" ?", replace: "const found = true ?" },
+  { name: "mcp: proof of work may be blank", file: "src/mcp/server.ts", find: "const words = (what: string) => z.string().trim().min(1).max(500).describe(what);", replace: "const words = (what: string) => z.string().max(500).describe(what);" },
+  { name: "mcp: a writing tool says it reads", file: "src/mcp/server.ts", find: "const WRITES = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };", replace: "const WRITES = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.

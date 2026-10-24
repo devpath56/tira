@@ -62,8 +62,8 @@ test("tira mcp reads the board: what's next, the task list in the board's order,
   const { client, call } = await connected(w);
   try {
     const tools = (await client.listTools()).tools;
-    assert.deepEqual(tools.map((x) => x.name), ["next_task", "list_tasks", "get_task"]);
-    for (const tool of tools) assert.equal(tool.annotations?.readOnlyHint, true, tool.name);
+    assert.deepEqual(tools.slice(0, 3).map((x) => x.name), ["next_task", "list_tasks", "get_task"]);
+    for (const tool of tools.slice(0, 3)) assert.equal(tool.annotations?.readOnlyHint, true, tool.name);
     assert.deepEqual(await call("next_task"), { error: false, text: 'In progress: nothing.\nNext: header (under site)\nBlocked: 1 (list_tasks with state "blocked" shows them)' });
     assert.deepEqual(await call("list_tasks"), { error: false, text: "site · to do · top level\nheader · to do · under site · ◆ next\nfooter · to do · under site\napi · blocked · under site" });
     assert.deepEqual(await call("list_tasks", { state: "blocked" }), { error: false, text: "api · blocked · under site" });
@@ -80,6 +80,58 @@ test("tira mcp reads the board: what's next, the task list in the board's order,
     assert.deepEqual(await call("list_tasks"), { error: false, text: "site · to do · top level\nfooter · to do · under site · ◆ next\napi · blocked · under site" }); // done: off the open list
     assert.match((await call("get_task", { id: "header" })).text, /^header · done · under site\nProof: header.png \(from isha, seq 8\)\nHistory:/);
     assert.match((await call("get_task", { id: "site" })).text, /^site · to do · top level\nSubtasks: header \(done\), footer \(to do\), api \(blocked\)\n/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("tira mcp acts through tira's rules, as the agent: start, complete with proof, block on a task or a new ticket, add a subtask, file an idea; refusals say what to do", async () => {
+  const w = await world();
+  const { client, call } = await connected(w);
+  const logged = async () => (await w.store.readStream(S)).length;
+  try {
+    // only these: no cancel, reopen, unblock, delete or settings for an agent
+    const tools = (await client.listTools()).tools;
+    assert.deepEqual(tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea"]);
+    for (const tool of tools.slice(3)) assert.deepEqual([tool.annotations?.readOnlyHint, tool.annotations?.destructiveHint], [false, false], tool.name);
+    assert.deepEqual(await call("start_task", { id: "header" }), { error: false, text: "Start header: done (seq 7)." });
+    assert.match((await call("get_task", { id: "header" })).text, /\n  seq 7 · node.start · claude-code$/); // as the agent
+    // one in progress at a time: refused, with the board's hint (the refusal is in the log, as from the CLI)
+    assert.deepEqual(await call("start_task", { id: "footer" }), { error: true, text: "Start footer: refused (gate: one active task: node:header is already active). The refusal is in the log (seq 8). What to do: Only one task can be in progress. Complete or block header first, then start footer." });
+    // a subtask under work in progress is found while working on it
+    assert.deepEqual(await call("add_subtask", { under: "header", name: "header_logo" }), { error: false, text: "Add subtask header_logo under header: done (seq 9)." });
+    assert.match((await call("get_task", { id: "header_logo" })).text, /^header_logo · to do · under site › header · ◆ next · found during header\n/);
+    assert.match((await call("add_subtask", { under: "footer", name: "footer_links" })).text, /^Add subtask footer_links under footer: done/);
+    assert.doesNotMatch((await call("get_task", { id: "footer_links" })).text, /found during/); // footer isn't under way
+    // proof of work, and the rules' order
+    const unproved = await logged();
+    for (const args of [{ id: "header" }, { id: "header", proof: "   " }]) { // no proof, or blank: the schema says no, before the log
+      const r = await call("complete_task", args);
+      assert.equal(r.error, true);
+      assert.match(r.text, /^Input validation error: Invalid arguments for tool complete_task: proof/);
+    }
+    assert.equal(await logged(), unproved);
+    assert.match((await call("complete_task", { id: "header", proof: "pr/1" })).text, /^Complete header: refused \(gate: .*\)\. The refusal is in the log \(seq \d+\)\. What to do: Close its open subtasks first \(complete or cancel them\): header_logo\.$/);
+    assert.match((await call("complete_task", { id: "header_logo", proof: "logo.png" })).text, /What to do: Start header_logo first\.$/);
+    // blocked, waiting on a new ticket made under it, found while working on it
+    assert.match((await call("block_task", { id: "footer", reason: "waiting on copy", new_ticket: "footer_copy" })).text, /^Add subtask footer_copy under footer: done \(seq \d+\)\. Block footer: done \(seq \d+\)\.$/);
+    const footer = (await call("get_task", { id: "footer" })).text;
+    assert.match(footer, /^footer · blocked · under site\nSubtasks: footer_links \(to do\), footer_copy \(to do\)\nBlocked: waiting on copy\nWaiting on: footer_copy\n/);
+    assert.match(footer, /node.block · claude-code · reason waiting on copy · blocked by footer_copy$/);
+    assert.match((await call("get_task", { id: "footer_copy" })).text, /found during footer/);
+    // or on an open task; never on one that isn't there, nor on two things; nothing written then
+    assert.match((await call("block_task", { id: "header", reason: "needs the api", waits_on: "api" })).text, /^Block header: done \(seq \d+\)\.$/);
+    assert.match((await call("get_task", { id: "header" })).text, /\nWaiting on: api\n/);
+    const before = await logged();
+    assert.deepEqual(await call("block_task", { id: "footer_links", reason: "x", waits_on: "nope" }), { error: true, text: "There is no task nope for footer_links to wait on: to wait on a new ticket, name it in new_ticket instead. Nothing was written." });
+    assert.deepEqual(await call("block_task", { id: "footer_links", reason: "x", waits_on: "api", new_ticket: "more" }), { error: true, text: "Name what it waits on once: an open task (waits_on) or a new ticket (new_ticket), not both. Nothing was written." });
+    assert.match((await call("block_task", { id: "footer_links", reason: "x", waits_on: "site" })).text, /^footer_links can't wait on that: footer_links sits under site: a task can't wait on what it is part of\. Nothing was written\.$/);
+    assert.deepEqual(await call("start_task", { id: "nope" }), { error: true, text: "There is no task nope in demo: list_tasks shows them. Nothing was written." });
+    assert.equal(await logged(), before);
+    // an idea, filed: tira proposes where it goes; a person approves
+    const idea = await call("file_idea", { summary: "Add a dark footer", why: "matches the header" });
+    assert.equal(idea.error, false);
+    assert.match(idea.text, /^File idea \S+: done \(seq \d+\)\.\nidea \S+: "Add a dark footer"\nparent: footer \(.+\)\nnext: a person approves the file/);
   } finally {
     await client.close();
   }

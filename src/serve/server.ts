@@ -447,7 +447,8 @@ export function carryQ(html: string, q: string): string {
     /[?&;]w=/.test(path) ? m : `${attr}="${path}${esc(joiner(path))}${esc(q)}"`);
 }
 
-const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
+// A write's result in the page's words (and tira mcp's).
+export const flashFor = (event: string, id: string, r: WriteResult): { ok: boolean; text: string } => {
   const label = PAGE_VERBS[event]?.label ?? event;
   if (r.status === "appended") {
     const closes = (r.closedByTira ?? []).map((c) => bareKey(c.key));
@@ -481,7 +482,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 // Why a block can't wait on an existing task: it must be an open task of the stream, and not
 // one the blocked task sits under (a task can't wait on what it is part of).
-function blockerProblem(r: FoldResult, stream: string, a: PageAction, blocker: string): string | undefined {
+export function blockerProblem(r: FoldResult, stream: string, a: Pick<PageAction, "type" | "id">, blocker: string): string | undefined {
   const rows = flatten(streamView(r, stream).roots);
   const target = rows.find((x) => x.type === a.type && x.id === blocker);
   if (!target) return `there is no task ${blocker} to wait on. To make it a new ticket, create it on the line above: tira create ${a.type} ${blocker} --parent ${a.id}`;
