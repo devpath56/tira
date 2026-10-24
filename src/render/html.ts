@@ -107,7 +107,7 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 #th-system:checked~main .theme label[for=th-system],#th-light:checked~main .theme label[for=th-light],#th-dark:checked~main .theme label[for=th-dark]{color:var(--accent-text);background:var(--accent-bg)}
 #th-system:focus-visible~main .theme label[for=th-system],#th-light:focus-visible~main .theme label[for=th-light],#th-dark:focus-visible~main .theme label[for=th-dark]{outline:2px solid var(--accent);outline-offset:1px}
 .flash{margin:16px 0 0;padding:10px 16px;border-radius:var(--r-lg);font-size:13px;color:var(--fg);background:var(--panel);border:1px solid var(--line)}
-.flash.ok{border-color:color-mix(in srgb,var(--done) 30%,transparent);background:var(--done-bg)}.flash.no{border-color:color-mix(in srgb,var(--block) 30%,transparent);background:var(--block-bg)}
+.flash.ok{border-color:color-mix(in srgb,var(--done) 30%,transparent);background:var(--done-bg)}.flash.no{border-color:color-mix(in srgb,var(--block) 30%,transparent);background:var(--block-bg)}.flash.wait{border-color:color-mix(in srgb,var(--accent) 30%,transparent);background:var(--accent-bg)}
 .hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 0;margin:36px 0 26px}
 .hero .who{display:contents}
 .hero h1{font-size:28px;font-weight:650;letter-spacing:-.02em;line-height:1.15;overflow-wrap:anywhere}

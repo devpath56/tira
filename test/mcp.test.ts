@@ -440,7 +440,8 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     // Test connection: not yet (the plain post comes back to step 3, the answer in it); after the app's first call, connected
     const notYet = await http("POST", "/integrations/agents/test", `token=k&id=${cursorAgent?.id ?? ""}&made=${key}`);
     assert.match(notYet.location ?? "", new RegExp(`^/integrations\\?made=${key}&r=\\d+&from=agents#agents$`));
-    assert.match(await settings(notYet.location ?? ""), /<div class="agent-tested" data-agent-tested><div class="flash no" role="status" data-flash>Not yet: tira hasn(?:'|&#39;)t heard from cursor-agent\. Add it to Cursor above and turn tira on in Cursor(?:'|&#39;)s settings, under MCP, then test again\.<\/div><\/div>/);
+    assert.match(await settings(notYet.location ?? ""), /<div class="agent-tested" data-agent-tested><div class="flash wait" role="status" data-flash>Waiting for Cursor(?:'|&#39;)s first call\. Once tira is added, Cursor calls it when tira is turned on in its settings, under MCP\. Then test again\.<\/div><\/div>/); // a wait, said calmly: not an error
+    assert.match(page, /\.flash\.wait\{border-color:color-mix\(in srgb,var\(--accent\) 30%,transparent\);background:var\(--accent-bg\)\}/);
     const setup = JSON.parse(setupIn(agents)) as { mcpServers: Record<string, { url: string; headers: Record<string, string> }> };
     const cursor = setup.mcpServers["tira-demo"];
     assert.equal((await fetch(cursor?.url ?? "", { method: "POST", headers: { ...cursor?.headers, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) })).status, 200); // Cursor, with what the page gave it
@@ -458,7 +459,7 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.match(code, /<h3><span class="agent-n">3<\/span>Finish in Claude Code<\/h3><ol class="agent-steps"><li>Run this in a terminal/);
     assert.doesNotMatch(code, /data-agent-install|agent-hand/);
     const codeAgent = (await tokens.list(S)).find((x) => x.agent === "claude-code");
-    assert.match((await http("POST", "/integrations/agents/test", `token=k&id=${codeAgent?.id ?? ""}&fragment=1`)).body, /Not yet: tira hasn(?:'|&#39;)t heard from claude-code\. Run the command above, then open a new Claude Code session and ask it &#34;what(?:'|&#39;)s next in tira\?&#34;, then test again\./);
+    assert.match((await http("POST", "/integrations/agents/test", `token=k&id=${codeAgent?.id ?? ""}&fragment=1`)).body, /^<div class="flash wait" role="status" data-flash>Waiting for Claude Code(?:'|&#39;)s first call\. If you(?:'|&#39;)ve run the command, Claude Code is set up and just hasn(?:'|&#39;)t called tira yet\. Quickest check: run claude mcp list in a terminal \(or ask a new Claude Code session &#34;what(?:'|&#39;)s next in tira\?&#34;\), then test again\.<\/div>$/);
     const desktop = await settings((await http("POST", "/integrations/agents/connect", "token=k&app=claude-desktop&name=claude-desktop")).location ?? "");
     assert.equal(JSON.parse(setupIn(desktop)).mcpServers["tira-demo"].args[2], "mcp");
     assert.match(desktop, /data-agent-step="3">(?:(?!data-agent-test)[^])*<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s \.env names no database, so Claude Desktop(?:'|&#39;)s agent couldn(?:'|&#39;)t reach this board/); // in step 3, before Test connection

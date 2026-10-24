@@ -59,8 +59,9 @@ Project settings (the project's mark and name at the top):
   Claude Code's one command (it replaces an earlier tira entry for the project; then a new
   session, asked "what's next in tira?"), or Claude Desktop's config entry (with a warning when tira's `.env`
   wouldn't reach this board). The token shows only there, for 10 minutes, to whoever made it.
-  **Test connection** says whether tira has heard from the agent yet (its first call), and what to
-  do if not. Below, the **Connected agents** (their app, who connected them, when, last used;
+  **Test connection** says whether tira has heard from the agent yet (its first call); until then
+  it says so calmly, as a wait, not an error, with the quickest way to make that call (for Claude
+  Code, `claude mcp list`). Below, the **Connected agents** (their app, who connected them, when, last used;
   **Revoke** for whoever connected it, or the admin). **More** folds the rest: tira's MCP address
   (`http://127.0.0.1:<port>/mcp`), each app by hand with `<your token>`, what agents can do, and
   whether Claude Desktop's agent would reach this tira's database (tira's own `.env`, compared,

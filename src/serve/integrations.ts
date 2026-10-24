@@ -52,7 +52,7 @@ const EYE = `<svg class="i-show" viewBox="0 0 16 16" fill="none" stroke="current
 const SIGNIN_COOKIE = "tira_signin";
 
 type Env = Record<string, string | undefined>;
-type Flash = { ok: boolean; text: string };
+type Flash = { ok: boolean; text: string; wait?: boolean }; // wait: not yet, and nothing wrong (Test connection)
 
 export interface Outside {
   jira?: (site: string, login: JiraLogin) => JiraClient; // an API-token login (tira connect-jira)
@@ -331,7 +331,11 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     return `<section class="grp" id="${id}" data-int="${id}"><h2 class="grp-h">${title}</h2>${desc}<div class="grp-list">${rows}</div>${footer}</section>`;
   };
   const problem = (text: string) => (text ? `<div class="grp-row"><span class="grp-k no">${esc(text)}</span></div>` : "");
-  const flashLine = (f: Flash) => `<div class="flash ${f.ok ? "ok" : "no"}" role="status" data-flash>${esc(f.text)}</div>`;
+  const flashKind = (f: Flash) => {
+    if (f.wait) return "wait";
+    return f.ok ? "ok" : "no";
+  };
+  const flashLine = (f: Flash) => `<div class="flash ${flashKind(f)}" role="status" data-flash>${esc(f.text)}</div>`;
   const flashOf = (url: URL) => {
     const f = c.takeFlash(url.searchParams.get("r") ?? "");
     return f ? flashLine(f) : "";
@@ -554,12 +558,14 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     said({ ok: true, text: `Revoked ${row.agent}: its next call is refused.` });
   };
   // Test connection: has the app called tira since the agent was made? Its first call sets the
-  // agent's last used (a call from this page would prove only that the token is new).
-  const NOT_YET: Record<App, string> = {
-    "claude-code": "Run the command above, then open a new Claude Code session and ask it \"what's next in tira?\"",
-    cursor: "Add it to Cursor above and turn tira on in Cursor's settings, under MCP",
-    vscode: "Add it to VS Code above and start tira from its MCP servers list",
-    "claude-desktop": "Add the entry above to Claude Desktop's config and restart it",
+  // agent's last used (a call from this page would prove only that the token is new). Until then
+  // it's a wait, not a fault: adding tira to an app doesn't call it, so it's said calmly, with the
+  // quickest way to make that first call.
+  const WAITING: Record<App, string> = {
+    "claude-code": "If you've run the command, Claude Code is set up and just hasn't called tira yet. Quickest check: run claude mcp list in a terminal (or ask a new Claude Code session \"what's next in tira?\"), then test again.",
+    cursor: "Once tira is added, Cursor calls it when tira is turned on in its settings, under MCP. Then test again.",
+    vscode: "Once tira is added, VS Code calls it when you start tira from its MCP servers list. Then test again.",
+    "claude-desktop": "Once the entry is in its config, Claude Desktop calls tira when it restarts. Then test again.",
   };
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA"); // YYYY-MM-DD, on this computer's calendar
   const ago = (iso: string) => {
@@ -572,7 +578,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const app = APPS.find((a) => a === row.app);
     const where = app ? APP_NAME[app] : row.agent;
     if (row.lastUsedAt) return { ok: true, text: `${where} is connected: tira heard from ${row.agent} ${ago(row.lastUsedAt)}. Ask it "what's next in tira?"` };
-    return { ok: false, text: `Not yet: tira hasn't heard from ${row.agent}. ${app ? NOT_YET[app] : "Finish the step above in its app"}, then test again.` };
+    return { ok: false, wait: true, text: `Waiting for ${where}'s first call. ${app ? WAITING[app] : "Finish the step above in its app, then test again."}` };
   };
   const agentTest = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
