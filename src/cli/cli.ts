@@ -19,6 +19,8 @@ import { fxKey, transitionOf } from "../write/fxkey.ts";
 import { isIsoTime } from "../time.ts";
 import { sweep } from "../sweep/sweep.ts";
 import { tiraServer } from "../serve/server.ts";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { agentNameProblem, tiraMcpServer } from "../mcp/server.ts";
 import { divergence, FX, VERDICTS, type Coordinates, type DivergenceReport, type FactoryRecord } from "../divergence/divergence.ts";
 import { canonicalJson, fingerprint, fold, type FoldOptions, type FoldResult } from "../fold/fold.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
@@ -103,6 +105,10 @@ Usage:
                                                   first (a landing page, then connect a repo and, optionally,
                                                   a Jira project); the divergence section is recomputed on every
                                                   page load. Ctrl-C stops it
+  tira mcp --actor NAME                           tira for agents: an MCP server on stdio, for Claude Code or
+                                                  Claude Desktop to start, for this project (--stream), acting
+                                                  as the agent's own name (claude-code, …-agent, …-bot; never a
+                                                  person's). It stops when the program that started it does
   tira import <file.db>                           copy an old SQLite log into the Postgres database, once: every
                                                   event as it was, into an empty schema; a re-run adds nothing.
                                                   Each stream's fingerprint must match before and after
@@ -868,6 +874,33 @@ async function serve(open: () => ClosableStore, registry: Registry, stream: stri
   }
 }
 
+// tira for agents (src/mcp): an MCP server on stdio for one project, under one agent's own name,
+// for Claude Code or Claude Desktop to start. It runs until the program that started it closes its
+// end, or Ctrl-C; the store closes on the way out. Nothing goes to stdout: that's the protocol's.
+async function mcp(open: () => ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
+  const actor = values.actor ?? io.env.TIRA_ACTOR;
+  const problem = agentNameProblem(actor);
+  if (problem !== undefined || actor === undefined) throw new UsageError(problem ?? "");
+  const store = open();
+  try {
+    io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
+    await new Promise<void>((resolve) => {
+      const handle = serveStdio(() => {
+        const server = tiraMcpServer({ store, registry, stream, actor });
+        server.server.onclose = () => resolve();
+        return server;
+      });
+      process.stdin.once("end", () => resolve());
+      const stop = () => void handle.close().then(resolve);
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+    return 0;
+  } finally {
+    await store.close();
+  }
+}
+
 export async function run(argv: string[], io: Io): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -890,7 +923,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   const registry = defaultRegistry();
   if (cmd === "types") return types(registry, values, io);
-  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "divergence", "import"].includes(cmd)) {
+  if (!["create", "send", "idea", "ideas", "link", "connect-jira", "sync", "log", "state", "replay", "dump", "tree", "render", "key", "sweep", "serve", "mcp", "divergence", "import"].includes(cmd)) {
     io.err(`tira: unknown command "${cmd}"`);
     io.err("");
     io.err(HELP);
@@ -908,6 +941,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (cmd === "import") return await importCmd(args, values, registry, io);
     if (values.now !== undefined && !isIsoTime(values.now)) throw new UsageError(`--now must be an ISO-8601 date-time with a zone (Z or +hh:mm), got "${values.now}"`);
     if (cmd === "serve") return await serve(open, registry, stream, values, io);
+    if (cmd === "mcp") return await mcp(open, registry, stream, values, io);
     store = open();
     switch (cmd) {
       case "create":

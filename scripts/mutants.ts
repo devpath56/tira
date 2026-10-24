@@ -830,6 +830,10 @@ const MUTANTS: Mutant[] = [
   { name: "proof: typing a proof jumps to the command", file: "src/serve/app.mjs", find: "fill(box, \"evidenceRef\", proof.value, false);", replace: "fill(box, \"evidenceRef\", proof.value);" },
   { name: "proof: a pull request picked as proof doesn't show in the field", file: "src/serve/app.mjs", find: "  if (chip.dataset.fill === \"evidenceRef\" && proof) proof.value = chip.dataset.value ?? \"\"; // a merged pull request as the proof\n", replace: "" },
   { name: "cli: tira waits out its account connections before it exits", file: "scripts/tira.ts", find: "await closeAccounts();\n", replace: "", needs: "postgres" },
+  { name: "mcp: a person's name accepted", file: "src/mcp/server.ts", find: "  if (!AGENT.test(name)) return", replace: "  if (false) return" },
+  { name: "mcp: tira's own names accepted", file: "src/mcp/server.ts", find: "  if (isReservedActor(name)) return", replace: "  if (false) return" },
+  { name: "mcp: any shape of name accepted", file: "src/mcp/server.ts", find: "  if (!NAME.test(name)) return", replace: "  if (false) return" },
+  { name: "mcp: no name needed", file: "src/mcp/server.ts", find: "  if (name === undefined || name.trim() === \"\") return", replace: "  if (name === undefined) return" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
@@ -850,7 +854,7 @@ function scratchCopy(): string {
   return dir;
 }
 
-const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync", "accounts"];
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync", "accounts", "mcp"];
 // a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
 const SUITE_TIMEOUT = 60_000;
 const CATCHERS = join(ROOT, ".mutant-catchers.json");
