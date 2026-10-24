@@ -93,7 +93,7 @@ const bare = (key: string) => key.slice(key.indexOf(":") + 1);
 
 // what a ticket says, in lines: its title, description, steps, estimate and assignee
 function ticketLines(k: Ticket | undefined): string[] {
-  if (!k) return ["Ticket: no description, steps, estimate or assignee yet."];
+  if (!k) return ["Ticket: no description, steps, estimate or assignee yet (fill_ticket writes all but the assignee)."];
   return [
     ...(k.title ? [`Title: ${k.title}`] : []),
     ...(k.description ? ["Description:", ...k.description.split("\n").map((x) => `  ${x}`)] : []),

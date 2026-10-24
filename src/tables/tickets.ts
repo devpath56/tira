@@ -5,8 +5,8 @@
 //   ticket   one per task (id = the task's id), versioned: v1 born WRITTEN, each edit a new
 //            version REWRITTEN, the whole ticket each time. {task, title?, description?, steps?,
 //            estimate?, assignee?}: what the work is, the steps to it, how long it should take
-//            ("2h", "1d"), and who does it (a person or one of the project's agents), set by a
-//            person on the page.
+//            ("2h", "1d"), and who does it (a person or one of the project's agents): its words
+//            written by a person on the page or an agent (fill_ticket), who does it by a person.
 //   comment  any number per task: {task, text}, written by a person (feedback for whoever works
 //            on it) or an agent (its reply), as themselves. Agents read them (tira's MCP server).
 //   commit   one per (commit, task): {task, repo, sha, pr?, branch?, message}, a commit on a pull
@@ -32,6 +32,17 @@ export const MAX_DESCRIPTION = 4000;
 export const MAX_STEPS = 30;
 export const MAX_STEP = 300;
 export const MAX_COMMENT = 2000;
+export const NO_CONTROL = /^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$/; // words may have line breaks, nothing else unseen
+
+// What a ticket's words can't say, if anything, in plain words: the page's Edit form and an
+// agent's fill_ticket ask the same (each trims them first; who it's assigned to is the page's own).
+export interface TicketWords { title: string; description: string; steps: string[]; estimate: string }
+export const ticketWordsProblem = ({ title, description, steps, estimate }: TicketWords): string | undefined => [
+  title !== "" && !TICKET_TITLE.test(title) ? "A title is 1 to 120 characters." : "",
+  description.length > MAX_DESCRIPTION || !NO_CONTROL.test(description) ? `A description is up to ${MAX_DESCRIPTION} characters.` : "",
+  steps.length > MAX_STEPS || steps.some((x) => x.length > MAX_STEP || /\p{Cc}/u.test(x)) ? `Up to ${MAX_STEPS} steps, each up to ${MAX_STEP} characters.` : "",
+  estimate !== "" && !ESTIMATE.test(estimate) ? "A time estimate is a number and a unit: 30m, 2h, 1d or 1w." : "",
+].find((x) => x !== "");
 
 const s = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 const optional = (v: unknown, ok: (x: string) => boolean) => v === undefined || (typeof v === "string" && ok(v));

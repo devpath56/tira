@@ -8,7 +8,8 @@ import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
-import { addComment, addSubtask, blockTask, completeTask, fileIdea, startTask } from "./actions.ts";
+import { addComment, addSubtask, blockTask, completeTask, fileIdea, fillTicket, startTask } from "./actions.ts";
+import { MAX_DESCRIPTION, MAX_STEP, MAX_STEPS } from "../tables/tickets.ts";
 
 // What every tool works in: the project's stream, the agent it acts as, (from tira mcp) whether
 // that agent is still connected: revoked in Project settings, its next call is refused; and how to
@@ -100,5 +101,17 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
     inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
     annotations: { ...WRITES, idempotentHint: false },
   }, async ({ id, text }) => answer(await guarded(ctx, () => addComment(ctx, id, text))));
+  server.registerTool("fill_ticket", {
+    title: "Fill in a ticket",
+    description: "Write what a task's ticket says: its title, description, steps and estimate (get_task shows them). Only what you give changes, and an empty one clears it. Who it's assigned to is a person's to say: it stays as it is. People see it on the ticket, and the history says you wrote it.",
+    inputSchema: z.object({
+      id: taskId,
+      title: z.string().max(120).optional().describe("optional: a short title, up to 120 characters"),
+      description: z.string().max(MAX_DESCRIPTION).optional().describe("optional: what the work is and why, in a few sentences"),
+      steps: z.array(z.string().max(MAX_STEP)).max(MAX_STEPS).optional().describe(`optional: the steps to do it, in order, up to ${MAX_STEPS} (these replace the ticket's steps)`),
+      estimate: z.string().max(12).optional().describe("optional: how long it should take: a number and a unit, e.g. 30m, 2h, 1d (8 hours) or 1w"),
+    }),
+    annotations: { ...WRITES, idempotentHint: true },
+  }, async ({ id, ...fill }) => answer(await guarded(ctx, () => fillTicket(ctx, id, fill))));
   return server;
 }

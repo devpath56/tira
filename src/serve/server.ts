@@ -37,7 +37,7 @@ import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
-import { ASSIGNEE, COMMENT, ESTIMATE, MAX_COMMENT, MAX_DESCRIPTION, MAX_STEP, MAX_STEPS, TICKET, TICKET_TITLE } from "../tables/tickets.ts";
+import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
 import { commitsOf, firstLine, shortSha, ticketsOf, whereFound, type Commit, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proveWith } from "../sync/commits.ts";
 import type { Recent } from "../sync/github.ts";
@@ -954,9 +954,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { r } = await now(ws.stream);
     return r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id) ? r : undefined;
   };
-  const NO_CONTROL = /^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$/; // words may have line breaks, nothing else unseen
   // a ticket's Edit form, read: each field trimmed, the steps one per line
-  type TicketAsked = { title: string; description: string; steps: string[]; estimate: string; assignee: string };
+  type TicketAsked = TicketWords & { assignee: string };
   const ticketAsked = (form: URLSearchParams): TicketAsked => ({
     title: (form.get("title") ?? "").trim().replace(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
@@ -965,13 +964,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     assignee: (form.get("assignee") ?? "").trim(),
   });
   // what a ticket can't say, if anything: `allowed`, who it can be assigned to
-  const ticketProblem = ({ title, description, steps, estimate, assignee }: TicketAsked, allowed: (string | undefined)[]): string | undefined => [
-    title !== "" && !TICKET_TITLE.test(title) ? "A title is 1 to 120 characters." : "",
-    description.length > MAX_DESCRIPTION || !NO_CONTROL.test(description) ? `A description is up to ${MAX_DESCRIPTION} characters.` : "",
-    steps.length > MAX_STEPS || steps.some((x) => x.length > MAX_STEP || /\p{Cc}/u.test(x)) ? `Up to ${MAX_STEPS} steps, each up to ${MAX_STEP} characters.` : "",
-    estimate !== "" && !ESTIMATE.test(estimate) ? "A time estimate is a number and a unit: 30m, 2h, 1d or 1w." : "",
-    assignee !== "" && (!ASSIGNEE.test(assignee) || !allowed.includes(assignee)) ? `${assignee} isn't on this project's team or one of its agents.` : "",
-  ].find((x) => x !== "");
+  const assigneeProblem = (assignee: string, allowed: (string | undefined)[]) =>
+    assignee !== "" && (!ASSIGNEE.test(assignee) || !allowed.includes(assignee)) ? `${assignee} isn't on this project's team or one of its agents.` : undefined;
+  const ticketProblem = (asked: TicketAsked, allowed: (string | undefined)[]): string | undefined => ticketWordsProblem(asked) ?? assigneeProblem(asked.assignee, allowed);
 
   // POST /tickets: a ticket's Edit form (its title, description, steps, estimate and assignee), the
   // whole ticket as a new version, written as the person saving it.

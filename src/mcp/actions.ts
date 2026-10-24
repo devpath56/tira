@@ -1,5 +1,5 @@
 // What tira's tools for agents do: start a task, complete it with proof, block it (with a reason,
-// and what it waits on), add a subtask, file an idea. Each is written through the dispatcher under
+// and what it waits on), add a subtask, file an idea, comment, fill in a ticket. Each is written through the dispatcher under
 // the agent's own name, as the CLI's and the page's writes are, so the rules, the gates and the
 // proof of work are tira's own; a refusal comes back with the page's plain-words hint. A task that
 // doesn't exist, or a block that can't wait on what it names, is answered before anything is
@@ -15,8 +15,8 @@ import type { Command } from "../write/write-path.ts";
 import type { AgentContext } from "./server.ts";
 import type { ToolText } from "./tasks.ts";
 import { randomBytes } from "node:crypto";
-import { COMMENT, MAX_COMMENT } from "../tables/tickets.ts";
-import { commitsOf, firstLine, shortSha, type Commit } from "../fold/tickets.ts";
+import { COMMENT, MAX_COMMENT, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { commitsOf, firstLine, shortSha, ticketsOf, type Commit, type Ticket } from "../fold/tickets.ts";
 
 const NODE = "node";
 const IDEA_TEXT_MAX = 500;
@@ -121,6 +121,35 @@ export async function addComment(c: AgentContext, id: string, text: string): Pro
   const r = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
   if (r.status === "appended") return { ok: true, text: `Commented on ${id} (seq ${r.seq}): people see it on the ticket.` };
   return { ok: false, text: `The comment wasn't written: ${r.status === "rejected" || r.status === "refused" ? r.detail : r.status}.` };
+}
+
+// fill in a ticket: its title, description, steps and estimate, as the agent, the whole ticket as its
+// next version (as the page's Edit saves it). What's left out stays as it is and an empty one is
+// cleared; who it's assigned to is a person's to say, so it stays as it is.
+export interface TicketFill { title?: string | undefined; description?: string | undefined; steps?: string[] | undefined; estimate?: string | undefined }
+// the ticket's words once filled: each given one, else what it says now, trimmed as the page trims them
+const filledWords = (fill: TicketFill, before: Ticket | undefined): TicketWords => ({
+  title: (fill.title ?? before?.title ?? "").trim().replace(/\s+/g, " "),
+  description: (fill.description ?? before?.description ?? "").replaceAll("\r\n", "\n").trim(),
+  steps: (fill.steps ?? before?.steps ?? []).map((x) => x.trim()).filter((x) => x !== ""),
+  estimate: (fill.estimate ?? before?.estimate ?? "").trim(),
+});
+export async function fillTicket(c: AgentContext, id: string, fill: TicketFill): Promise<ToolText> {
+  const { r, rows } = await treeNow(c);
+  if (!rows.some((x) => x.id === id)) return missing(c, id);
+  if (Object.values(fill).every((x) => x === undefined)) return { ok: false, text: "Give at least one of title, description, steps or estimate. Nothing was written." };
+  const before = ticketsOf(r, c.stream).get(id);
+  const { title, description, steps, estimate } = filledWords(fill, before);
+  const why = ticketWordsProblem({ title, description, steps, estimate });
+  if (why) return { ok: false, text: `${why} Nothing was written.` };
+  const assignee = before?.assignee;
+  const payload = { task: id, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
+  const same = JSON.stringify([before?.title, before?.description, before?.steps ?? [], before?.estimate]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate]);
+  if (same) return { ok: true, text: `Nothing changed: ${id}'s ticket already says that.` };
+  const cmd: Command = { stream: c.stream, kind: "create", entity: { type: TICKET, id, version: (before?.version ?? 0) + 1 }, actor: c.actor, payload };
+  const w = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;
+  if (w.status === "appended") return { ok: true, text: `Filled in ${id}'s ticket (seq ${w.seq}): people see it on the ticket. get_task shows it.` };
+  return { ok: false, text: `The ticket wasn't written: ${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}.` };
 }
 
 // file an idea: its summary and why; tira drafts its file and proposes where it goes, and a person

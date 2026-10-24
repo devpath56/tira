@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 867 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 874 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -665,6 +665,7 @@ claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope us
 | `add_subtask` | A new task under one, found while working on it when that one is under way |
 | `file_idea` | An idea for later: tira drafts it and proposes where it goes; a person approves |
 | `add_comment` | A reply on a task's comments, shown on its ticket |
+| `fill_ticket` | Writes a ticket's title, description, steps and estimate as the agent; what it leaves out stays. Who it's assigned to stays a person's to say |
 
 Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. A remote endpoint for cloud agents waits on the shared server.
 
