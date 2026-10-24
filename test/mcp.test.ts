@@ -3,12 +3,20 @@
 import "./hermetic.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { run } from "../src/cli/cli.ts";
 import { agentNameProblem, tiraMcpServer } from "../src/mcp/server.ts";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
+import { freshPgDb, needsPg } from "./test-stores.ts";
+import { openStore } from "../src/store/open.ts";
 
 const S = "demo";
 
@@ -134,5 +142,41 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
     assert.match(idea.text, /^File idea \S+: done \(seq \d+\)\.\nidea \S+: "Add a dark footer"\nparent: footer \(.+\)\nnext: a person approves the file/);
   } finally {
     await client.close();
+  }
+});
+
+test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, for the project and as the agent named; it says so on stderr only, and stops when its client does", { skip: needsPg }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tira-mcp-"));
+  const script = fileURLToPath(new URL("../scripts/tira.ts", import.meta.url));
+  const db = freshPgDb();
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), TIRA_DATABASE_URL: db, TIRA_HOME: join(dir, "home"), TIRA_FACTORY: "" };
+  const tira = (...argv: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", script, "--stream", "e2e", ...argv, "--actor", "isha"], { encoding: "utf8", env });
+  tira("create", "node", "site");
+  tira("create", "node", "header", "--parent", "site");
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["--disable-warning=ExperimentalWarning", script, "--stream", "e2e", "mcp", "--actor", "claude-code"], env, stderr: "pipe" });
+  let said = "";
+  transport.stderr?.on("data", (d: Buffer) => { said += d.toString(); });
+  const client = new Client({ name: "tira-e2e", version: "1.0.0" });
+  const text = async (name: string, args: Record<string, unknown> = {}) => ((await client.callTool({ name, arguments: args })).content as { text: string }[]).map((c) => c.text).join("\n");
+  try {
+    await client.connect(transport);
+    assert.equal((await client.listTools()).tools.length, 8);
+    assert.equal(await text("next_task"), "In progress: nothing.\nNext: header (under site)");
+    assert.match(await text("start_task", { id: "header" }), /^Start header: done \(seq 3\)\.$/);
+    assert.match(said, /^tira: MCP server for e2e, acting as claude-code \(on stdio; it stops when its client does\)$/m);
+    const t = performance.now();
+    await client.close();
+    assert.ok(performance.now() - t < 5000, "tira mcp stops promptly when its client does");
+    // the write is in the project's log, as the agent
+    const store = openStore(db);
+    try {
+      const last = (await store.readStream("e2e")).at(-1);
+      assert.deepEqual([last?.type, last?.metadata.actor], ["node.start", "claude-code"]);
+    } finally {
+      await store.close();
+    }
+  } finally {
+    await client.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
   }
 });

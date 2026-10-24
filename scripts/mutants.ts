@@ -854,6 +854,10 @@ const MUTANTS: Mutant[] = [
   { name: "mcp: a subtask is found while working on a task not under way", file: "src/mcp/actions.ts", find: "const found = parent.state === \"in_progress\" || parent.state === \"blocked\" ?", replace: "const found = true ?" },
   { name: "mcp: proof of work may be blank", file: "src/mcp/server.ts", find: "const words = (what: string) => z.string().trim().min(1).max(500).describe(what);", replace: "const words = (what: string) => z.string().max(500).describe(what);" },
   { name: "mcp: a writing tool says it reads", file: "src/mcp/server.ts", find: "const WRITES = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };", replace: "const WRITES = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };" },
+  { name: "mcp: tira mcp's startup line goes to stdout, the protocol's", file: "src/cli/cli.ts", find: "    io.err(`tira: MCP server for ${stream}, acting as ${actor}", replace: "    io.out(`tira: MCP server for ${stream}, acting as ${actor}", needs: "postgres" },
+  { name: "mcp: tira mcp acts as another agent", file: "src/cli/cli.ts", find: "tiraMcpServer({ store, registry, stream, actor })", replace: "tiraMcpServer({ store, registry, stream, actor: \"claude\" })", needs: "postgres" },
+  { name: "mcp: tira mcp serves another project", file: "src/cli/cli.ts", find: "tiraMcpServer({ store, registry, stream, actor })", replace: "tiraMcpServer({ store, registry, stream: \"tasktree-main\", actor })", needs: "postgres" },
+  { name: "mcp: tira mcp starts under any name", file: "src/cli/cli.ts", find: "  if (problem !== undefined || actor === undefined) throw new UsageError(problem ?? \"\");", replace: "  if (actor === undefined) throw new UsageError(problem ?? \"\");" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
