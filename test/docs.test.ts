@@ -13,6 +13,7 @@ import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
+import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
 import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
@@ -106,6 +107,9 @@ async function pages(): Promise<string> {
   const firstRunServer = tiraServer({ store, registry, stream: "t", token: "k", links: { githubAuth, env: { TIRA_HOME: firstHome } } });
   const getFirstRun = await ask(firstRunServer);
   try {
+    // a ticket with its words, and a comment on it (src/tables/tickets.ts)
+    await d.submit({ stream: "t", kind: "create", entity: { type: "ticket", id: "b", version: 1 }, actor: "isha", payload: { task: "b", title: "Task b, in words", description: "What b is.", steps: ["one", "two"], estimate: "2h", assignee: "claude-code" } });
+    await d.submit({ stream: "t", kind: "create", entity: { type: "comment", id: "c-docs" }, actor: "isha", payload: { task: "b", text: "Feedback for b." } });
     const live = (await get("GET", "/")).body;
     const confirm = (await get("GET", "/confirm?type=node&id=b&event=COMPLETE")).body;
     // the dialog's packet alone, for an action tira would refuse (a is blocked): its hint and way out
@@ -123,13 +127,16 @@ async function pages(): Promise<string> {
       + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body;
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
+    const sha = "b".repeat(40); // a commit the sync kept for b: its proof of work
+    await new WritePath(store, registry).submitAsSync({ stream: "t", kind: "create", entity: { type: "commit", id: `${sha.slice(0, 12)}-b` }, payload: { task: "b", repo: "acme/app", sha, pr: 1, message: "b's work" } });
+    const withCommit = (await get("GET", "/confirm?type=node&id=b&event=COMPLETE&fragment=1")).body; // the commits to pick from
     const seen = String((await store.readStream("t")).at(-1)?.seq);
-    const acted = await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&evidenceRef=e&seen=${seen}`);
+    const acted = await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&evidenceRef=${sha}&seen=${seen}`);
     const flash = (await get("GET", acted.location ?? "/")).body;
     const noWorkspace = (await get("GET", "/?w=nope")).body; // a project the store doesn't hold
     const unlinked = (await get("GET", "/?w=busy")).body; // a board with nothing linked: Connect GitHub and Jira
     const script = ["app.mjs", "graph.mjs", "signin.mjs", "drag.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
-    return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, flash, noWorkspace, script, unlinked].join("\n");
+    return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, withCommit, flash, noWorkspace, script, unlinked].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
     await new Promise<void>((r) => signInServer.close(() => r()));

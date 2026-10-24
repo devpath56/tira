@@ -3,8 +3,9 @@
 //
 // 1. In from GitHub: each recently updated pull request that names a task ("tira: <task>" in
 //    its title, body or a commit, a branch segment equal to the task's id, or the task's Jira
-//    key) is linked to that task, and follows GitHub to merged or closed. A merged one is
-//    offered as the proof when the task is completed.
+//    key) is linked to that task, and follows GitHub to merged or closed. Its commits are kept
+//    for the task (src/tables/tickets.ts): a person or an agent completes it with one of them as
+//    the proof of work.
 // 1b. In from Jira: the linked project's name, as Jira shows it ("Tira Board" for KAN). When the
 //    link has another, or none, the link follows, written as the person syncing.
 // 2. In from Jira: issues people made in Jira itself become tasks, keeping Jira's structure (an
@@ -38,7 +39,8 @@ import { linksOf, tasksNamed, workspaceOf, type WorkspaceLink } from "../fold/wo
 
 export { linksOf, tasksNamed, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
 import { projectName, TIRA_LABEL, type JiraClient, type JiraIssue } from "./jira.ts";
-import type { GitHubClient } from "./github.ts";
+import type { GitHubClient, Pull } from "./github.ts";
+import { COMMIT, SHA } from "../tables/tickets.ts";
 
 const TASK = "node";
 
@@ -75,6 +77,7 @@ export interface SyncReport {
   linked: { repo?: string; jira?: string };
   jiraName?: string; // the Jira project's name, saved to the link by this sync (Jira calls it that now)
   prs: { task: string; pr: string; url: string; change: string }[]; // change: linked, merged, closed, reopened
+  commits?: { task: string; sha: string }[]; // commits kept for a task, new this sync
   created: { task: string; key: string }[];
   imported: { key: string; task: string; to: string }[]; // issues made in Jira, now tasks
   requests: { key: string; task: string; who: string; to: string; result: string }[]; // result: what tira did with it
@@ -135,6 +138,21 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
     return why === "";
   };
 
+  // a pull request's commits, for a task: each one not kept yet (its id: the commit's, short, and the task's)
+  const keptNow = new Set<string>(); // this sync's, before the log is read again (a commit on two pull requests)
+  const keepCommits = async (p: Pull, task: string, repo: string) => {
+    for (const [i, sha] of (p.shas ?? []).entries()) {
+      if (!SHA.test(sha)) continue;
+      const id = `${sha.slice(0, 12)}-${task}`;
+      if (keptNow.has(id) || r.entities.some((e) => e.stream === o.stream && e.type === COMMIT && e.id === id)) continue;
+      keptNow.add(id);
+      const message = (p.commits[i] ?? "").slice(0, 300);
+      if (await asSync(`keep commit ${sha.slice(0, 7)} for ${task}`, { stream: o.stream, kind: "create", entity: { type: COMMIT, id }, payload: { task, repo, sha, pr: p.number, message } })) {
+        (report.commits ??= []).push({ task, sha });
+      }
+    }
+  };
+
   // 1. pull requests
   if (ws.repo && o.github) {
     try {
@@ -154,6 +172,7 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
           if (event && await asSync(`${pr} ${event.toLowerCase()}`, { stream: o.stream, kind: "event", entity: { type: PR, id }, event, payload: p.mergedAt ? { merged_at: p.mergedAt } : {} })) {
             report.prs.push({ task, pr, url: p.url, change: event.toLowerCase() });
           }
+          await keepCommits(p, task, ws.repo);
         }
       }
     } catch (err) {
@@ -347,6 +366,8 @@ export function reportLines(rep: SyncReport): string[] {
   if (linked) out.push(`synced with ${linked}`);
   if (rep.jiraName) out.push(`Jira calls ${rep.linked.jira} "${rep.jiraName}": the link shows that name now`);
   for (const p of rep.prs) out.push(`${p.pr} ${p.change}${p.change === "linked" ? ` to ${p.task}` : ` (${p.task})`}`);
+  const kept = rep.commits ?? [];
+  if (kept.length > 0) out.push(`${kept.length} ${kept.length === 1 ? "commit" : "commits"} kept for ${[...new Set(kept.map((c) => c.task))].join(", ")}`);
   for (const m of rep.imported) out.push(`${m.key} brought in as ${m.task} (${m.to})`);
   for (const c of rep.created) out.push(`${c.task}: made Jira ${c.key}`);
   for (const q of rep.requests) out.push(`${q.key} moved to ${q.to} in Jira by ${q.who}: ${q.result}`);

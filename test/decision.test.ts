@@ -60,8 +60,8 @@ test("a command the page won't run is explained, never guessed at", () => {
 
 test("a value the verb needs, left empty or only spaces, is caught before anything is written", () => {
   const act = (event: string, payload: Record<string, unknown>) => ({ type: "node", id: "x", event, payload });
-  assert.match(missing(act("COMPLETE", { evidenceRef: "" })) ?? "", /Add the proof of work: evidenceRef/);
-  assert.match(missing(act("COMPLETE", {})) ?? "", /Add the proof of work/);
+  assert.equal(missing(act("COMPLETE", { evidenceRef: "" })), "Pick the proof of work: one of the task's commits.");
+  assert.equal(missing(act("COMPLETE", {})), "Pick the proof of work: one of the task's commits.");
   assert.match(missing(act("BLOCK", { reason: "   " })) ?? "", /Add the reason: reason="…" \(words, not only spaces\)/);
   assert.match(missing(act("REOPEN", {})) ?? "", /Add the reason/);
   assert.equal(missing(act("BLOCK", { reason: "waiting on x" })), undefined);

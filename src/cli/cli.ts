@@ -387,6 +387,21 @@ async function connectJira(store: ClosableStore, registry: Registry, stream: str
   return 0;
 }
 
+// An agent's sync (tira mcp's complete_task, for the task's newest commits): what it said, or
+// undefined when the project links nothing to sync with. As the agent, with tira's own GitHub and Jira sign-ins.
+async function syncForAgent(store: ClosableStore, registry: Registry, stream: string, actor: string, io: Io): Promise<string | undefined> {
+  const ws = workspaceOf(fold(await store.readStream(stream), registry), stream);
+  if (!ws?.repo && !ws?.jira_project) return undefined;
+  try {
+    const login = ws.jira_site ? jiraLogin(ws.jira_site, io.env) : undefined;
+    const jira = ws.jira_site && login ? io.jira?.(ws.jira_site, login) ?? new JiraCloud(ws.jira_site, login.email, login.token) : undefined;
+    const rep = await sync({ store, registry, stream, by: actor, ...(jira ? { jira } : {}), ...(ws.repo ? { github: io.github ?? new GhCli() } : {}) });
+    return `Synced just now: ${reportLines(rep).join("; ")}.`;
+  } catch (err) {
+    return `Couldn't sync just now (${(err as Error).message}).`;
+  }
+}
+
 async function syncCmd(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
   const ws = workspaceOf(fold(await store.readStream(stream), registry), stream);
   const login = ws?.jira_site ? jiraLogin(ws.jira_site, io.env) : undefined;
@@ -902,7 +917,7 @@ async function mcp(open: () => ClosableStore, registry: Registry, values: Values
     io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
     await new Promise<void>((resolve) => {
       const handle = serveStdio(() => {
-        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected });
+        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected, syncNow: () => syncForAgent(store, registry, stream, actor, io) });
         server.server.onclose = () => resolve();
         return server;
       });

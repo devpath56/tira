@@ -39,14 +39,16 @@ function webRequest(req: IncomingMessage, url: URL): Request {
   return new Request(url, { method: req.method ?? "POST", headers, ...(body ? { body, duplex: "half" } : {}) } as RequestInit);
 }
 
-export interface McpHttp { store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined }
+// syncFor: sync the project as the agent (complete_task brings the task's newest commits in first)
+export interface McpHttp { store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; syncFor?: (stream: string, actor: string) => Promise<string | undefined> }
 export type McpRoute = ((req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>) & { close: () => Promise<void> };
 
 export function mcpRoute(o: McpHttp): McpRoute {
   const handler = createMcpHandler((ctx) => {
     const agent = ctx.authInfo?.extra?.agent as AgentToken | undefined;
     if (!agent) throw new Error("tira: an MCP request reached the server without its agent");
-    return tiraMcpServer({ store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent });
+    const syncFor = o.syncFor;
+    return tiraMcpServer({ store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent, ...(syncFor ? { syncNow: () => syncFor(agent.project, agent.agent) } : {}) });
   }, { maxRequestBodySize: MAX_BODY });
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL) => {
     const origin = req.headers.origin;

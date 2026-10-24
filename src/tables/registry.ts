@@ -13,6 +13,7 @@ import type { EntityState, StateView } from "../fold/types.ts";
 import { TABLE_EVENT_NAME } from "../fold/events.ts";
 import { FACTORY_GUARDS, factoryTypes } from "./factory.ts";
 import { LINK_GUARDS, linkTypes } from "./links.ts";
+import { TICKET_GUARDS, ticketTypes } from "./tickets.ts";
 
 // Versioned rules (ruling 2026-10-20). Every event the write path appends carries the rules
 // era it was decided under (metadata.era), and replay applies that era's tables: a rule
@@ -229,7 +230,7 @@ const chart = (name: string) => loadTable(new URL(`../../charts/${name}`, import
 // The vocabularies specced today: dashboard nodes (the S1–S9 test vocabulary), vapor
 // ideas, the factory's brief / session / drop (Track B1), and workspace links (links.ts).
 export function defaultRegistry(): Registry {
-  const r = new Registry({ ...FACTORY_GUARDS, ...LINK_GUARDS })
+  const r = new Registry({ ...FACTORY_GUARDS, ...LINK_GUARDS, ...TICKET_GUARDS })
     .register({
       type: "node",
       createdAs: "BORN",
@@ -253,5 +254,6 @@ export function defaultRegistry(): Registry {
     .register({ type: "idea", regions: { lifecycle: chart("idea-lifecycle.json") } });
   for (const def of factoryTypes(chart)) r.register(def);
   for (const def of linkTypes(chart)) r.register(def);
+  for (const def of ticketTypes(chart)) r.register(def);
   return r;
 }

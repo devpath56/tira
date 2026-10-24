@@ -103,12 +103,13 @@ export class GitHubDevice implements GitHubAuthApi {
       pulls: async (repo: string): Promise<Pull[]> => {
         const raw = (await this.get(token, `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=${limit}`)) as { number: number; title?: string; body?: string | null; html_url: string; state: string; merged_at?: string | null; head?: { ref?: string } }[];
         return Promise.all(raw.map(async (p) => {
-          const commits = (await this.get(token, `/repos/${repo}/pulls/${p.number}/commits?per_page=100`)) as { commit?: { message?: string } }[];
+          const commits = (await this.get(token, `/repos/${repo}/pulls/${p.number}/commits?per_page=100`)) as { sha?: string; commit?: { message?: string } }[];
           return {
             number: p.number, title: p.title ?? "", body: p.body ?? "", branch: p.head?.ref ?? "", url: p.html_url,
             state: p.state === "open" ? "open" as const : "closed" as const,
             ...(p.merged_at ? { mergedAt: p.merged_at } : {}),
             commits: commits.map((c) => c.commit?.message ?? ""),
+            shas: commits.map((c) => c.sha ?? ""),
           };
         }));
       },

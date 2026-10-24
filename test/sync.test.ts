@@ -16,6 +16,7 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
 import { linksOf, reportLines, sync, tasksNamed, workspaceOf } from "../src/sync/sync.ts";
+import { commitsOf } from "../src/fold/tickets.ts";
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
 import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
@@ -117,6 +118,25 @@ test("in from GitHub: a pull request naming a task is linked to it and follows i
   const prs = linksOf(await w.state(), S).get("table")?.prs;
   assert.deepEqual(prs, [{ repo: "acme/app", number: 7, url: "https://github.com/acme/app/pull/7", title: "Pagination for the table", state: "merged", mergedAt: "2026-10-21T12:00:00Z" }]);
   assert.deepEqual(tasksNamed({ number: 1, title: "tira: table.", body: "", branch: "table/x", url: "", state: "open", commits: [] }, new Set(["table"]), new Map()), ["table"]);
+});
+
+test("in from GitHub: the commits of a pull request that names a task are kept for it, once each: the proof a task is completed with", async () => {
+  const w = await world();
+  await w.link(linked);
+  const one = "1".repeat(40);
+  const two = "2".repeat(40);
+  w.github.add({ number: 20, title: "Table pagination", branch: "isha/table", state: "open", commits: ["first pass", "pagination done\n\nwith tests"], shas: [one, two] });
+  w.github.add({ number: 21, title: "Again", body: "tira: table", state: "open", commits: ["pagination done\n\nwith tests"], shas: [two] }); // the same commit, on another pull request
+  const rep1 = await w.run();
+  assert.deepEqual(rep1.commits, [{ task: "table", sha: one }, { task: "table", sha: two }]);
+  assert.ok(reportLines(rep1).includes("2 commits kept for table"));
+  assert.deepEqual(rep1.problems, []);
+  const kept = commitsOf(await w.state(), S).get("table");
+  assert.deepEqual(kept?.map((c) => [c.sha, c.message, c.pr, c.repo]), [[two, "pagination done\n\nwith tests", 20, "acme/app"], [one, "first pass", 20, "acme/app"]]); // newest first
+  assert.equal((await w.run()).commits, undefined); // nothing new
+  // only the sync keeps commits
+  const r = await new Dispatcher(w.store, w.registry).submit({ stream: S, kind: "create", entity: { type: "commit", id: "fake-table" }, actor: "isha", payload: { task: "table", repo: "acme/app", sha: "3".repeat(40), pr: 1, message: "m" } });
+  assert.equal(r.result.status, "rejected");
 });
 
 test("in from Jira: issues people made there become tasks, in Jira's shape and where they are in Jira, once", async () => {
@@ -312,10 +332,10 @@ test("the GitHub client reads pull requests and their commit messages through gh
   const asked: string[][] = [];
   const gh = new GhCli(async (args) => {
     asked.push(args);
-    if (args[1]?.endsWith("/commits?per_page=100")) return JSON.stringify([{ commit: { message: "tira: table" } }]);
+    if (args[1]?.endsWith("/commits?per_page=100")) return JSON.stringify([{ sha: "a".repeat(40), commit: { message: "tira: table" } }]);
     return JSON.stringify([{ number: 7, title: "t", body: null, html_url: "https://github.com/acme/app/pull/7", state: "closed", merged_at: "2026-10-21T12:00:00Z", head: { ref: "isha/table" } }]);
   });
-  assert.deepEqual(await gh.pulls("acme/app"), [{ number: 7, title: "t", body: "", branch: "isha/table", url: "https://github.com/acme/app/pull/7", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["tira: table"] }]);
+  assert.deepEqual(await gh.pulls("acme/app"), [{ number: 7, title: "t", body: "", branch: "isha/table", url: "https://github.com/acme/app/pull/7", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["tira: table"], shas: ["a".repeat(40)] }]);
   assert.deepEqual(asked.map((a) => a[1]), ["repos/acme/app/pulls?state=all&sort=updated&direction=desc&per_page=50", "repos/acme/app/pulls/7/commits?per_page=100"]);
 });
 
@@ -888,10 +908,12 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
     assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" target="_blank" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
     assert.doesNotMatch(board, /class="chip" title="pr:|chip" title="jira-issue:/); // links show on their tasks, not as Lanes chips
-    // completing the task offers the merged pull request as its proof
+    // completing the task syncs first, and offers the pull request's commits as its proof (the newest picked)
     await s.send("table", "START");
+    s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["table done"], shas: ["7".repeat(40)] });
     const complete = (await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body;
-    assert.match(complete, /<span>Proof from GitHub:<\/span><button type="button" class="fill" data-fill="evidenceRef" data-value="https:\/\/github\.com\/acme\/app\/pull\/7">/);
+    assert.match(complete, new RegExp(`<input type="radio" name="evidenceRef" value="${"7".repeat(40)}" checked><code>7777777</code><span>table done</span><small>#7</small>`));
+    assert.match(complete, /<p class="cmd-help" data-synced>Synced just now: synced with GitHub acme\/app and Jira DOG; 1 commit kept for table[^<]*<\/p>/);
     // disconnect drops the Atlassian sign-in
     await s.post("/integrations/jira/disconnect", {});
     assert.equal(atlassianAuth("isha-gh", s.env), undefined);

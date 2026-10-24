@@ -1,0 +1,10 @@
+{
+  "id": "ticket",
+  "initial": "written",
+  "states": [
+    "written"
+  ],
+  "events": [],
+  "pairs": [],
+  "guards": {}
+}

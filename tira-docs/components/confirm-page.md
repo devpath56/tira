@@ -1,79 +1,63 @@
-# Decision dialog (two views)
+# Decision dialog (the ticket, and your part)
 
 **JTBD:** 2 — Prove a task is done (and 5 — Change my mind honestly).
 
 **What / why.** Every human input from the live page goes through this first, so nothing
-fires by surprise, and every one has two views side by side (stacked on a phone):
+fires by surprise. Redesigned 2026-10-24 (Isha): it's about the work, not a command line. Two
+views side by side (stacked on a phone):
 
-1. **tira recommends** (read-only): the work in a nutshell, only what you need to know to
-   decide, in that order. Every sentence comes from the log or the rules, nothing is guessed:
-   - **Decision**, first and larger: the task, where it sits, why and since when it is blocked, its subtasks, its proof, the move, and what tira will close first.
-   - tira's check right under it, and **what to do** when it would refuse.
-   - **Recommendation**: from the facts, e.g. "api is done now, so the wait looks over", "next in order is fetch_metrics", "it's the last open subtask of improve_visual", or "Don't run it: tira will refuse".
-   - Folded under **Why**: **Tradeoffs**, **Best practice**, **Kind** (routine, needs proof, needs a reason, final, an undo, a change of scope; refused) and the rule it must pass.
-2. **Your action — edit before sending**: the action as a tira command, filled in. It is
-   complete when nothing is needed ("tira send node colors UNBLOCK"); empty quotes mark a
-   value to fill in (`evidenceRef=""`, `reason=""`, a subtask's name). Any command can take
-   `note="…"`, which the history keeps. The same text runs in a terminal. Live, reasons used
-   before (and "waiting on" each other open task, not one it sits under) are chips that fill
-   the reason in; a subtask under work already under way is pre-marked as found
-   (`kind=discovered`), and elsewhere a chip adds it. To complete, live, the proof of work has
-   its own field above the command, focused when the dialog opens: what you type fills in
-   `evidenceRef`, and a merged pull request linked to the task is a chip that fills both.
+1. **The ticket** (read-only): what the work is, from its ticket (`node-drawer.md`): its
+   title, description, steps, time estimate and assignee, or that none is written yet. Above
+   it, only when it matters: tira's word when it would refuse (or when nothing would change),
+   with **what to do** instead, and the finished parents tira will close first.
+2. **Your part**: what the move needs, as plain fields, and a **comment** (optional) that goes
+   on the ticket, where its agent reads it. No command: the page writes the move from these
+   fields (the same move `tira send` writes in a terminal).
+   - **Complete**: the proof of work is one of the task's commits, picked from a list, the
+     newest first and picked. Opening it syncs with GitHub and Jira first, so the newest
+     commits are there; with none yet, it says how to get one there (a branch named after the
+     task, or "tira: <task>" in its pull request) and Complete waits.
+   - **Block**: "Blocked by", a new ticket by name or an open task (live, the open tasks are
+     chips), and a reason (optional: it waits on that ticket, if left empty).
+   - **Add subtask**: its name; under work already under way it's marked as found, and
+     elsewhere a chip marks it.
+   - **Reopen**, a reject: a reason (reasons used before are chips).
 
-**An idea's two approvals use it too** (`ideas.md`): the Decision is the idea's summary, why,
-who declared it and where tira proposes it go; Approve placement opens with tira's parent
-filled in (`tira send idea pagination APPROVE_NODE parent_id="table"`, editable), or empty
-with the candidates as buttons when tira couldn't settle one, and the parent is checked
-before anything is written. A stage skip typed in (approving the placement while the file is
-pending) is refused in plain words: "the file isn't approved yet, and the placement comes
-after the file", with what to do instead.
+**An idea's two approvals use it too** (`ideas.md`), with tira's own account on the left (the
+idea's summary, why, who declared it, where tira proposes it go): Approve placement opens with
+tira's parent in "Goes under", to change, or empty with the candidates as chips when tira
+couldn't settle one, and the parent is checked before anything is written.
 
-**Blocking makes the wait a ticket.** Block asks "Blocked by": type a name and the command
-becomes two lines, run in order (each checked by tira first; if the ticket isn't written,
-neither is the block):
+**Blocking makes the wait a ticket.** A new name in "Blocked by" makes the ticket first, a
+subtask of the blocked task found while working on it, then the block on it, in order (if the
+ticket isn't written, neither is the block). The two are linked everywhere (the dialogs, needs
+attention, Kanban, the Graph), and the blocked task can't be completed until its ticket is
+closed. A blocker must be an open task, not the task itself or one it sits under.
 
-```
-tira create node design_tokens --parent colors kind=discovered discovered_during=colors
-tira send node colors BLOCK blocker="design_tokens" reason="waiting on design_tokens"
-```
+The move's button (**Complete**, **Block**, …) sends it; "Not now" (or Esc, or a click
+outside) closes it. It opens as a dialog over the page: the page's script fetches the packet
+alone (`?fragment=1`) and posts from the dialog, so anything that stops the write comes back
+into the dialog with what you wrote kept. A direct link still gets the full confirm page (no
+script: the chips are listed as text). A refused move has nothing to fill in: **Check again**.
 
-The ticket is a subtask of the blocked task, found while working on it, and the block names
-it, so the two are linked everywhere (the dialogs, needs attention, Kanban, the Graph) and
-colors can't be completed until its ticket is closed. Or pick an open task as the blocker: one
-line, nothing created. A blocker must be an open task, not the task itself or one it sits
-under. Without a reason written, the block waits on its ticket ("waiting on design_tokens").
-
-"*Verb* — run it" sends the command; "Not now" (or Esc, or a click outside) closes it. It opens
-as a dialog over the page, never a new page: the page's script fetches the packet alone
-(`?fragment=1`) and posts from the dialog, so anything that stops the write comes back into
-the dialog with your text kept. A direct link still gets the full confirm page (no script:
-the reasons are listed as text).
-
-**How the command is read.** Strictly, and never guessed at:
-
-| You send | tira does |
-|---|---|
-| A command as offered, values filled in | Runs it, exactly as typed |
-| A value left empty or only spaces | "Add the proof of work…" / "Add the reason…"; nothing written |
-| Another task or verb than the one you opened | Shows what tira says about that one first; nothing written until you run it |
-| A key the verb doesn't take, a flag (`--actor`), a verb the page doesn't send, a non-task type, an unclosed quote | Says why it can't run it; nothing written |
-| Something tira would refuse | Says it would still refuse, and why; nothing written (a refused decision stays editable: **Check again**) |
-| Anything, after the log moved | Shows the decision again, as it is now; nothing written |
+**What stops a write**, nothing written: a value it needs left empty; a proof that isn't one
+of the task's commits; a blocker that can't be; something tira would refuse (said, and why);
+or the log moving after you opened it (the decision is shown again, as it is now).
 
 ## Devtool hook
 
 - `[data-packet]` on the packet (in the dialog and on the page), with `[data-ok]` true or false.
-- `[data-brief]` on the left view (tira recommends), `[data-nutshell]` on its Decision and `[data-why]` on the folded rest; `[data-you]` on the form; `[data-command]` on the command.
+- `[data-brief]` on the left view (the ticket, or tira's account of an idea), `[data-ticket]` on the ticket in it; `[data-you]` on the form, `[data-you-part]` on your part.
 - `.confirm-dialog` on the live page's dialog; `[data-close-confirm]` on its way out.
 - `[data-hint]` on what to do, when tira would refuse; `[data-error]` on why nothing was written; `[data-fills]` on the chips.
-- `[data-blocked-by]` on a block's "Blocked by" field (the task's id).
-- `[data-proof]` on a complete's "Proof of work" field, live only.
+- `[data-field]` on each field (its name), `[data-blocked-by]` on Block's "Blocked by" (the task's id), `[data-comment-field]` on the comment.
+- `[data-proof]` on Complete's commits, `[data-no-commits]` when there are none yet.
 - `[data-flash]` on the result shown after an action.
 
 Assertion: the verdict is the write path's own decision (`WritePath.preview`: reserved
 names, tira's closes, then the rules), and the form carries the seq it was decided on
 (`seen`): if the log moved before you send, nothing is written and the decision is shown again.
 
-**Falsifier.** An action is written without passing through this dialog, a command runs as
-something other than what it says, or the left view states something the log doesn't.
+**Falsifier.** An action is written without passing through this dialog, a task is completed
+from the page with anything but one of its commits, or the left view states something the log
+doesn't.

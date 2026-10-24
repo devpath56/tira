@@ -8,11 +8,12 @@ import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
-import { addSubtask, blockTask, completeTask, fileIdea, startTask } from "./actions.ts";
+import { addComment, addSubtask, blockTask, completeTask, fileIdea, startTask } from "./actions.ts";
 
-// What every tool works in: the project's stream, the agent it acts as, and (from tira mcp) whether
-// that agent is still connected: revoked in Project settings, its next call is refused.
-export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string; stillConnected?: () => Promise<boolean> }
+// What every tool works in: the project's stream, the agent it acts as, (from tira mcp) whether
+// that agent is still connected: revoked in Project settings, its next call is refused; and how to
+// sync the project with GitHub and Jira (to complete a task: its newest commits), when it can.
+export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string; stillConnected?: () => Promise<boolean>; syncNow?: () => Promise<string | undefined> }
 
 export { agentNameProblem } from "./names.ts";
 
@@ -60,8 +61,8 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ id }) => answer(await guarded(ctx, () => startTask(ctx, id))));
   server.registerTool("complete_task", {
     title: "Complete a task",
-    description: "Mark a task Done, with proof of work anyone can re-check: a link (a pull request, a report), a file path, or a short note of what was checked. tira refuses without proof, before the task is started, or while its subtasks are open.",
-    inputSchema: z.object({ id: taskId, proof: words("the proof of work: a link, file or note anyone can re-check"), note: words("optional: a note for the task's history").optional() }),
+    description: "Mark a task Done. The proof of work is one of the task's commits: push your work to a branch named after the task (or write \"tira: <task>\" in its pull request), then pass the commit's id. tira syncs with GitHub first; get_task lists the commits it has. tira refuses any other proof, before the task is started, or while its subtasks are open.",
+    inputSchema: z.object({ id: taskId, proof: words("the commit id (its full sha, or its first 7 or more characters) of the work on this task"), note: words("optional: a note for the task's history").optional() }),
     annotations: { ...WRITES, idempotentHint: true },
   }, async ({ id, proof, note }) => answer(await guarded(ctx, () => completeTask(ctx, id, proof, note))));
   server.registerTool("block_task", {
@@ -87,5 +88,11 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
     inputSchema: z.object({ summary: words("the idea, in a sentence"), why: words("why it's worth doing"), under: z.string().trim().min(1).optional().describe("optional: the task it belongs under, if you know") }),
     annotations: { ...WRITES, idempotentHint: false },
   }, async ({ summary, why, under }) => answer(await guarded(ctx, () => fileIdea(ctx, summary, why, under))));
+  server.registerTool("add_comment", {
+    title: "Comment on a task",
+    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. People see it on the ticket, under your name.",
+    inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
+    annotations: { ...WRITES, idempotentHint: false },
+  }, async ({ id, text }) => answer(await guarded(ctx, () => addComment(ctx, id, text))));
   return server;
 }

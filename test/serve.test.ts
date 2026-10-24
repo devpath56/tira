@@ -12,7 +12,7 @@ import { loadTable } from "../src/tables/table.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { fold } from "../src/fold/fold.ts";
 import { renderHtml } from "../src/render/html.ts";
-import { CSP, changedBy, hintFor, inOrder, taskIndex, tiraServer, withQ, workspaceIn, workspaceList } from "../src/serve/server.ts";
+import { CSP, changedBy, hintFor, inOrder, packetFor, taskIndex, tiraServer, withQ, workspaceIn, workspaceList } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
 import { filesMatching, srcCode } from "./src-text.ts";
 // @ts-expect-error: plain JS shared with the browser (src/serve/rank.mjs)
@@ -63,7 +63,13 @@ async function serving() {
     const seen = String((await w.store.readStream(S)).at(-1)?.seq ?? 0);
     return http("POST", "/act", { headers: { "content-type": "application/x-www-form-urlencoded", origin }, body: new URLSearchParams({ seen, ...fields }).toString() });
   };
-  return { ...w, server, port, http, form, done: () => new Promise<void>((r) => server.close(() => r())) };
+  // a commit the sync kept for a task (the page completes a task with one of them): its sha
+  const commit = async (task: string, n = 1, message = "the work") => {
+    const sha = n.toString(16).padStart(8, "0") + "c".repeat(32);
+    await new WritePath(w.store, w.registry).submitAsSync({ stream: S, kind: "create", entity: { type: "commit", id: `${sha.slice(0, 12)}-${task}` }, payload: { task, repo: "acme/app", sha, pr: 7, message } });
+    return sha;
+  };
+  return { ...w, server, port, http, form, commit, done: () => new Promise<void>((r) => server.close(() => r())) };
 }
 
 test("the live page: needs attention with actions, the palette, the guide; strict CSP; the rendered file has none of the live parts", async () => {
@@ -142,80 +148,144 @@ test("the palette's index lists every task in drawer order, with its path", asyn
   }
 });
 
-test("every decision has two views: the work in a nutshell with tira's recommendation, and the command it will run, filled in", async () => {
+test("every decision shows the ticket beside what the move needs, and a comment: never a command; tira's word only when it would refuse, with what to do", async () => {
   const s = await serving();
   try {
     const before = (await s.store.readStream(S)).length;
     const unblock = await s.http("GET", "/confirm?type=node&id=colors&event=UNBLOCK");
     assert.equal(unblock.status, 409); // loading_state is in progress: one active task at a time
     assert.match(unblock.body, /data-ok="false"/);
-    assert.match(unblock.body, /tira would refuse this: gate: one active task: node:loading_state is already active\./);
-    // the nutshell first: the move, then tira's verdict and what to do instead, then the recommendation
-    assert.match(unblock.body, /<section class="brief" aria-label="tira recommends \(read-only\)" data-brief><h2>tira recommends<\/h2><p class="nutshell" data-nutshell><b>Decision:<\/b> colors is blocked under improve_visual since seq 10: &#34;waiting on the design-token decision&#34;\. Recorded as isha\.<\/p><p class="verdict no">tira would refuse this: [^<]+<\/p><p class="hint" data-hint>[^]*?<\/p><p><b>Recommendation:<\/b> Don&#39;t run it: tira will refuse \(gate: /);
-    // the tradeoffs, best practice and kind wait under "Why"
-    assert.match(unblock.body, /<details class="why" data-why><summary>Why: tradeoffs, best practice, kind<\/summary><p><b>Tradeoffs:<\/b> [^<]+<\/p><p><b>Best practice:<\/b> [^<]+<\/p><p><b>Kind:<\/b> refused by the rules\.<\/p><\/details><\/section>/);
-    assert.match(unblock.body, /<p><b>Kind:<\/b> refused by the rules\.<\/p>/);
-    // refused: the command shows, read-only, with nothing to run
-    assert.match(unblock.body, /data-command>tira send node colors UNBLOCK<\/textarea><p class="cmd-help">tira would refuse this as it stands: edit it \(another task or verb\) and check again, or close\./);
-    // still editable (into another task or verb), checked again before anything runs
+    // refused: tira's word and what to do, then the ticket (nothing written yet on it)
+    assert.match(unblock.body, /<section class="brief ticket-side" aria-label="The ticket" data-brief><p class="verdict no">tira would refuse this: gate: one active task: node:loading_state is already active\.<\/p><p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p><h2>The ticket<\/h2><div class="ticket" data-ticket><p class="tk-none">No description, steps, estimate or assignee yet: Edit ticket, in the task(?:'|&#39;)s dialog, adds them\.<\/p><\/div><\/section>/);
+    // no command, no recommendation essay; nothing to fill in or comment on a move tira refuses
+    assert.doesNotMatch(unblock.body, /data-command|tira send|Your action|Recommendation|data-why|data-you-part/);
     assert.match(unblock.body, /<button class="act" type="submit">Check again<\/button>/);
-    assert.doesNotMatch(unblock.body, /— run it/);
-    // a refusal says what to do instead
-    assert.match(unblock.body, /<p class="hint" data-hint><b>What to do:<\/b> Only one task can be in progress\. Complete or block loading_state first, then unblock colors\.<\/p>/);
     // the theme, and the script that remembers the choice
     assert.match(unblock.body, /id="th-system" checked[^]*?<main class="packet-page"[^]*?<script type="module" src="\/theme\.mjs"><\/script><\/body>/); // the theme you picked (in Account settings) carries here
     assert.doesNotMatch(unblock.body, /data-theme-switch/); // and is picked there, not here
+    // to complete: no commits yet, so nothing to complete it with; the comment box
+    const early = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
+    assert.equal(early.status, 200);
+    assert.doesNotMatch(early.body, /class="verdict/); // allowed: no word from tira
+    assert.match(early.body, /<input type="hidden" name="seen" value="11"><input type="hidden" name="dialog" value="1">/);
+    assert.match(early.body, /<input type="hidden" name="token" value="t0k3n">/);
+    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits for loading_state yet\. Push the work to a branch named after it \(loading_state\), or write &#34;tira: loading_state&#34; in its pull request, then Complete again: tira syncs first\.<\/p>/);
+    assert.match(early.body, /<button class="act primary" type="submit" disabled>Complete<\/button>/);
+    assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment <small>optional: on the ticket, where its agent reads it<\/small><\/span><textarea name="comment"/);
+    // with its ticket written and two commits kept: the work, and the newest commit picked
+    await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", task: "loading_state", title: "Loading state for the cards", description: "A spinner while metrics load.", steps: "Add the spinner\nTest on a slow network", estimate: "2h", assignee: "isha" }).toString() });
+    const old = await s.commit("loading_state", 1, "first try");
+    const newest = await s.commit("loading_state", 2, "spinner, tested on 3G\n\nmore words");
     const complete = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
-    assert.equal(complete.status, 200);
-    assert.match(complete.body, /<p class="nutshell" data-nutshell><b>Decision:<\/b> loading_state is in progress under improve_visual since seq 11\. Completing it moves it in progress → done\. Recorded as isha\.<\/p>/);
-    assert.match(complete.body, /<p><b>Recommendation:<\/b> Complete it with proof anyone can re-check\.<\/p>/); // colors and font are still open
-    assert.match(complete.body, /<p><b>Kind:<\/b> a finish \(needs proof\)\. The rule: event\.evidenceRef is a non-empty string\.<\/p>/);
-    for (const k of ["Tradeoffs", "Best practice"]) assert.match(complete.body, new RegExp(`<p><b>${k}:</b> [^<]+</p>`), k);
-    assert.match(complete.body, /<input type="hidden" name="seen" value="11">/);
-    assert.match(complete.body, /tira&#39;s check: allowed\./);
-    assert.match(complete.body, /<input type="hidden" name="token" value="t0k3n">/);
-    // your action: the command, editable, with the proof to fill in, then the button
-    assert.match(complete.body, /<h2>Your action — edit before sending<\/h2><textarea name="command" [^>]*data-command>tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/);
-    assert.match(complete.body, /<button class="act primary" type="submit">Complete — run it<\/button>/);
-    // starting fetch_metrics would leave nothing for tira to close yet; after the dashboard's
-    // visual branch drains, moving on names the parent tira will close
-    await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" });
-    await s.send("font", "CANCEL");
-    await s.send("colors", "UNBLOCK");
-    await s.send("colors", "COMPLETE", { evidenceRef: "palette.png" });
-    // the block form asks for what the gate checks: a reason with text, not only spaces (2026-10-20)
+    assert.match(complete.body, /<h2>The ticket<\/h2><div class="ticket" data-ticket><p class="tk-title" data-ticket-title>Loading state for the cards<\/p><div class="tk-desc"><p>A spinner while metrics load\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol><li>Add the spinner<\/li><li>Test on a slow network<\/li><\/ol><\/div><div class="tk-facts"><span><span class="lk">Estimate<\/span>2h<\/span><span><span class="lk">Assignee<\/span>isha<\/span><\/div><\/div>/);
+    assert.match(complete.body, new RegExp(`<fieldset class="field commits" data-proof><legend>Proof of work <small>a commit on loading_state</small></legend><label class="commit"><input type="radio" name="evidenceRef" value="${newest}" checked><code>${newest.slice(0, 7)}</code><span>spinner, tested on 3G</span><small>#7</small></label><label class="commit"><input type="radio" name="evidenceRef" value="${old}"><code>`));
+    assert.match(complete.body, /<button class="act primary" type="submit">Complete<\/button>/);
+    // to block: what it waits on, and why
     const block = await s.http("GET", "/confirm?type=node&id=table&event=BLOCK");
-    assert.match(block.body, /data-command>tira create node &#34;&#34; --parent table kind=discovered discovered_during=table\ntira send node table BLOCK blocker=&#34;&#34; reason=&#34;&#34;<\/textarea>/);
-    assert.match(block.body, /<p><b>Kind:<\/b> a pause \(needs a reason\)\. The rule: event\.reason has text \(not only spaces\)\.<\/p>/);
-    const start = await s.http("GET", "/confirm?type=node&id=table&event=START");
-    assert.match(start.body, /Starting it moves it to do → in progress\. First, tira closes improve_visual \(every child closed\), citing this move\. Recorded as isha\./);
-    assert.match(start.body, /<p><b>Recommendation:<\/b> Start it only if the order should change: next in order is fetch_metrics\.<\/p>/);
+    assert.match(block.body, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="a new ticket, e\.g\. design_tokens, or an open task"[^>]* data-blocked-by="table"><\/label>/);
+    assert.match(block.body, /<label class="field" data-field="reason"><span>Reason <small>optional: waiting on it, if left empty<\/small><\/span><input type="text" name="reason"/);
+    assert.doesNotMatch(block.body + complete.body + early.body, /data-command|tira send|tira create/);
     // unknown verbs and tasks are explained, not offered
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=ADD_CHILD")).body, /tira doesn&#39;t take ADD_CHILD from the page\./);
     assert.match((await s.http("GET", "/confirm?type=node&id=ghost&event=START")).body, /There is no task ghost\./);
     assert.match((await s.http("GET", `/confirm?type=node&id=${encodeURIComponent("<b>")}&event=START`)).body, /There is no task &#60;b&#62;\./);
-    assert.equal((await s.store.readStream(S)).length, before + 4); // only the four sends above wrote anything
+    assert.equal((await s.store.readStream(S)).length, before + 3); // only the ticket and the two commits wrote anything
   } finally {
     await s.done();
   }
+});
+
+test("a ticket is the work: Edit ticket saves its title, description, steps, estimate and assignee as a new version; comments are feedback on it; each comes back to the task's dialog", async () => {
+  const s = await serving();
+  try {
+    const post = (path: string, fields: Record<string, string>) => s.http("POST", path, { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", ...fields }).toString() });
+    const dialog = (page: string, id: string) => new RegExp(`<section class="drawer" id="t\\d+" aria-label="${id}"[^]*?</section>`).exec(page)?.[0] ?? "";
+    const flashOf = async (r: { headers: Record<string, string | string[] | undefined> }) => {
+      const at = String(r.headers.location);
+      return { at, page: (await s.http("GET", at)).body };
+    };
+    let ls = dialog((await s.http("GET", "/")).body, "loading_state");
+    assert.match(ls, /<div class="ticket" data-ticket><p class="tk-none">No description, steps, estimate or assignee yet\.<\/p><details class="tk-edit" data-ticket-edit><summary>Edit ticket<\/summary><form method="post" action="\/tickets" class="tk-form">/);
+    assert.match(ls, /<select name="assignee" aria-label="Assignee"><option value="">Nobody yet<\/option><optgroup label="Team"><option value="isha">isha<\/option><\/optgroup><\/select>/);
+    assert.match(ls, /<section class="comments" data-comments aria-label="Comments"><h3>Comments <span class="ev-seq">0<\/span><\/h3><p class="tk-none">No comments yet\.<\/p><form method="post" action="\/comments" class="cm-form" data-comment-form>/);
+    const back = /name="back" value="(#t\d+)"/.exec(ls)?.[1] ?? "";
+    // saved: back to its dialog, which shows the work under its title
+    const saved = await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\n\n  Test on 3G  ", estimate: "2h", assignee: "isha" }));
+    assert.match(saved.at, new RegExp(`^/\\?r=\\d+${back}$`));
+    assert.match(saved.page, /data-flash>Saved loading_state(?:'|&#39;)s ticket\.<\/div>/);
+    ls = dialog(saved.page, "loading_state");
+    assert.match(ls, /<h2>Loading state<\/h2><p class="tk-id">loading_state<\/p>/);
+    assert.match(ls, /<div class="tk-desc" data-ticket-description><p>A spinner while metrics load\.<\/p><p>No layout shift\.<\/p><\/div><div class="tk-steps"><span class="lk">Steps<\/span><ol aria-label="Steps" data-ticket-steps><li>Add the spinner<\/li><li>Test on 3G<\/li><\/ol><\/div><div class="tk-facts"><span data-ticket-estimate><span class="lk">Estimate<\/span>2h<\/span><span data-ticket-assignee><span class="lk">Assignee<\/span>isha<\/span><\/div>/);
+    assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
+    // what a ticket can't say, and nothing written
+    const n0 = (await s.store.readStream(S)).length;
+    for (const [fields, why] of [
+      [{ estimate: "soon" }, "A time estimate is a number and a unit: 30m, 2h, 1d or 1w."],
+      [{ assignee: "mallory" }, "mallory isn(?:'|&#39;)t on this project(?:'|&#39;)s team or one of its agents."],
+      [{ title: "x".repeat(121) }, "A title is 1 to 120 characters."],
+      [{ steps: Array.from({ length: 31 }, (_, i) => `s${i}`).join("\n") }, "Up to 30 steps, each up to 300 characters."],
+    ] as const) {
+      const r = await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", ...fields }));
+      assert.match(r.page, new RegExp(`data-flash>The ticket wasn(?:'|&#39;)t saved: ${why.replaceAll(".", "\\.").replaceAll("(?:\\.", "(?:")}`), JSON.stringify(fields));
+    }
+    assert.match((await flashOf(await post("/tickets", { task: "ghost", back }))).page, /data-flash>There is no task ghost\./);
+    assert.equal((await s.store.readStream(S)).length, n0);
+    assert.match((await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\nTest on 3G", estimate: "2h", assignee: "isha" }))).page, /data-flash>Nothing changed on the ticket\./);
+    // a second save is the whole ticket again, its next version
+    await post("/tickets", { task: "loading_state", back, title: "Loading state v2" });
+    const { ticketsOf } = await import("../src/fold/tickets.ts");
+    assert.deepEqual(ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("loading_state"), { version: 2, title: "Loading state v2", steps: [], by: "isha" });
+    // a comment: feedback on the ticket, as the person writing it
+    const commented = await flashOf(await post("/comments", { task: "loading_state", back, text: "Check the dark theme too." }));
+    assert.match(commented.page, /data-flash>Comment added to loading_state\./);
+    assert.match(dialog(commented.page, "loading_state"), /<h3>Comments <span class="ev-seq">1<\/span><\/h3><ol class="cm-list"><li class="cm" data-comment><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]* · seq \d+<\/span><\/div><p>Check the dark theme too\.<\/p><\/li><\/ol>/);
+    assert.match((await flashOf(await post("/comments", { task: "loading_state", back, text: "   " }))).page, /data-flash>A comment is 1 to 2000 characters\./);
+    assert.equal((await s.http("POST", "/comments", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: "task=loading_state&text=hi" })).status, 403); // no token
+    // a comment sent with a move: on the ticket, once the move is written
+    const sha = await s.commit("loading_state");
+    const moved = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: sha, comment: "Shipped behind a flag.", dialog: "1", fragment: "1" });
+    const go = /data-go="([^"]+)"/.exec(moved.body)?.[1] ?? "";
+    const after = (await s.http("GET", go)).body;
+    assert.match(after, /data-flash>Complete loading_state: done \(seq \d+\)\. Comment added\.<\/div>/);
+    assert.match(dialog(after, "loading_state"), /<p>Shipped behind a flag\.<\/p>/);
+  } finally {
+    await s.done();
+  }
+});
+
+test("a task's packet still carries tira's own account of the move (idea dialogs show theirs): why and since when it's blocked, and its blocker ticket's state", async () => {
+  const w = await world();
+  const wp = new WritePath(w.store, w.registry);
+  await wp.submit({ stream: S, kind: "create", entity: { type: "node", id: "qa" }, actor: "isha", payload: { parent_id: "table" } });
+  await w.send("table", "BLOCK", { reason: "QA must sign off", blocker: "qa" });
+  await w.send("loading_state", "COMPLETE", { evidenceRef: "e" }); // one task at a time
+  await w.send("qa", "START");
+  await w.send("qa", "COMPLETE", { evidenceRef: "e" });
+  const events = await w.store.readStream(S);
+  const p = await packetFor({ wp, r: fold(events, w.registry), events, registry: w.registry, stream: S, actor: "isha", type: "node", id: "table", event: "UNBLOCK" });
+  assert.match(p.brief?.decision ?? "", /table is blocked under dashboard since seq \d+: "QA must sign off"\./);
+  assert.match(p.brief?.recommendation ?? "", /qa is done now, so the wait looks over/); // the blocker ticket's state
 });
 
 test("writes need the token and a same-origin request, accept only the page's verbs on tree tasks, and land as the server's actor", async () => {
   const s = await serving();
   try {
     const count = async () => (await s.store.readStream(S)).length;
+    const x = await s.commit("loading_state");
     const n0 = await count();
-    assert.equal((await s.form({ type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" })).status, 403); // no token
-    assert.equal((await s.form({ token: "wrong!", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" })).status, 403);
-    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" }, "https://evil.example")).status, 403);
-    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x" }, "null")).status, 403); // an opaque origin
+    assert.equal((await s.form({ type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: x })).status, 403); // no token
+    assert.equal((await s.form({ token: "wrong!", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: x })).status, 403);
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: x }, "https://evil.example")).status, 403);
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: x }, "null")).status, 403); // an opaque origin
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" })).status, 409); // proof that isn't one of its commits
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "ADD_CHILD" })).status, 400); // a table event the page doesn't offer
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "  " })).status, 400); // a subtask needs a name
     assert.equal((await s.form({ token: "t0k3n", type: "brief", id: "b", event: "START" })).status, 400);
-    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "x", actor: "tira" })).status, 303); // a posted actor is ignored
+    assert.equal((await s.form({ token: "t0k3n", type: "brief", id: "b", event: "START", dialog: "1" })).status, 400); // the dialog's fields, the same
+    assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: x, actor: "tira" })).status, 303); // a posted actor is ignored
     assert.equal(await count(), n0 + 1);
     const last = (await s.store.readStream(S)).at(-1);
-    assert.deepEqual([last?.type, last?.metadata.actor, (last?.data.payload as { evidenceRef?: string }).evidenceRef], ["node.complete", "isha", "x"]);
+    assert.deepEqual([last?.type, last?.metadata.actor, (last?.data.payload as { evidenceRef?: string }).evidenceRef], ["node.complete", "isha", x]);
   } finally {
     await s.done();
   }
@@ -224,10 +294,10 @@ test("writes need the token and a same-origin request, accept only the page's ve
 test("after an action the page says what happened, a refusal included (and the refusal is in the log)", async () => {
   const s = await serving();
   try {
-    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
+    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     assert.equal(ok.status, 303);
     const okPage = await s.http("GET", String(ok.headers.location));
-    assert.match(okPage.body, /<div class="flash ok" role="status" data-flash>Complete loading_state: done \(seq 12\)\.<\/div>/);
+    assert.match(okPage.body, /<div class="flash ok" role="status" data-flash>Complete loading_state: done \(seq 13\)\.<\/div>/);
     await s.send("filters", "START"); // filters is now the one task in progress
     const no = await s.form({ token: "t0k3n", type: "node", id: "table", event: "START" }); // posted straight, past the decision
     const noPage = await s.http("GET", String(no.headers.location));
@@ -266,16 +336,17 @@ test("the confirm page is the write path's own decision: a drained active parent
 test("a write is refused if the log moved after its confirm page (the packet is shown again), and a post that skipped the confirm page gets one", async () => {
   const s = await serving();
   try {
+    const e = await s.commit("loading_state");
     const n0 = (await s.store.readStream(S)).length;
     const confirm = await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE");
     const seen = /name="seen" value="(\d+)"/.exec(confirm.body)?.[1] as string;
     await s.send("table", "BLOCK", { reason: "someone else wrote meanwhile" });
-    const late = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "e", seen });
+    const late = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: e, seen });
     assert.equal(late.status, 303);
     assert.equal(late.headers.location, "/confirm?type=node&id=loading_state&event=COMPLETE&moved=1");
     assert.equal((await s.store.readStream(S)).length, n0 + 1); // only the other write
     assert.match((await s.http("GET", String(late.headers.location))).body, /data-moved>The log changed since you opened this, so nothing was written\./);
-    const bare = await s.http("POST", "/act", { headers: { "content-type": "application/x-www-form-urlencoded" }, body: "token=t0k3n&type=node&id=loading_state&event=COMPLETE&evidenceRef=e" });
+    const bare = await s.http("POST", "/act", { headers: { "content-type": "application/x-www-form-urlencoded" }, body: `token=t0k3n&type=node&id=loading_state&event=COMPLETE&evidenceRef=${e}` });
     assert.equal(bare.headers.location, "/confirm?type=node&id=loading_state&event=COMPLETE");
     assert.equal((await s.store.readStream(S)).length, n0 + 1);
   } finally {
@@ -293,7 +364,7 @@ test("the server refuses to act as tira or the dispatcher; an oversized body get
     const big = await s.http("POST", "/act", { headers: { "content-type": "application/x-www-form-urlencoded" }, body: `token=t0k3n&x=${"a".repeat(20_000)}` });
     assert.equal(big.status, 413);
     assert.equal((await s.http("GET", "/")).status, 200);
-    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "e" });
+    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     const link = String(ok.headers.location);
     assert.match((await s.http("GET", link)).body, /data-flash/);
     assert.ok(!(await s.http("GET", link)).body.includes("data-flash"));
@@ -360,7 +431,7 @@ test("a confirm opens as a dialog over the page: ?fragment=1 is just the packet,
     assert.equal(frag.status, 200);
     assert.match(frag.body, /^<div class="packet" data-packet data-ok="true"><h1>Block table\?<\/h1>/);
     assert.doesNotMatch(frag.body, /<html|<nav|<script/); // no page around it
-    assert.match(frag.body, /<button class="act primary" type="submit">Block — run it<\/button> <button class="how" type="button" data-close-confirm>Not now<\/button><\/div><\/form><\/div>$/);
+    assert.match(frag.body, /<button class="act primary" type="submit">Block<\/button> <button class="how" type="button" data-close-confirm>Not now<\/button><\/div><\/form><\/div>$/);
     assert.equal(frag.headers["content-security-policy"], CSP);
     const refused = await s.http("GET", "/confirm?type=node&id=colors&event=UNBLOCK&fragment=1");
     assert.equal(refused.status, 409);
@@ -437,38 +508,49 @@ test("a drop means its move's verb or nothing: only Start runs without a dialog,
   assert.match(drag, /for \(const col of cols\) col\.dataset\.drop = dropOf\(col\);/);
 });
 
-test("In progress → Done asks for the proof of work in its own field; the command fills in as you type", async () => {
+test("In progress → Done asks for the proof of work: one of the task's commits, picked in the dialog; nothing else is taken, and the done task shows it", async () => {
   const s = await serving();
   try {
+    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body, /data-no-commits/);
+    const sha = await s.commit("loading_state", 3, "spinner on the cards");
     const done = (await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE&fragment=1")).body;
-    assert.match(done, /<label class="proof-of-work" data-proof><span>Proof of work<\/span><input type="text" placeholder="a link, file or note anyone can re-check"/);
-    assert.match(done, /<p class="cmd-help">Add the proof of work: a link, file or note anyone can re-check, or pick a merged pull request\./);
-    assert.match(done, /tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/);
-    // the confirm page as a page of its own, a refused complete, and other verbs have no such field
-    assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=loading_state&event=COMPLETE")).body, /data-proof/);
+    assert.match(done, new RegExp(`<input type="radio" name="evidenceRef" value="${sha}" checked><code>${sha.slice(0, 7)}</code><span>spinner on the cards</span>`));
+    // a refused complete, and other verbs, have no such field
     assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body, /data-proof/);
     assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=loading_state&event=BLOCK&fragment=1")).body, /data-proof/);
+    // the dialog posts its fields: anything but one of the task's commits is refused in the dialog
+    const post = (ref: string) => s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: ref, dialog: "1", fragment: "1" });
+    const wrong = await post("spinner.mp4");
+    assert.equal(wrong.status, 422);
+    assert.match(wrong.body, /data-error>The proof of work is one of loading_state(?:'|&#39;)s commits: pick one\. Nothing was written\./);
+    const ok = await post(sha);
+    assert.match(ok.body, /^<div data-go="\/\?r=\d+"><\/div>$/);
+    const last = (await s.store.readStream(S)).at(-1);
+    assert.deepEqual([last?.type, (last?.data.payload as { evidenceRef?: string }).evidenceRef], ["node.complete", sha]);
+    // done: its proof is the commit, one click to it on GitHub
+    assert.match((await s.http("GET", "/")).body, new RegExp(`<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v"><a href="https://github.com/acme/app/commit/${sha}" target="_blank" rel="noopener noreferrer"><code>${sha.slice(0, 7)}</code></a> spinner on the cards</span>`));
+    // the page's script: the first field gets the focus, a chip fills its field
     const app = (await s.http("GET", "/app.mjs")).body;
-    assert.match(app, /if \(proof\) \{\n    proof\.value = valueIn\(box\.value, "evidenceRef"\);\n    return proof\.focus\(\);/); // the field first
-    assert.match(app, /else if \(box && e\.target === proof\) fill\(box, "evidenceRef", proof\.value, false\);/); // typing stays in the field
-    assert.match(app, /if \(chip\.dataset\.fill === "evidenceRef" && proof\) proof\.value = chip\.dataset\.value \?\? "";/);
+    assert.match(app, /const first = confirmBox\.querySelector\("\[data-field\] input:not\(\[type=hidden\]\), \[data-comment-field\] textarea"\);/);
+    assert.match(app, /const field = confirmBox\.querySelector\(`\[name="\$\{chip\.dataset\.fill\}"\]`\);\n    if \(field instanceof HTMLInputElement\) \{\n      field\.value = chip\.dataset\.value \?\? "";/);
+    assert.match(app, /if \(found && mark instanceof HTMLInputElement\) \{\n    mark\.value = "1";\n    found\.remove\(\);/); // a subtask marked as found
   } finally {
     await s.done();
   }
 });
 
-test("the command you send is read strictly: a value left empty, a stray key or flag, another action, a moved log — nothing written; a good one runs as typed", async () => {
+test("a command posted to /act is read strictly: a value left empty, a stray key or flag, another action, a moved log — nothing written; a good one runs as typed", async () => {
   const s = await serving();
   try {
     const count = async () => (await s.store.readStream(S)).length;
+    const sha = await s.commit("loading_state");
     const n0 = await count();
     // as the dialog posts it: what it opened (type, id, event), the seq it saw, and your command
     const run = (command: string, at: { id: string; event: string } = { id: "loading_state", event: "COMPLETE" }, extra: Record<string, string> = {}) =>
       s.form({ token: "t0k3n", type: "node", ...at, command, fragment: "1", ...extra });
     const empty = await run('tira send node loading_state COMPLETE evidenceRef=""');
     assert.equal(empty.status, 422);
-    assert.match(empty.body, /<p class="flash no" role="alert" data-error>Add the proof of work: evidenceRef=&#34;…&#34; \(a file, link or note anyone can re-check\)\. Nothing was written\.<\/p>/);
-    assert.match(empty.body, /data-command>tira send node loading_state COMPLETE evidenceRef=&#34;&#34;<\/textarea>/); // your text, kept
+    assert.match(empty.body, /<p class="flash no" role="alert" data-error>Pick the proof of work: one of the task(?:'|&#39;)s commits\. Nothing was written\.<\/p>/);
     const spaces = await run('tira send node table BLOCK reason="   "', { id: "table", event: "BLOCK" });
     assert.match(spaces.body, /data-error>Add the reason: reason=&#34;…&#34; \(words, not only spaces\)\. Nothing was written\./);
     for (const [bad, why] of [
@@ -485,24 +567,24 @@ test("the command you send is read strictly: a value left empty, a stray key or 
     const other = await run('tira send node loading_state BLOCK reason="waiting on QA"');
     assert.match(other.body, /<h1>Block loading_state\?<\/h1><p class="flash no" role="status" data-notice>That&#39;s a different action from the one you opened, so here is what tira says about it first\. Nothing was written\.<\/p>/);
     assert.match(other.body, /<input type="hidden" name="id" value="loading_state"><input type="hidden" name="event" value="BLOCK">/);
-    assert.match(other.body, /data-command>tira send node loading_state BLOCK reason=&#34;waiting on QA&#34;<\/textarea>/);
     // one tira refuses, sent as it stands: refused in the dialog, not written to the log
     const refused = await run("tira send node table START", { id: "table", event: "START" });
     assert.equal(refused.status, 409);
     assert.match(refused.body, /data-error>tira would still refuse this: gate: one active task: node:loading_state is already active\. Nothing was written\./);
     // the log moved after you opened it: shown again, your command kept
-    const late = await run('tira send node loading_state COMPLETE evidenceRef="e"', undefined, { seen: "3" });
+    const late = await run(`tira send node loading_state COMPLETE evidenceRef="${sha}"`, undefined, { seen: "3" });
     assert.equal(late.status, 409);
-    assert.match(late.body, /data-moved>The log changed since you opened this[^]*data-command>tira send node loading_state COMPLETE evidenceRef=&#34;e&#34;<\/textarea>/);
+    assert.match(late.body, /data-moved>The log changed since you opened this/);
     assert.equal(await count(), n0); // none of it wrote anything
     // a good one runs exactly as typed, quotes and a note included; the dialog is told where to go
-    const ok = await run('tira send node loading_state COMPLETE evidenceRef="spinner \\"v2\\".mp4" note="checked on a slow network"');
+    assert.match((await run('tira send node loading_state COMPLETE evidenceRef="spinner \\"v2\\".mp4"')).body, /data-error>The proof of work is one of loading_state(?:'|&#39;)s commits: pick one\./); // only a commit
+    const ok = await run(`tira send node loading_state COMPLETE evidenceRef="${sha}" note="checked on a slow network"`);
     assert.equal(ok.status, 200);
     const go = /^<div data-go="(\/\?r=\d+)"><\/div>$/.exec(ok.body)?.[1];
     assert.ok(go, ok.body);
-    assert.match((await s.http("GET", go)).body, /data-flash>Complete loading_state: done \(seq 12\)\./);
+    assert.match((await s.http("GET", go)).body, /data-flash>Complete loading_state: done \(seq 13\)\./);
     const last = (await s.store.readStream(S)).at(-1);
-    assert.deepEqual([last?.type, last?.metadata.actor, last?.data.payload], ["node.complete", "isha", { evidenceRef: 'spinner "v2".mp4', note: "checked on a slow network" }]);
+    assert.deepEqual([last?.type, last?.metadata.actor, last?.data.payload], ["node.complete", "isha", { evidenceRef: sha, note: "checked on a slow network" }]);
     // a subtask by command; found work must be found under the task it goes under
     const wrong = await run("tira create node charts --parent dashboard kind=discovered discovered_during=table", { id: "dashboard", event: "ADD_SUBTASK" });
     assert.match(wrong.body, /data-error>tira can&#39;t run that: found work is marked kind=discovered discovered_during=dashboard/);
@@ -546,8 +628,8 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
   const s = await serving();
   try {
     const block = (await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body;
-    assert.match(block, /<label class="blocked-by" data-blocked-by="table" data-type="node"><span>Blocked by<\/span><input type="text" placeholder="a new ticket, e\.g\. design_tokens"/);
-    const open = () => [...block.matchAll(/data-fill-blocker="([^"]*)"/g)].map((m) => m[1]);
+    assert.match(block, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="a new ticket, e\.g\. design_tokens, or an open task" autocomplete="off" spellcheck="false" data-blocked-by="table"><\/label>/);
+    const open = () => [...block.matchAll(/data-fill="blocker" data-value="([^"]*)"/g)].map((m) => m[1]);
     for (const id of ["colors", "loading_state", "font", "filters", "fetch_metrics"]) assert.ok(open().includes(id), id);
     assert.ok(!open().includes("table"), "not itself");
     assert.ok(!open().includes("dashboard"), "not a task it sits under");
@@ -557,7 +639,7 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time
     await s.send("fetch_metrics", "START");
     await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
-    assert.ok(!(await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body.includes('data-fill-blocker="fetch_metrics"'), "done tasks aren't waited on");
+    assert.ok(!(await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body.includes('data-fill="blocker" data-value="fetch_metrics"'), "done tasks aren't waited on");
     // a re-open: nothing re-opened yet, no suggestions; then the reason used before
     assert.doesNotMatch((await s.http("GET", "/confirm?type=node&id=fetch_metrics&event=REOPEN&fragment=1")).body, /data-fills/);
     await s.send("fetch_metrics", "REOPEN", { reason: "numbers were wrong" });
@@ -573,8 +655,9 @@ test("blocking on a new ticket creates it under the blocked task and links the t
   try {
     const count = async () => (await s.store.readStream(S)).length;
     const run = (command: string, id: string) => s.form({ token: "t0k3n", type: "node", id, event: "BLOCK", command, fragment: "1" });
-    // the dialog's own default, filled in by the page's script: a ticket, then the block on it
-    const ok = await run('tira create node qa_signoff --parent loading_state kind=discovered discovered_during=loading_state\ntira send node loading_state BLOCK blocker="qa_signoff" reason="QA hasn\'t signed off"', "loading_state");
+    // as the dialog posts it: what it waits on, and why (a new ticket's name: made under the task first)
+    const blockBy = (id: string, blocker: string, reason = "") => s.form({ token: "t0k3n", type: "node", id, event: "BLOCK", blocker, reason, dialog: "1", fragment: "1" });
+    const ok = await blockBy("loading_state", "qa_signoff", "QA hasn't signed off");
     const go = /^<div data-go="(\/\?r=\d+)"><\/div>$/.exec(ok.body)?.[1] as string;
     assert.ok(go, ok.body);
     const page = (await s.http("GET", go)).body;
@@ -600,10 +683,9 @@ test("blocking on a new ticket creates it under the blocked task and links the t
     await s.send("qa_signoff", "START");
     await s.send("qa_signoff", "COMPLETE", { evidenceRef: "qa-report.pdf" });
     assert.match((await s.http("GET", "/")).body, /waiting on <a href="#t\d+">qa_signoff<\/a><span class="state s-done">done<\/span><\/span><span class="ready" data-ready>ready to unblock<\/span>/);
-    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=UNBLOCK")).body, /Recommendation:<\/b> Unblock it: qa_signoff is done now, so the wait looks over\./);
     // an open task elsewhere: linked, nothing created, the reason waits on it; drawn as an arc
     const n0 = await count();
-    const onTask = await run("tira send node table BLOCK blocker=filters", "table");
+    const onTask = await blockBy("table", "filters");
     assert.match(onTask.body, /^<div data-go=/);
     assert.equal(await count(), n0 + 1);
     assert.deepEqual((await s.store.readStream(S)).at(-1)?.data.payload, { blocker: "filters", reason: "waiting on filters" });
@@ -619,13 +701,19 @@ test("blocking on a new ticket creates it under the blocked task and links the t
       assert.equal(r.status, 422, command);
       assert.match(r.body, new RegExp(`data-error>tira can&#39;t run that: ${why}`), command);
     }
+    for (const [blocker, why] of [["improve_visual", "font sits under improve_visual: a task can&#39;t wait on what it is part of"], ["qa_signoff", "qa_signoff is already done: there&#39;s nothing to wait on"]]) {
+      const r = await blockBy("font", blocker as string); // the dialog's field, the same checks
+      assert.equal(r.status, 422, blocker);
+      assert.match(r.body, new RegExp(`data-error>tira can&#39;t run that: ${why}`), blocker);
+      assert.match(r.body, new RegExp(`name="blocker" value="${blocker}"`), "what you wrote, kept");
+    }
     // a new ticket tira would refuse (the name is taken): neither the ticket nor the block is written
     const taken = await run("tira create node filters --parent font\ntira send node font BLOCK blocker=filters", "font");
     assert.equal(taken.status, 409);
     assert.match(taken.body, /data-error>tira would still refuse the new ticket filters: /);
     assert.equal(await count(), n1);
-    // without the page's script (no reason written), the block waits on its ticket
-    const plain = await run('tira create node fonts_licence --parent font kind=discovered discovered_during=font\ntira send node font BLOCK blocker="fonts_licence" reason=""', "font");
+    // no reason written: the block waits on its ticket
+    const plain = await blockBy("font", "fonts_licence");
     assert.match(plain.body, /^<div data-go=/);
     assert.deepEqual((await s.store.readStream(S)).at(-1)?.data.payload, { blocker: "fonts_licence", reason: "waiting on fonts_licence" });
   } finally {
@@ -639,7 +727,7 @@ test("Cancel, Reopen and Add subtask go through the page like the other verbs", 
     const state = async (id: string) => fold(await s.store.readStream(S), s.registry).entities.find((e) => e.id === id);
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "table", event: "CANCEL" })).status, 303);
     assert.equal((await state("table"))?.regions.lifecycle, "cancelled");
-    await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
+    await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     assert.equal((await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "REOPEN", reason: "the spinner flickers" })).status, 303);
     assert.equal((await state("loading_state"))?.regions.lifecycle, "in_progress");
     // a subtask: born under the task, marked as discovered work when the box is ticked
@@ -650,14 +738,18 @@ test("Cancel, Reopen and Add subtask go through the page like the other verbs", 
     assert.equal(charts?.tree?.discoveredDuring, "node:dashboard");
     await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "legend" });
     assert.equal((await state("legend"))?.tree?.kind, "planned");
-    // the packet for a subtask says where it goes; under a done task it says to re-open first
+    // the same from the dialog's fields
+    await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "axes", discovered: "1", dialog: "1" });
+    assert.deepEqual([(await state("axes"))?.tree?.kind, (await state("axes"))?.tree?.discoveredDuring], ["discovered", "node:dashboard"]);
+    await s.form({ token: "t0k3n", type: "node", id: "dashboard", event: "ADD_SUBTASK", name: "ticks", discovered: "", dialog: "1" });
+    assert.equal((await state("ticks"))?.tree?.kind, "planned");
+    // the packet for a subtask asks its name; under a done task it says to re-open first
     const add = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK")).body;
-    assert.match(add, /This adds a new task at the end of its subtasks\./);
-    assert.match(add, /data-command>tira create node &#34;&#34; --parent dashboard<\/textarea>/); // dashboard isn't under way: planned, unless you say found
+    assert.match(add, /<label class="field" data-field="name"><span>Name of the new subtask<\/span><input type="text" name="name" value="" placeholder="e\.g\. header_layout" autocomplete="off" spellcheck="false" required maxlength="80"><\/label><input type="hidden" name="discovered" value="">/); // dashboard isn't under way: planned, unless you say found
     const addLive = (await s.http("GET", "/confirm?type=node&id=dashboard&event=ADD_SUBTASK&fragment=1")).body;
     assert.match(addLive, /<button type="button" class="fill" data-fill-found="dashboard">Mark as found while working on dashboard<\/button>/);
     // under a task in progress, a new subtask is marked as found while working on it
-    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=ADD_SUBTASK")).body, /data-command>tira create node &#34;&#34; --parent loading_state kind=discovered discovered_during=loading_state<\/textarea>/);
+    assert.match((await s.http("GET", "/confirm?type=node&id=loading_state&event=ADD_SUBTASK")).body, /<input type="hidden" name="discovered" value="1">/);
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time
     await s.send("fetch_metrics", "START");
     await s.send("fetch_metrics", "COMPLETE", { evidenceRef: "api.md" });
@@ -720,7 +812,7 @@ test("after an action, what it changed glows once: the task it moved, or a block
   const s = await serving();
   try {
     const glowing = (page: string) => [...page.matchAll(/<a class="(?:gn|ghost)[^"]*\bchanged\b[^"]*"[^>]*data-(?:key|idea)="([^"]+)"/g)].map((m) => m[1]);
-    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: "spinner.mp4" });
+    const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     const page = (await s.http("GET", String(ok.headers.location))).body;
     assert.deepEqual(glowing(page), ["node:loading_state"]);
     assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><div class="t">loading_<wbr>state<\/div>/);

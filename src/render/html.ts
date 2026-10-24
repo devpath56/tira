@@ -21,6 +21,7 @@ import { esc } from "./escape.ts";
 import { foundPath, fx, layout, tint, treePath } from "../serve/layout.mjs";
 import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
 import { linksOf as taskLinksOf, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
+import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import { LINK_TYPES } from "../tables/links.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -360,8 +361,8 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .links{display:grid;gap:6px;margin-top:12px}.links p{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}.links .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--block);min-width:78px}.links a{font-weight:600;color:var(--accent)}.links a:hover{text-decoration:underline}
 .att-row .by{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)}.att-row .by a{font-weight:600;color:var(--accent)}.att-row .ready{display:inline;font-size:11px}
 .chip.blocks{color:var(--block);border-color:var(--block);background:var(--block-bg)}
-.blocked-by,.proof-of-work{display:grid;gap:6px;margin:0 0 10px;font-weight:600;font-size:13px}.blocked-by input,.proof-of-work input{font:500 14px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.blocked-by input:focus,.proof-of-work input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
-.your-action .blocked-by+.fills{margin:-2px 0 10px}
+.field{display:grid;gap:6px;margin:0 0 12px;font-weight:600;font-size:13px}.field small{font-weight:400;color:var(--mut)}.field input,.field textarea{font:500 14px var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px}.field textarea{font-weight:400;line-height:1.5;resize:vertical;min-height:72px}.field input:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.your-part .field+.fills{margin:-4px 0 12px}.ticket-side h2{margin-top:4px}.tk-title{font-size:15px;font-weight:650}
 .wait-ring{width:12px;height:12px;border-radius:999px;border:1.5px dashed var(--warn);flex:none}
 .meter{flex:1;min-width:40px;height:6px;border-radius:3px;background:var(--gone-bg);overflow:hidden;display:flex}.meter i{display:block;height:100%}
 .m-done{background:var(--done)}.m-cancelled{background:var(--gone)}.m-in_progress{background:var(--prog)}.m-blocked{background:var(--block)}
@@ -427,6 +428,13 @@ body:has(.drawer:target){overflow:hidden}
 .kids-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px}
 .kids-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}
 .kids-list a{font-weight:600;color:var(--accent);overflow-wrap:anywhere}.kids-list a:hover{text-decoration:underline}
+.tk-id{margin:0 0 4px;font:12px var(--mono);color:var(--dim)}.ticket{display:grid;gap:10px;margin-top:12px}.tk-desc p{margin:0 0 6px;font-size:14px;line-height:1.55}.tk-steps ol{margin:4px 0 0;padding-left:20px;font-size:14px;line-height:1.55}
+.ticket .lk,.tk-steps .lk{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-right:8px}.tk-facts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px}.tk-none{margin:0;font-size:13px;color:var(--mut)}.agent-chip{margin-left:6px}
+.tk-edit>summary{cursor:pointer;font-size:13px;color:var(--accent);width:max-content}.tk-form{display:grid;gap:10px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.tk-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tk-field{display:grid;gap:4px;font-size:12px;font-weight:600;color:var(--mut)}.tk-field small{font-weight:400}.tk-field input,.tk-field textarea,.tk-field select,.cm-form textarea{font:inherit;font-size:14px;font-weight:400;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:7px 9px}.tk-form .act{justify-self:start}
+.comments{margin-top:16px}.comments h3{margin:0 0 8px;font-size:14px}.cm-list{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:8px}.cm{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.cm-h{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px}.cm-h .ev-seq{margin-left:auto}.cm p{margin:4px 0 0;font-size:14px;line-height:1.5}
+.cm-form{display:grid;gap:8px}.cm-form .act{justify-self:start}
+.commits{border:0;padding:0;margin:0 0 12px;min-width:0}.commits legend{padding:0;margin-bottom:6px}.commit{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 10px;margin:0 0 4px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2);font-weight:400;cursor:pointer}.commit:has(input:checked){border-color:var(--accent);background:var(--accent-bg)}.commit code{font:12px var(--mono);color:var(--accent)}.commit span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}.commit small{color:var(--dim)}
 .proof{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--done);border-radius:var(--r);background:var(--done-bg)}
 .proof-k{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--done)}.proof-v{font-family:var(--mono);font-size:13px;color:var(--fg);overflow-wrap:anywhere}
 .drawer-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
@@ -462,7 +470,6 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .brief .nutshell{font-size:15px;line-height:1.5;margin-bottom:10px}.brief .nutshell b{display:block;font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-bottom:2px}
 .brief .verdict{margin:0 0 10px}.brief .hint{margin:0 0 10px}
 .brief details.why{margin-top:6px;border-top:1px solid var(--line);padding-top:8px}.brief details.why>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent-text);min-height:24px}.brief details.why[open]>summary{margin-bottom:8px}
-.your-action textarea{display:block;width:100%;min-height:150px;resize:vertical;font:13px/1.6 var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 12px}.your-action textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 .cmd-help{margin:8px 0 0;font-size:12px;color:var(--mut)}
 .fills{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}.fills span{font-size:12px;color:var(--mut)}
 .fill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 12px var(--sans);color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;cursor:pointer}.fill:hover{border-color:var(--accent);color:var(--accent)}
@@ -890,9 +897,13 @@ function kidsHtml(r: TreeRow, ctx: DialogContext): string {
   return `<div class="kids">${meter(r.children.map((c) => c.state))}<span>${closedKids} of ${r.children.length} ${kidNoun} closed</span></div><ul class="kids-list" aria-label="Subtasks">${kidsList}</ul>`;
 }
 
+// a done task's proof: one of its commits shows as its short id (a link to it on GitHub) and its message
 function proofHtml(r: TreeRow, ctx: DialogContext): string {
   if (r.state !== "done" || !ctx.proof) return "";
-  return `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${esc(ctx.proof.ref)}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`;
+  const ref = ctx.proof.ref;
+  const c = ctx.ext.commits.get(r.id)?.find((x) => x.sha === ref);
+  const shown = c ? `<a href="https://github.com/${esc(c.repo)}/commit/${esc(c.sha)}" ${OUT}><code>${esc(shortSha(c.sha))}</code></a> ${esc(firstLine(c.message))}` : esc(ref);
+  return `<div class="proof" data-proof><span class="proof-k">Proof of work</span><span class="proof-v">${shown}</span><span class="ev-seq">${esc(ctx.proof.actor)} · seq ${ctx.proof.seq}</span></div>`;
 }
 
 // the blocks link, both ways: a blocked task names its blocker ticket, the ticket what it blocks
@@ -912,7 +923,13 @@ const locate = (key: string, live: boolean) => (live ? `<button type="button" cl
 // The workspace's repo and Jira project, in a bar under the header; each task's Jira issue and
 // pull requests in its dialog, and its Jira key on its card. Live, the bar offers Sync, Link
 // and Connect Jira, each through its own decision.
-interface Ext { links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined }
+// form: under tira serve, what the ticket's own forms need (the page's token, who it can be
+// assigned to: the project's people and its connected agents)
+interface Ext {
+  links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined
+  tickets: ReadonlyMap<string, Ticket>; comments: ReadonlyMap<string, Comment[]>; commits: ReadonlyMap<string, Commit[]>
+  form?: { token: string; people: string[]; agents: string[] }
+}
 
 const jiraUrl = (ext: Ext, key: string) => (ext.ws?.jira_site ? `${ext.ws.jira_site}/browse/${encodeURIComponent(key)}` : undefined);
 
@@ -962,13 +979,72 @@ function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): str
   return box(repo + jira + add + sync);
 }
 
+// ---------- the ticket: what the work is, and what people and agents say on it (tickets.ts) ----------
+// Its description, steps, estimate and assignee, under its title; live, Edit ticket opens its form.
+// Then its comments, oldest first; live, one to add. Each form comes back to this dialog.
+const agentChip = (name: string) => (AGENT.test(name) ? `<span class="chip agent-chip">agent</span>` : "");
+const when = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+const hiddenOf = (fields: [string, string][]) => fields.map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
+const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
+const listItem = (x: string) => `<li>${esc(x)}</li>`;
+
+function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefined): string {
+  const opt = (v: string) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(v)}</option>`;
+  const people = [...new Set([...form.people, ...(current && !form.agents.includes(current) ? [current] : [])])];
+  const group = (label: string, names: string[]) => (names.length === 0 ? "" : `<optgroup label="${label}">${names.map(opt).join("")}</optgroup>`);
+  return `<select name="assignee" aria-label="Assignee"><option value="">Nobody yet</option>${group("Team", people)}${group("Agents", form.agents)}</select>`;
+}
+
+function ticketEditHtml(r: TreeRow, t: Ticket | undefined, form: NonNullable<Ext["form"]>, back: string, q: string): string {
+  const field = (label: string, input: string) => `<label class="tk-field"><span>${label}</span>${input}</label>`;
+  const title = `<input type="text" name="title" maxlength="120" value="${esc(t?.title ?? "")}" placeholder="${esc(r.id)}">`;
+  const description = `<textarea name="description" rows="4" maxlength="4000" placeholder="What the work is, and what done looks like">${esc(t?.description ?? "")}</textarea>`;
+  const steps = `<textarea name="steps" rows="4" placeholder="1. …">${esc((t?.steps ?? []).join("\n"))}</textarea>`;
+  const estimate = `<input type="text" name="estimate" maxlength="10" value="${esc(t?.estimate ?? "")}" placeholder="e.g. 2h, 1d">`;
+  const row = field("Time estimate", estimate) + field("Assignee", assigneeSelect(form, t?.assignee));
+  return `<details class="tk-edit" data-ticket-edit><summary>Edit ticket</summary><form method="post" action="${esc(withQ("/tickets", q))}" class="tk-form">`
+    + hiddenOf([["token", form.token], ["task", r.id], ["back", back]])
+    + field("Title", title) + field("Description", description) + field("Steps <small>one per line</small>", steps)
+    + `<div class="tk-row">${row}</div><button class="act primary" type="submit">Save ticket</button></form></details>`;
+}
+
+function ticketHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
+  const t = ext.tickets.get(r.id);
+  const desc = t?.description ? `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>` : "";
+  const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><span class="lk">Steps</span><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
+  const facts = [
+    t?.estimate ? `<span data-ticket-estimate><span class="lk">Estimate</span>${esc(t.estimate)}</span>` : "",
+    t?.assignee ? `<span data-ticket-assignee><span class="lk">Assignee</span>${esc(t.assignee)}${agentChip(t.assignee)}</span>` : "",
+  ].join("");
+  const shown = desc + steps + (facts === "" ? "" : `<div class="tk-facts">${facts}</div>`);
+  const none = shown === "" ? `<p class="tk-none">No description, steps, estimate or assignee yet.</p>` : "";
+  return `<div class="ticket" data-ticket>${shown}${none}${ext.form ? ticketEditHtml(r, t, ext.form, back, q) : ""}</div>`;
+}
+
+function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
+  const list = ext.comments.get(r.id) ?? [];
+  const item = (c: Comment) => `<li class="cm" data-comment><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))} · seq ${c.seq}</span></div>${paragraphs(c.text)}</li>`;
+  const shown = list.length === 0 ? `<p class="tk-none">No comments yet.</p>` : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
+  const form = ext.form
+    ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}`
+      + `<textarea name="text" rows="3" maxlength="2000" required placeholder="Feedback for whoever works on it: its agent reads it too" aria-label="Add a comment"></textarea><button class="act" type="submit">Comment</button></form>`
+    : "";
+  return `<section class="comments" data-comments aria-label="Comments"><h3>Comments <span class="ev-seq">${list.length}</span></h3>${shown}${form}</section>`;
+}
+
 function drawerHtml(n: Placed, lines: TrailEntry[], path: string, ctx: DialogContext): string {
   const r = n.row;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
   const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
+  const title = ctx.ext.tickets.get(r.id)?.title;
+  const head = title ? `<h2>${esc(title)}</h2><p class="tk-id">${esc(r.id)}</p>` : `<h2>${esc(r.id)}</h2>`;
+  const back = `#t${n.i}`;
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
-    + `<div class="path">${path}</div><h2>${esc(r.id)}</h2><div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${linksHtml(r, ctx)}${taskLinksHtml(ctx.ext, r.id)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
-    + `<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
+    + `<div class="path">${path}</div>${head}<div class="badges">${stateBadge(r.state)}${marksHtml(r)}${locate(r.key, ctx.live)}</div>${ticketHtml(r, ctx.ext, back, ctx.q)}${linksHtml(r, ctx)}${taskLinksHtml(ctx.ext, r.id)}${acts}${proofHtml(r, ctx)}${kidsHtml(r, ctx)}`
+    + `${commentsHtml(r, ctx.ext, back, ctx.q)}<details class="trail" open><summary>history (${lines.length})</summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details></div></section>`;
 }
 
 // ---------- needs attention (the D1 UI brief, 2026-10-19) ----------
@@ -1371,7 +1447,8 @@ export interface RenderOptions {
   // `actor`: who the page acts as; `user`: who is signed in with GitHub (shown in their place);
   // `token`: the page's own, for its forms. `moves`: what a drag between the Kanban's columns
   // means ("node:unstarted>in_progress" → START), from today's rules (command.ts dragMoves).
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string> };
+  // `people` and `agents`: who a ticket can be assigned to (the project's people, its connected agents).
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string>; people?: string[]; agents?: string[] };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -1443,7 +1520,8 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const links = linksOf(attentionSince(events, stream, skip).blocked, new Set(rowOf.keys()));
   const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
   const board = v.roots.length > 0 || ghosts.length > 0;
-  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream) };
+  const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [] } : undefined;
+  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), ...(form ? { form } : {}) };
   const name = ext.ws?.title ?? stream; // as people see it (renamed in Project settings)
   const first = !board && lanesFirst ? "lanes" : "board";
   return `<!doctype html>

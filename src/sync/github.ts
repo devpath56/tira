@@ -14,6 +14,7 @@ export interface Pull {
   state: "open" | "closed";
   mergedAt?: string;
   commits: string[]; // messages
+  shas?: string[]; // their commit ids, in the same order (a task is completed with one of them)
 }
 
 export interface GitHubClient {
@@ -47,12 +48,13 @@ export class GhCli implements GitHubClient {
     for (let i = 0; i < raw.length; i += 8) {
       const batch = raw.slice(i, i + 8);
       out.push(...await Promise.all(batch.map(async (p) => {
-        const commits = JSON.parse(await this.run(["api", `repos/${repo}/pulls/${p.number}/commits?per_page=100`])) as { commit?: { message?: string } }[];
+        const commits = JSON.parse(await this.run(["api", `repos/${repo}/pulls/${p.number}/commits?per_page=100`])) as { sha?: string; commit?: { message?: string } }[];
         return {
           number: p.number, title: p.title ?? "", body: p.body ?? "", branch: p.head?.ref ?? "", url: p.html_url,
           state: p.state === "open" ? "open" as const : "closed" as const,
           ...(p.merged_at ? { mergedAt: p.merged_at } : {}),
           commits: commits.map((c) => c.commit?.message ?? ""),
+          shas: commits.map((c) => c.sha ?? ""),
         };
       })));
     }

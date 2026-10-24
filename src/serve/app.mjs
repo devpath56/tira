@@ -118,9 +118,9 @@ document.addEventListener("keydown", (e) => {
 });
 
 // Every action opens its decision in a dialog over the page, never a new page: the server
-// sends just the packet (?fragment=1), parsed here without running anything in it. Left, what
-// tira recommends; right, the command it will run, editable. Running it posts from here: a
-// value missing, an edited-into-another action or a moved log comes back into the dialog;
+// sends just the packet (?fragment=1), parsed here without running anything in it. Left, the
+// ticket (and tira's word when it would refuse); right, what the move needs and a comment.
+// Running it posts from here: a value missing or a moved log comes back into the dialog;
 // otherwise the page comes back with the result. Esc or a click outside closes it. If the
 // packet can't be fetched, the confirm page opens instead.
 const confirmBox = document.createElement("dialog");
@@ -131,19 +131,9 @@ const packetOf = (html) => new DOMParser().parseFromString(html, "text/html").qu
 function show(packet) {
   confirmBox.replaceChildren(document.importNode(packet, true));
   if (!confirmBox.open) confirmBox.showModal();
-  const box = confirmBox.querySelector("textarea[data-command]");
-  if (!box) return;
-  const name = confirmBox.querySelector("[data-blocked-by] input"); // to block: what it waits on first
-  if (name) return name.focus();
-  const proof = confirmBox.querySelector("[data-proof] input"); // to complete: the proof of work first
-  if (proof) {
-    proof.value = valueIn(box.value, "evidenceRef");
-    return proof.focus();
-  }
-  box.focus();
-  const at = box.value.indexOf('""'); // the first value to fill in
-  const caret = at < 0 ? box.value.length : at + 1;
-  box.setSelectionRange(caret, caret);
+  // the first thing to fill in: what the move needs, else the comment
+  const first = confirmBox.querySelector("[data-field] input:not([type=hidden]), [data-comment-field] textarea");
+  first?.focus();
 }
 // a decision's packet, just the packet (?fragment=1): null if the answer has none
 const packetAt = async (href) => packetOf(await (await fetch(`${href}&fragment=1`, { headers: { accept: "text/html" } })).text());
@@ -156,61 +146,25 @@ async function openConfirm(href) {
     location.href = href;
   }
 }
-// key="value" in a command: replaced if it's there, else added
-const BACKSLASH = "\\";
-const quoted = (v) => '"' + v.replaceAll(BACKSLASH, BACKSLASH + BACKSLASH).replaceAll('"', BACKSLASH + '"') + '"';
-function fill(box, key, value, focus = true) {
-  const re = new RegExp(String.raw`(^|\s)${key}=("(?:[^"\\]|\\.)*"|\S*)`);
-  box.value = re.test(box.value) ? box.value.replace(re, (_m, pre) => `${pre}${key}=${quoted(value)}`) : `${box.value.trimEnd()} ${key}=${quoted(value)}`;
-  if (focus) box.focus();
-}
-// key's value in a command, unquoted ("" when it isn't there)
-function valueIn(text, key) {
-  const v = new RegExp(String.raw`(?:^|\s)${key}=("(?:[^"\\]|\\.)*"|\S*)`).exec(text)?.[1] ?? "";
-  return v.startsWith('"') ? v.slice(1, -1).replaceAll(/\\(.)/g, "$1") : v;
-}
-// Blocking: name what it waits on, and the command becomes two lines (a new ticket under the
-// task, found while working on it, then the block on it), or one line for an open task picked
-// from the chips. A note you added is kept.
-const bare = (s) => (/^[\w.:/@+-]+$/.test(s) ? s : quoted(s));
-function composeBlock(name) {
-  const holder = confirmBox.querySelector("[data-blocked-by]");
-  const box = confirmBox.querySelector("textarea[data-command]");
-  if (!holder || !box) return;
-  const id = bare(holder.dataset.blockedBy ?? "");
-  const type = bare(holder.dataset.type ?? "node");
-  const open = [...confirmBox.querySelectorAll("[data-fill-blocker]")].map((b) => b.dataset.fillBlocker);
-  const note = /(?:^|\s)note=("(?:[^"\\]|\\.)*"|\S*)/.exec(box.value)?.[1];
-  const n = name.trim();
-  const reason = n ? "waiting on " + n : "";
-  const noted = note ? " note=" + note : "";
-  const block = `tira send ${type} ${id} BLOCK blocker=${quoted(n)} reason=${quoted(reason)}` + noted;
-  const ticket = `tira create ${type} ${n ? bare(n) : '""'} --parent ${id} kind=discovered discovered_during=${id}`;
-  box.value = n !== "" && open.includes(n) ? block : `${ticket}\n${block}`;
-}
-confirmBox.addEventListener("input", (e) => {
-  const box = confirmBox.querySelector("textarea[data-command]");
-  const proof = confirmBox.querySelector("[data-proof] input");
-  if (e.target instanceof HTMLInputElement && e.target.closest("[data-blocked-by]")) composeBlock(e.target.value);
-  else if (box && e.target === proof) fill(box, "evidenceRef", proof.value, false);
-  else if (box && proof && e.target === box) proof.value = valueIn(box.value, "evidenceRef");
-});
 confirmBox.addEventListener("click", (e) => {
   const el = e.target instanceof Element ? e.target : null;
   if (e.target === confirmBox || el?.closest("[data-close-confirm]")) return confirmBox.close();
-  const box = confirmBox.querySelector("textarea[data-command]");
-  const pick = el?.closest("[data-fill-blocker]");
-  if (pick) {
-    const name = confirmBox.querySelector("[data-blocked-by] input");
-    if (name) name.value = pick.dataset.fillBlocker ?? "";
-    return composeBlock(pick.dataset.fillBlocker ?? "");
+  // a chip fills its field: an open task to wait on, a reason used before, a proof, a parent
+  const chip = el?.closest("[data-fill]");
+  if (chip) {
+    const field = confirmBox.querySelector(`[name="${chip.dataset.fill}"]`);
+    if (field instanceof HTMLInputElement) {
+      field.value = chip.dataset.value ?? "";
+      field.focus();
+    }
+    return;
   }
-  const chip = el?.closest("[data-fill], [data-fill-found]");
-  if (!box || !chip) return;
-  const proof = confirmBox.querySelector("[data-proof] input");
-  if (chip.dataset.fill === "evidenceRef" && proof) proof.value = chip.dataset.value ?? ""; // a merged pull request as the proof
-  if (chip.dataset.fill) fill(box, chip.dataset.fill, chip.dataset.value ?? "");
-  else { fill(box, "kind", "discovered"); fill(box, "discovered_during", chip.dataset.fillFound ?? ""); chip.remove(); }
+  const found = el?.closest("[data-fill-found]"); // a subtask found while working on its parent
+  const mark = confirmBox.querySelector('input[name="discovered"]');
+  if (found && mark instanceof HTMLInputElement) {
+    mark.value = "1";
+    found.remove();
+  }
 });
 confirmBox.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target instanceof HTMLTextAreaElement) {

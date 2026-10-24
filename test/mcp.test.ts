@@ -24,6 +24,9 @@ import { APPS, appSetup, databaseCheck, mcpUrl, serverName, TIRA_SCRIPT, TOKEN_H
 import { NO_TOKEN, NOT_CONNECTED } from "../src/mcp/http.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
+import { Dispatcher } from "../src/write/dispatcher.ts";
+import { fold } from "../src/fold/fold.ts";
+import { renderHtml } from "../src/render/html.ts";
 import pg from "pg";
 
 const S = "demo";
@@ -39,13 +42,19 @@ async function world() {
   for (const id of ["header", "footer", "api"]) await born(id, "site");
   await send("api", "START");
   await send("api", "BLOCK", { reason: "waiting on the key" });
-  return { store, registry, send };
+  // a commit the sync kept for a task (complete_task takes one as proof): its sha
+  const commit = async (task: string, n = 1, message = "the work") => {
+    const sha = n.toString(16).padStart(8, "0") + "d".repeat(32);
+    await wp.submitAsSync({ stream: S, kind: "create", entity: { type: "commit", id: `${sha.slice(0, 12)}-${task}` }, payload: { task, repo: "acme/site", sha, pr: 3, message } });
+    return sha;
+  };
+  return { store, registry, send, commit };
 }
 
 // tira mcp's server for the project, with the official MCP client on the other end of a pipe
-async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>) {
+async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>, syncNow?: () => Promise<string | undefined>) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}) }).connect(serverSide);
+  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}), ...(syncNow ? { syncNow } : {}) }).connect(serverSide);
   const client = new Client({ name: "tira-tests", version: "1.0.0" });
   await client.connect(clientSide);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -96,15 +105,15 @@ test("tira mcp reads the board: what's next, the task list in the board's order,
     assert.equal((await call("list_tasks", { state: "weird" })).error, true); // the schema says no
     const api = await call("get_task", { id: "api" });
     assert.equal(api.error, false);
-    assert.match(api.text, /^api · blocked · under site\nBlocked: waiting on the key\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
+    assert.match(api.text, /^api · blocked · under site\nTicket: no description, steps, estimate or assignee yet\.\nBlocked: waiting on the key\nCommits: none yet \(push to a branch named api, or write "tira: api" in a pull request; complete_task syncs first\)\nComments: none yet \(add_comment writes one\)\.\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
     assert.deepEqual(await call("get_task", { id: "nope" }), { error: true, text: "There is no task nope in demo: list_tasks shows them." });
     // the one in progress, not listed again as next; once done, its proof
     await w.send("header", "START");
     assert.match((await call("next_task")).text, /^In progress: header \(under site\)\nBlocked: 1/);
     await w.send("header", "COMPLETE", { evidenceRef: "header.png" });
     assert.deepEqual(await call("list_tasks"), { error: false, text: "site · to do · top level\nfooter · to do · under site · ◆ next\napi · blocked · under site" }); // done: off the open list
-    assert.match((await call("get_task", { id: "header" })).text, /^header · done · under site\nProof: header.png \(from isha, seq 8\)\nHistory:/);
-    assert.match((await call("get_task", { id: "site" })).text, /^site · to do · top level\nSubtasks: header \(done\), footer \(to do\), api \(blocked\)\n/);
+    assert.match((await call("get_task", { id: "header" })).text, /^header · done · under site\nTicket: no description, steps, estimate or assignee yet\.\nProof: header.png \(from isha, seq 8\)\nComments: none yet/); // done: no commits to pick
+    assert.match((await call("get_task", { id: "site" })).text, /^site · to do · top level\nTicket: no description, steps, estimate or assignee yet\.\nSubtasks: header \(done\), footer \(to do\), api \(blocked\)\n/);
   } finally {
     await client.close();
   }
@@ -117,7 +126,7 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
   try {
     // only these: no cancel, reopen, unblock, delete or settings for an agent
     const tools = (await client.listTools()).tools;
-    assert.deepEqual(tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea"]);
+    assert.deepEqual(tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea", "add_comment"]);
     for (const tool of tools.slice(3)) assert.deepEqual([tool.annotations?.readOnlyHint, tool.annotations?.destructiveHint], [false, false], tool.name);
     assert.deepEqual(await call("start_task", { id: "header" }), { error: false, text: "Start header: done (seq 7)." });
     assert.match((await call("get_task", { id: "header" })).text, /\n  seq 7 · node.start · claude-code$/); // as the agent
@@ -136,12 +145,18 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
       assert.match(r.text, /^Input validation error: Invalid arguments for tool complete_task: proof/);
     }
     assert.equal(await logged(), unproved);
-    assert.match((await call("complete_task", { id: "header", proof: "pr/1" })).text, /^Complete header: refused \(gate: .*\)\. The refusal is in the log \(seq \d+\)\. What to do: Close its open subtasks first \(complete or cancel them\): header_logo\.$/);
-    assert.match((await call("complete_task", { id: "header_logo", proof: "logo.png" })).text, /What to do: Start header_logo first\.$/);
+    // the proof is one of the task's commits: none yet, then one that isn't it, then the rules
+    assert.deepEqual(await call("complete_task", { id: "header", proof: "pr/1" }), { error: true, text: 'header has no commits yet: push the work to a branch named after it (header), or write "tira: header" in its pull request, then complete it with the commit\'s id. Nothing was written.' });
+    const sha = await w.commit("header", 1, "header layout\n\nwith the logo");
+    assert.deepEqual(await call("complete_task", { id: "header", proof: "abcdef12" }), { error: true, text: `abcdef12 isn't one of header's commits. Its commits: ${sha.slice(0, 7)} header layout. Nothing was written.` });
+    assert.equal(await logged(), unproved + 1); // only the commit the sync kept
+    assert.match((await call("complete_task", { id: "header", proof: sha.slice(0, 8) })).text, /^Complete header: refused \(gate: .*\)\. The refusal is in the log \(seq \d+\)\. What to do: Close its open subtasks first \(complete or cancel them\): header_logo\.$/);
+    await w.commit("header_logo", 2);
+    assert.match((await call("complete_task", { id: "header_logo", proof: "00000002dddd" })).text, /What to do: Start header_logo first\.$/);
     // blocked, waiting on a new ticket made under it, found while working on it
     assert.match((await call("block_task", { id: "footer", reason: "waiting on copy", new_ticket: "footer_copy" })).text, /^Add subtask footer_copy under footer: done \(seq \d+\)\. Block footer: done \(seq \d+\)\.$/);
     const footer = (await call("get_task", { id: "footer" })).text;
-    assert.match(footer, /^footer · blocked · under site\nSubtasks: footer_links \(to do\), footer_copy \(to do\)\nBlocked: waiting on copy\nWaiting on: footer_copy\n/);
+    assert.match(footer, /^footer · blocked · under site\nTicket: no description, steps, estimate or assignee yet\.\nSubtasks: footer_links \(to do\), footer_copy \(to do\)\nBlocked: waiting on copy\nWaiting on: footer_copy\n/);
     assert.match(footer, /node.block · claude-code · reason waiting on copy · blocked by footer_copy$/);
     assert.match((await call("get_task", { id: "footer_copy" })).text, /found during footer/);
     // or on an open task; never on one that isn't there, nor on two things; nothing written then
@@ -160,6 +175,48 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
   } finally {
     await client.close();
   }
+});
+
+test("agents read a ticket: its words, its comments, what's assigned to them and feedback they haven't answered; they reply on it", async () => {
+  const w = await world();
+  const d = new Dispatcher(w.store, w.registry);
+  await d.submit({ stream: S, kind: "create", entity: { type: "ticket", id: "footer", version: 1 }, actor: "isha", payload: { task: "footer", title: "Site footer", description: "Links and the copyright line.\nDark, like the header.", steps: ["Add the links", "Add the copyright"], estimate: "1d", assignee: "claude-code" } });
+  await d.submit({ stream: S, kind: "create", entity: { type: "comment", id: "c-1" }, actor: "isha", payload: { task: "footer", text: "Use the brand blue for the links." } });
+  const { call } = await connected(w);
+  assert.match((await call("next_task")).text, /\nAssigned to you: footer\nFeedback on footer: 1 new, latest from isha: "Use the brand blue for the links\." \(get_task shows it; add_comment replies\)$/);
+  assert.match((await call("list_tasks")).text, /\nfooter · to do · under site "Site footer" · assigned to claude-code\n/);
+  const footer = (await call("get_task", { id: "footer" })).text;
+  assert.match(footer, /^footer · to do · under site\nTitle: Site footer\nDescription:\n  Links and the copyright line\.\n  Dark, like the header\.\nSteps:\n  1\. Add the links\n  2\. Add the copyright\nEstimate: 1d\nAssignee: claude-code\n/);
+  assert.match(footer, /\nComments \(1, oldest first\):\n  seq \d+ · isha: Use the brand blue for the links\.\nHistory:/);
+  // a reply: on the ticket, as the agent; answered, the feedback leaves what's next
+  assert.match((await call("add_comment", { id: "footer", text: "Done: links are brand blue." })).text, /^Commented on footer \(seq \d+\): people see it on the ticket\.$/);
+  assert.match((await call("get_task", { id: "footer" })).text, /\n  seq \d+ · claude-code: Done: links are brand blue\.\n/);
+  assert.doesNotMatch((await call("next_task")).text, /Feedback on/);
+  assert.deepEqual(await call("add_comment", { id: "nope", text: "hi" }), { error: true, text: "There is no task nope in demo: list_tasks shows them. Nothing was written." });
+  assert.match((await call("add_comment", { id: "footer", text: "x".repeat(2001) })).text, /^Input validation error/); // the schema says no, before the log
+  const page = renderHtml(fold(await w.store.readStream(S), w.registry), S, "h");
+  assert.match(page, /<li class="cm" data-comment><div class="cm-h"><b>claude-code<\/b><span class="chip agent-chip">agent<\/span>/); // people see it, marked as an agent's
+});
+
+test("complete_task syncs with GitHub first when the commit isn't there yet, then takes it; a sync that brings none says so", async () => {
+  const w = await world();
+  let sha = "";
+  const synced: string[] = [];
+  const { call } = await connected(w, "claude-code", undefined, async () => {
+    synced.push("sync");
+    if (synced.length === 1) sha = await w.commit("footer", 5, "footer done");
+    return "Synced just now: 1 commit kept for footer.";
+  });
+  await w.send("footer", "START");
+  assert.match((await call("complete_task", { id: "footer", proof: "00000005dddddd" })).text, /^Complete footer: done \(seq \d+\)\.$/);
+  assert.deepEqual([synced.length, ((await w.store.readStream(S)).at(-1)?.data.payload as { evidenceRef?: string } | undefined)?.evidenceRef], [1, sha]); // a short id, written as the whole sha
+  // already there: no sync needed
+  await w.send("header", "START");
+  await w.commit("header", 6);
+  assert.match((await call("complete_task", { id: "header", proof: "00000006dddddd" })).text, /^Complete header: done/);
+  assert.equal(synced.length, 1);
+  // not there after the sync either: said, with what the sync said
+  assert.match((await call("complete_task", { id: "site", proof: "1234567" })).text, /^site has no commits yet \(Synced just now: 1 commit kept for footer\.\): push the work/);
 });
 
 test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, with the agent's token (the project and the agent come from it); it says so on stderr only, a revoked agent's next call is refused, and it stops when its client does", { skip: needsPg }, async () => {
@@ -183,7 +240,7 @@ test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, wi
   };
   try {
     await client.connect(transport);
-    assert.equal((await client.listTools()).tools.length, 8);
+    assert.equal((await client.listTools()).tools.length, 9);
     assert.deepEqual(await call("next_task"), { error: false, text: "In progress: nothing.\nNext: header (under site)" });
     assert.match((await call("start_task", { id: "header" })).text, /^Start header: done \(seq 3\)\.$/);
     assert.match(said, /^tira: MCP server for e2e, acting as claude-code \(on stdio; it stops when its client does\)$/m);
@@ -287,7 +344,7 @@ test("tira serve answers MCP at /mcp, as Claude Code, Cursor and VS Code reach i
   try {
     const client = new Client({ name: "tira-tests", version: "1.0.0" });
     await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-    assert.deepEqual((await client.listTools()).tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea"]);
+    assert.deepEqual((await client.listTools()).tools.map((x) => x.name), ["next_task", "list_tasks", "get_task", "start_task", "complete_task", "block_task", "add_subtask", "file_idea", "add_comment"]);
     const said = async (name: string, args: Record<string, unknown> = {}) => ((await client.callTool({ name, arguments: args })).content as { text?: string }[]).map((c) => c.text ?? "").join("\n");
     assert.match(await said("next_task"), /^In progress: nothing\.\nNext: header \(under site\)/);
     assert.match(await said("start_task", { id: "header" }), /^Start header: done/);
@@ -407,7 +464,8 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.ok(more.includes(`<pre class="agent-code" id="agent-url">http://127.0.0.1:${port}/mcp</pre>`), "the address, as 127.0.0.1");
     assert.ok(more.includes(esc(appSetup("claude-code", S, at, TOKEN_HERE).code)), "Claude Code's command, its token's place marked");
     assert.equal((more.match(/data-agent-app="/g) ?? []).length, 4);
-    assert.match(more, /<li><code>complete_task<\/code> done, with proof of work<\/li>/);
+    assert.match(more, /<li><code>complete_task<\/code> done, with one of its commits as proof of work<\/li><li><code>block_task<\/code>/);
+    assert.match(more, /<li><code>add_comment<\/code> a reply on a task(?:'|&#39;)s comments<\/li><\/ul>/);
     assert.match(more, /Cancelling, reopening and unblocking stay with people\./);
     assert.match(more, /<p class="agent-db no" data-agent-database="missing">/);
     assert.match(more, /<h4>Claude(?:'|&#39;)s Connectors<\/h4><p data-agent-connectors>Claude(?:'|&#39;)s own Connectors settings \(Add custom connector\) can(?:'|&#39;)t add tira yet: [^<]*public https address[^<]*That comes once tira is hosted\./);

@@ -200,7 +200,7 @@ export function missing(a: PageAction): string | undefined {
   if (a.event === "BLOCK" && blockerOf(a) !== undefined) return undefined;
   const v = a.payload[field.name];
   if (typeof v === "string" && v.trim() !== "") return undefined;
-  if (field.name === "evidenceRef") return 'Add the proof of work: evidenceRef="…" (a file, link or note anyone can re-check).';
+  if (field.name === "evidenceRef") return "Pick the proof of work: one of the task's commits.";
   if (field.name === "parent_id") return 'Say where it goes: parent_id="…" (the task it becomes a subtask of).';
   return 'Add the reason: reason="…" (words, not only spaces).';
 }
