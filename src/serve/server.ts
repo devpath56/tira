@@ -38,8 +38,8 @@ import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { ASSIGNEE, COMMENT, ESTIMATE, MAX_COMMENT, MAX_DESCRIPTION, MAX_STEP, MAX_STEPS, TICKET, TICKET_TITLE } from "../tables/tickets.ts";
-import { commitsOf, firstLine, shortSha, ticketsOf, type Commit, type Ticket } from "../fold/tickets.ts";
-import { reportLines, sync } from "../sync/sync.ts";
+import { commitsOf, firstLine, shortSha, ticketsOf, whereFound, type Commit, type Ticket } from "../fold/tickets.ts";
+import { lookedSaid, lookForCommits } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { access, appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
@@ -145,10 +145,11 @@ export function workspaceList(r: FoldResult, streams: readonly string[], home: s
 
 // waitables: to block, the open tasks it could wait on instead of a new ticket; parents: to place an
 // idea, the tasks tira found for it
-// commits: to complete, the task's commits the sync kept, its only proof of work (src/tables/tickets.ts)
+// commits: to complete, the task's commits tira kept, its only proof of work (src/tables/tickets.ts);
+// canLook: the project links a repo, so the dialog can look on GitHub for newer ones
 // ticket: what the task's ticket says (src/fold/tickets.ts), shown beside the move
 // closes: the finished parents tira closes first, citing the move
-interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; commits?: Commit[]; ticket?: Ticket; closes?: string[] }
+interface Packet { ok: boolean; title: string; verdict: string; hint?: string; seen: number; brief?: Brief; command?: string; suggestions: string[]; found?: boolean; waitables?: string[]; parents?: string[]; commits?: Commit[]; canLook?: boolean; ticket?: Ticket; closes?: string[] }
 
 export interface PacketAsk { wp: WritePath; r: FoldResult; events: readonly StoredEvent[]; registry: Registry; stream: string; actor: string; type: string; id: string; event: string }
 
@@ -246,7 +247,7 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   return {
     ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
     ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
-    ...(event === "COMPLETE" ? { commits: commitsOf(r, stream).get(id) ?? [] } : {}),
+    ...(event === "COMPLETE" ? { commits: commitsOf(r, stream).get(id) ?? [], canLook: workspaceOf(r, stream)?.repo !== undefined } : {}),
     ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
@@ -329,7 +330,7 @@ export function waitable(r: FoldResult, stream: string, id: string): string[] {
 }
 
 // values: what the dialog's fields held when it comes back (a value missing, a moved log)
-// synced: what the sync just before a Complete said (it brings the task's commits in from GitHub)
+// synced: what the Complete dialog's look on GitHub for the task's commits said
 interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string; values?: Record<string, string>; synced?: string }
 
 // The decision: tira recommends (read-only) beside your action (the command, editable), then
@@ -397,19 +398,28 @@ function fieldHtml(name: string, label: string, value: string, placeholder: stri
   return `<label class="field" data-field="${name}"><span>${label}</span><input type="text" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false"${extra}></label>`;
 }
 
-// To complete: the proof of work is one of the task's commits, as the sync just brought them in
-// from GitHub (newest first, the newest picked); none yet says how to get one there.
-function commitsHtml(p: Packet, opts: ConfirmOpts): string {
+// To complete: the proof of work is one of the task's commits (newest first, the newest picked).
+// The dialog opens on the ones tira has, saying it's looking on GitHub for newer ones (the page's
+// script asks, POST /commits, and puts what comes back in place); "Look on GitHub again" asks the
+// same without the script. None yet says how to get one there.
+function commitsStatusHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
+  if (opts.synced) return `<p class="commits-status" data-commits-status role="status">${esc(opts.synced)}</p>`;
+  if (!p.canLook || !fragment) return "";
+  const looking = `Looking on GitHub for ${opts.id}'s newest commits: the proof of work is one of them.`;
+  return `<p class="commits-status" data-commits-status data-commits-fetch="${esc(withQ("/commits", opts.q ?? ""))}" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span>${esc(looking)}</p>`;
+}
+function commitsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const commits = p.commits ?? [];
-  const synced = opts.synced ? `<p class="cmd-help" data-synced>${esc(opts.synced)}</p>` : "";
+  const status = commitsStatusHtml(p, opts, fragment);
+  const again = p.canLook ? `<button type="submit" class="how" formaction="${esc(withQ("/commits", opts.q ?? ""))}" formnovalidate data-commits-again>Look on GitHub again</button>` : "";
   const legend = `Proof of work <small>a commit on ${esc(opts.id)}</small>`;
   if (commits.length === 0) {
-    const how = `No commits for ${opts.id} yet. Push the work to a branch named after it (${opts.id}), or write "tira: ${opts.id}" in its pull request, then Complete again: tira syncs first.`;
-    return `<div class="field commits" data-proof><span>${legend}</span><p class="tk-none" data-no-commits>${esc(how)}</p>${synced}</div>`;
+    const how = `No commits for ${opts.id} yet. Push the work to a branch named after it (${opts.id}), or write "tira: ${opts.id}" in its pull request, then look again.`;
+    return `<div class="field commits" data-proof><span>${legend}</span>${status}<p class="tk-none" data-no-commits>${esc(how)}</p>${again}</div>`;
   }
   const picked = opts.values?.evidenceRef ?? commits[0]?.sha;
-  const one = (c: Commit) => `<label class="commit"><input type="radio" name="evidenceRef" value="${esc(c.sha)}"${c.sha === picked ? " checked" : ""}><code>${esc(shortSha(c.sha))}</code><span>${esc(firstLine(c.message))}</span><small>#${c.pr}</small></label>`;
-  return `<fieldset class="field commits" data-proof><legend>${legend}</legend>${commits.map(one).join("")}${synced}</fieldset>`;
+  const one = (c: Commit) => `<label class="commit"><input type="radio" name="evidenceRef" value="${esc(c.sha)}"${c.sha === picked ? " checked" : ""}><code>${esc(shortSha(c.sha))}</code><span>${esc(firstLine(c.message))}</span><small>${esc(whereFound(c))}</small></label>`;
+  return `<fieldset class="field commits" data-proof><legend>${legend}</legend>${status}${commits.map(one).join("")}${again}</fieldset>`;
 }
 
 // To add a subtask: its name; under work already under way it's marked as found, elsewhere a chip marks it.
@@ -434,7 +444,7 @@ function moveFieldsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string
       + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`)
       + fieldHtml("reason", "Reason <small>optional: waiting on it, if left empty</small>", v.reason ?? "", "why it's blocked");
   }
-  if (opts.event === "COMPLETE") return commitsHtml(p, opts);
+  if (opts.event === "COMPLETE") return commitsHtml(p, opts, fragment);
   if (verb.creates) return subtaskFieldHtml(p, opts, fragment);
   if (!verb.field) return "";
   const proposed = /parent_id="((?:[^"\\]|\\.)*)"/.exec(p.command ?? "")?.[1] ?? ""; // tira's proposal for an idea's parent
@@ -457,9 +467,7 @@ function packetBody(p: Packet, opts: ConfirmOpts, fragment: boolean): string {
   const comment = opts.type === IDEA || !p.ok ? "" : `<label class="field comment-field" data-comment-field><span>Comment <small>optional: on the ticket, where its agent reads it</small></span><textarea name="comment" rows="3" maxlength="2000" placeholder="Feedback, context, what to watch for">${esc(opts.values?.comment ?? "")}</textarea></label>`;
   const fields = moveFieldsHtml(p, opts, fragment) + comment;
   const right = fields === "" ? "" : `<section class="your-part" aria-label="Your part" data-you-part>${fields}</section>`;
-  const noProof = opts.event === "COMPLETE" && opts.type !== IDEA && (p.commits ?? []).length === 0; // nothing to complete it with yet
-  const disabled = noProof ? " disabled" : "";
-  const button = p.ok ? `<button class="act primary" type="submit"${disabled}>${esc(verb.label)}</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
+  const button = p.ok ? `<button class="act primary" type="submit">${esc(verb.label)}</button> ${leave("Not now")}` : `<button class="act" type="submit">Check again</button> ${close}`;
   return `${head}<form method="post" action="${esc(withQ("/act", opts.q ?? ""))}" class="you-decide" aria-label="Your decision" data-you>${hidden}<div class="split">${left}${right}</div>`
     + `<div class="run">${button}</div></form></div>`;
 }
@@ -729,13 +737,21 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
 
   // GET /confirm: the decision; ?fragment=1 is just the packet, for the dialog the live page
   // opens over itself
-  // To complete a task, tira syncs with GitHub and Jira first, so its newest commits are there to
-  // pick from (the proof of work is one of them).
-  const confirm = async (req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
+  const confirm = async (_req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
     const at = { type: url.searchParams.get("type") ?? "node", id: url.searchParams.get("id") ?? "", event: url.searchParams.get("event") ?? "" };
-    const actor = actorNow();
-    const synced = at.event === "COMPLETE" && actor !== undefined && opts.registry.get(at.type)?.tree ? await syncFor(ws.stream, actor, who(req).login) : undefined;
-    await decide(res, ws, at, { moved: url.searchParams.get("moved") === "1", ...(synced ? { synced } : {}) }, url.searchParams.get("fragment") === "1");
+    await decide(res, ws, at, { moved: url.searchParams.get("moved") === "1" }, url.searchParams.get("fragment") === "1");
+  };
+
+  // POST /commits: the Complete dialog's look on GitHub for the task's newest commits (only this
+  // task's: src/sync/commits.ts), kept for it; the decision comes back with them and what the look
+  // said (the page's script puts the commits and the form's seq in place, keeping what you typed).
+  const commitsPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const at = { type: form.get("type") ?? "node", id: form.get("id") ?? "", event: "COMPLETE" };
+    if (actorNow() === undefined) { send(res, 401, text, "sign in with GitHub first (Integrations)\n"); return; }
+    const synced = await commitsSaid(ws.stream, at.id, who(req).login);
+    await decide(res, ws, at, { synced, values: valuesOf(form) }, form.get("fragment") === "1");
   };
 
   // POST /act, in stages: the form (from this page only), what it asks for, what stops it
@@ -1015,19 +1031,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // Cancel and the tira mark go back to. It offers what your accounts hold: your GitHub repos, and
   // your Jira's projects (or a way to connect it). No one who can act yet: the landing first.
   const acc = accounts(opts.links);
-  // Sync, for a move that needs it fresh (Complete: the task's commits, from GitHub): what it said,
-  // or undefined when the project links nothing to sync with. As the person (or agent) acting.
-  const syncFor = async (stream: string, actor: string, login: string | undefined): Promise<string | undefined> => {
-    const ws = workspaceOf((await now(stream)).r, stream);
-    if (!ws?.repo && !ws?.jira_project) return undefined;
-    try {
-      const jira = acc.jiraOf(login, ws);
-      const rep = await sync({ store: opts.store, registry: opts.registry, stream, by: actor, ...(jira ? { jira } : {}), ...(ws.repo ? { github: acc.githubOf(login) } : {}) });
-      return `Synced just now: ${reportLines(rep).join("; ")}.`;
-    } catch (err) {
-      return `Couldn't sync just now (${(err as Error).message}).`;
-    }
-  };
+  // A task's newest commits, looked up on GitHub (only that task's) and kept: what the look said.
+  const commitsSaid = (stream: string, task: string, login: string | undefined) =>
+    lookedSaid(task, () => lookForCommits(opts.store, opts.registry, stream, task, acc.githubOf(login)));
   // the page's Jira: your connected site's projects, else a way to sign in, else that it isn't set up
   const newProjectJira = async (login: string | undefined, host: string, ws: Workspace): Promise<NewProject["jira"]> => {
     if (login) return acc.jira(login, host, withQ("/projects/new", ws.q));
@@ -1167,9 +1173,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       return f;
     },
   }, who);
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, ...integrations };
+  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /commits": commitsPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
-  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), syncFor: (stream, actor) => syncFor(stream, actor, undefined) });
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (stream, task) => commitsSaid(stream, task, undefined) });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");

@@ -339,6 +339,37 @@ test("the GitHub client reads pull requests and their commit messages through gh
   assert.deepEqual(asked.map((a) => a[1]), ["repos/acme/app/pulls?state=all&sort=updated&direction=desc&per_page=50", "repos/acme/app/pulls/7/commits?per_page=100"]);
 });
 
+test("one task's commits, straight from GitHub: its pull requests (by branch, by \"tira: <task>\", or linked already) and a branch named after it with none, since the default branch", async () => {
+  const asked: string[] = [];
+  const c = (sha: string, message: string) => ({ sha, commit: { message } });
+  const gh = new GhCli(async (args) => {
+    const path = args[1] ?? "";
+    asked.push(path);
+    if (path.startsWith("repos/acme/app/pulls?")) return JSON.stringify([
+      { number: 7, title: "Pagination", html_url: "u7", state: "open", head: { ref: "isha/table" } },
+      { number: 8, title: "Polish", body: "tira: table.", html_url: "u8", state: "closed", head: { ref: "polish" } },
+      { number: 9, title: "Unrelated", body: "the table header", html_url: "u9", state: "open", head: { ref: "header" } },
+      { number: 10, title: "Old", html_url: "u10", state: "closed", head: { ref: "old" } },
+    ]);
+    if (path.startsWith("repos/acme/app/branches")) return JSON.stringify([{ name: "main" }, { name: "isha/table" }, { name: "wip/table" }, { name: "header" }]);
+    if (path === "repos/acme/app") return JSON.stringify({ default_branch: "main" });
+    if (path === "repos/acme/app/pulls/7/commits?per_page=100") return JSON.stringify([c("7".repeat(40), "pagination")]);
+    if (path === "repos/acme/app/pulls/8/commits?per_page=100") return JSON.stringify([c("8".repeat(40), "polish"), { sha: "not-a-sha" }]);
+    if (path === "repos/acme/app/pulls/10/commits?per_page=100") return JSON.stringify([c("a".repeat(40), "old work")]);
+    if (path === "repos/acme/app/compare/main...wip%2Ftable") return JSON.stringify({ commits: [c("b".repeat(40), "on a branch, no pull request yet")] });
+    throw new Error(`unexpected ${path}`);
+  });
+  const found = await gh.taskCommits("acme/app", "table", [10]);
+  assert.deepEqual(found, [
+    { sha: "7".repeat(40), message: "pagination", pr: 7, branch: "isha/table" },
+    { sha: "8".repeat(40), message: "polish", pr: 8, branch: "polish" },
+    { sha: "a".repeat(40), message: "old work", pr: 10, branch: "old" }, // linked to it already
+    { sha: "b".repeat(40), message: "on a branch, no pull request yet", branch: "wip/table" },
+  ]);
+  assert.equal(asked.length, 7); // three at once, then one per pull request or branch: never every pull request's commits
+  assert.ok(!asked.includes("repos/acme/app/pulls/9/commits?per_page=100"), "a pull request that only mentions it isn't asked");
+});
+
 // ---------- on the page ----------
 
 // GitHub's device sign-in and Atlassian's round trip, as stand-ins
@@ -908,12 +939,28 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
     assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" target="_blank" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
     assert.doesNotMatch(board, /class="chip" title="pr:|chip" title="jira-issue:/); // links show on their tasks, not as Lanes chips
-    // completing the task syncs first, and offers the pull request's commits as its proof (the newest picked)
+    // Complete opens at once, saying it's looking on GitHub for the task's newest commits; the look
+    // (the page's script posts it) brings the pull request's commit, the newest picked
     await s.send("table", "START");
     s.github.add({ number: 7, title: "tira: table", state: "closed", mergedAt: "2026-10-21T12:00:00Z", commits: ["table done"], shas: ["7".repeat(40)] });
-    const complete = (await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body;
-    assert.match(complete, new RegExp(`<input type="radio" name="evidenceRef" value="${"7".repeat(40)}" checked><code>7777777</code><span>table done</span><small>#7</small>`));
-    assert.match(complete, /<p class="cmd-help" data-synced>Synced just now: synced with GitHub acme\/app and Jira DOG; 1 commit kept for table[^<]*<\/p>/);
+    const opened = (await s.http("GET", "/confirm?type=node&id=table&event=COMPLETE&fragment=1")).body;
+    assert.match(opened, /<p class="commits-status" data-commits-status data-commits-fetch="\/commits" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"><\/span>Looking on GitHub for table(?:'|&#39;)s newest commits: the proof of work is one of them\.<\/p>/);
+    assert.match(opened, /data-no-commits[^]*?<button type="submit" class="how" formaction="\/commits" formnovalidate data-commits-again>Look on GitHub again<\/button>/);
+    const seen = /name="seen" value="(\d+)"/.exec(opened)?.[1] ?? "";
+    const looked = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", seen, dialog: "1", fragment: "1" })).body;
+    assert.match(looked, new RegExp(`<input type="radio" name="evidenceRef" value="${"7".repeat(40)}" checked><code>7777777</code><span>table done</span><small>#7</small>`));
+    assert.match(looked, /<p class="commits-status" data-commits-status role="status">Found 1 commit for table on GitHub just now \(1 new\)\.<\/p>/);
+    assert.notEqual(/name="seen" value="(\d+)"/.exec(looked)?.[1], seen, "keeping the commit moved the log: the form's seq with it");
+    assert.match((await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body, /Found 1 commit for table on GitHub just now\.<\/p>/); // kept once
+    s.github.fail = "rate limited";
+    const failed = (await s.post("/commits", { type: "node", id: "table", event: "COMPLETE", fragment: "1" })).body;
+    assert.match(failed, /data-commits-status role="status">Couldn(?:'|&#39;)t reach GitHub just now \(rate limited\): these are the commits tira already has\.<\/p>[^]*?value="7{40}" checked/);
+    s.github.fail = undefined;
+    // the page's script: the look runs when the dialog opens, and what comes back goes in place with the form's seq
+    const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
+    assert.match(app, /if \(confirmBox\.querySelector\("\[data-commits-fetch\]"\)\) void lookForCommits\(\);/);
+    assert.match(app, /confirmBox\.querySelector\("\[data-proof\]"\)\?\.replaceWith\(document\.importNode\(fresh, true\)\);/);
+    assert.match(app, /if \(seen instanceof HTMLInputElement && mine instanceof HTMLInputElement\) mine\.value = seen\.value;/);
     // disconnect drops the Atlassian sign-in
     await s.post("/integrations/jira/disconnect", {});
     assert.equal(atlassianAuth("isha-gh", s.env), undefined);

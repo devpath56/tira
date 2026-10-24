@@ -9,9 +9,10 @@
 //            person on the page.
 //   comment  any number per task: {task, text}, written by a person (feedback for whoever works
 //            on it) or an agent (its reply), as themselves. Agents read them (tira's MCP server).
-//   commit   one per (commit, task): {task, repo, sha, pr, message}, a commit on a pull request
-//            that names the task, as the sync found it on GitHub. A task is completed with one of
-//            them as its proof of work.
+//   commit   one per (commit, task): {task, repo, sha, pr?, branch?, message}, a commit on a pull
+//            request that names the task, or on a branch named after it, as tira found it on GitHub
+//            (the sync, or the Complete dialog's own look). A task is completed with one of them as
+//            its proof of work.
 //
 // Tickets and comments are written by people and agents, never the sync; commits only by the sync.
 import type { GuardFn, Table } from "./table.ts";
@@ -46,7 +47,8 @@ export const TICKET_GUARDS: Record<string, GuardFn> = {
   commentWellFormed: ({ actor, payload }) => byPerson(actor) && s(payload.task) && s(payload.text) && (payload.text as string).length <= MAX_COMMENT,
   commitSynced: ({ actor, payload }) =>
     actor === SYNC && s(payload.task) && typeof payload.sha === "string" && SHA.test(payload.sha)
-    && typeof payload.repo === "string" && REPO.test(payload.repo) && Number.isInteger(payload.pr) && typeof payload.message === "string",
+    && typeof payload.repo === "string" && REPO.test(payload.repo) && (payload.pr === undefined || Number.isInteger(payload.pr))
+    && (payload.branch === undefined || typeof payload.branch === "string") && typeof payload.message === "string",
 };
 
 export function ticketTypes(chart: (name: string) => Table): EntityTypeDef[] {

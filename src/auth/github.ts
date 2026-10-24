@@ -4,7 +4,7 @@
 // flow: tira asks GitHub for a short code, the person approves it at github.com/login/device, and
 // tira polls until GitHub hands over a token. The token then lists the person's repos (to link one)
 // and reads pull requests (to sync), as them. https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
-import type { GitHubClient, Pull } from "../sync/github.ts";
+import { taskCommitsVia, type GitHubClient, type Pull } from "../sync/github.ts";
 
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 const realFetch = fetch as unknown as Fetch;
@@ -100,6 +100,7 @@ export class GitHubDevice implements GitHubAuthApi {
   // Pull requests read with the person's own token (the sync's GitHub side once they've signed in).
   pullsAs(token: string, limit = 50): GitHubClient {
     return {
+      taskCommits: (repo, task, linked) => taskCommitsVia((path) => this.get(token, `/${path}`), repo, task, linked),
       pulls: async (repo: string): Promise<Pull[]> => {
         const raw = (await this.get(token, `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=${limit}`)) as { number: number; title?: string; body?: string | null; html_url: string; state: string; merged_at?: string | null; head?: { ref?: string } }[];
         return Promise.all(raw.map(async (p) => {

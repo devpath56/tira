@@ -12,8 +12,8 @@ import { addComment, addSubtask, blockTask, completeTask, fileIdea, startTask } 
 
 // What every tool works in: the project's stream, the agent it acts as, (from tira mcp) whether
 // that agent is still connected: revoked in Project settings, its next call is refused; and how to
-// sync the project with GitHub and Jira (to complete a task: its newest commits), when it can.
-export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string; stillConnected?: () => Promise<boolean>; syncNow?: () => Promise<string | undefined> }
+// look on GitHub for a task's newest commits (to complete it with one), when it can.
+export interface AgentContext { store: EventStore; registry: Registry; stream: string; actor: string; stillConnected?: () => Promise<boolean>; fetchCommits?: (task: string) => Promise<string | undefined> }
 
 export { agentNameProblem } from "./names.ts";
 
@@ -61,7 +61,7 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ id }) => answer(await guarded(ctx, () => startTask(ctx, id))));
   server.registerTool("complete_task", {
     title: "Complete a task",
-    description: "Mark a task Done. The proof of work is one of the task's commits: push your work to a branch named after the task (or write \"tira: <task>\" in its pull request), then pass the commit's id. tira syncs with GitHub first; get_task lists the commits it has. tira refuses any other proof, before the task is started, or while its subtasks are open.",
+    description: "Mark a task Done. The proof of work is one of the task's commits: push your work to a branch named after the task (or write \"tira: <task>\" in its pull request), then pass the commit's id. tira looks on GitHub for the task's newest commits first; get_task lists the ones it has. tira refuses any other proof, before the task is started, or while its subtasks are open.",
     inputSchema: z.object({ id: taskId, proof: words("the commit id (its full sha, or its first 7 or more characters) of the work on this task"), note: words("optional: a note for the task's history").optional() }),
     annotations: { ...WRITES, idempotentHint: true },
   }, async ({ id, proof, note }) => answer(await guarded(ctx, () => completeTask(ctx, id, proof, note))));

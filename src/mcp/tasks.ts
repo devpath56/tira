@@ -5,7 +5,7 @@ import { fold } from "../fold/fold.ts";
 import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
 import { attentionSince, proofsOf, trails } from "../render/html.ts";
 import { taskIndex, type TaskEntry } from "../serve/server.ts";
-import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import type { AgentContext } from "./server.ts";
 
 // A tool's answer: its text, and whether it did what was asked (false: the tool reports an error).
@@ -108,8 +108,8 @@ const commentLines = (list: readonly Comment[]) =>
 // the commits complete_task takes as proof (as the last sync found them)
 const commitLines = (id: string, list: readonly Commit[]) =>
   list.length === 0
-    ? [`Commits: none yet (push to a branch named ${id}, or write "tira: ${id}" in a pull request; complete_task syncs first)`]
-    : ["Commits (complete_task takes one as proof):", ...list.slice(0, 10).map((x) => `  ${shortSha(x.sha)} ${firstLine(x.message)} (#${x.pr})`)];
+    ? [`Commits: none yet (push to a branch named ${id}, or write "tira: ${id}" in a pull request; complete_task looks on GitHub first)`]
+    : ["Commits (complete_task takes one as proof):", ...list.slice(0, 10).map((x) => `  ${shortSha(x.sha)} ${firstLine(x.message)} (${whereFound(x)})`)];
 
 // one task: its state and place, its ticket, its subtasks, why it's blocked and on what, its proof,
 // its comments and its history

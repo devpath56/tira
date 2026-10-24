@@ -147,7 +147,7 @@ export async function sync(o: SyncOptions): Promise<SyncReport> {
       if (keptNow.has(id) || r.entities.some((e) => e.stream === o.stream && e.type === COMMIT && e.id === id)) continue;
       keptNow.add(id);
       const message = (p.commits[i] ?? "").slice(0, 300);
-      if (await asSync(`keep commit ${sha.slice(0, 7)} for ${task}`, { stream: o.stream, kind: "create", entity: { type: COMMIT, id }, payload: { task, repo, sha, pr: p.number, message } })) {
+      if (await asSync(`keep commit ${sha.slice(0, 7)} for ${task}`, { stream: o.stream, kind: "create", entity: { type: COMMIT, id }, payload: { task, repo, sha, pr: p.number, ...(p.branch ? { branch: p.branch } : {}), message } })) {
         (report.commits ??= []).push({ task, sha });
       }
     }

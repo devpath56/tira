@@ -5,7 +5,7 @@ import { COMMENT, COMMIT, TICKET } from "../tables/tickets.ts";
 
 export interface Ticket { version: number; title?: string; description?: string; steps: string[]; estimate?: string; assignee?: string; by?: string }
 export interface Comment { id: string; text: string; by: string; seq: number; at: string }
-export interface Commit { sha: string; message: string; pr: number; repo: string; seq: number }
+export interface Commit { sha: string; message: string; pr?: number; branch?: string; repo: string; seq: number }
 
 const str = (b: Record<string, unknown>, k: string) => (typeof b[k] === "string" && (b[k] as string) !== "" ? { [k]: b[k] as string } : {});
 
@@ -44,7 +44,8 @@ export function commitsOf(r: FoldResult, stream: string): Map<string, Commit[]> 
     if (e.stream !== stream || e.type !== COMMIT) continue;
     const b = e.born ?? {};
     if (typeof b.task !== "string" || typeof b.sha !== "string") continue;
-    out.set(b.task, [...(out.get(b.task) ?? []), { sha: b.sha, message: String(b.message ?? ""), pr: Number(b.pr), repo: String(b.repo ?? ""), seq: e.createdSeq }]);
+    const where = { ...(Number.isInteger(b.pr) ? { pr: b.pr as number } : {}), ...(typeof b.branch === "string" && b.branch !== "" ? { branch: b.branch } : {}) };
+    out.set(b.task, [...(out.get(b.task) ?? []), { sha: b.sha, message: String(b.message ?? ""), ...where, repo: String(b.repo ?? ""), seq: e.createdSeq }]);
   }
   for (const list of out.values()) list.sort((a, b) => b.seq - a.seq);
   return out;
@@ -53,3 +54,5 @@ export function commitsOf(r: FoldResult, stream: string): Map<string, Commit[]> 
 // A commit as people read it: its short id and the first line of its message.
 export const shortSha = (sha: string) => sha.slice(0, 7);
 export const firstLine = (message: string) => message.split("\n", 1)[0] ?? "";
+// where a commit was found: its pull request, else its branch
+export const whereFound = (c: Commit) => (c.pr === undefined ? c.branch ?? "" : `#${c.pr}`);

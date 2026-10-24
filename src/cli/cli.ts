@@ -31,6 +31,7 @@ import { JIRA_PROJECT, JIRA_SITE, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from ".
 import { reportLines, sync, workspaceOf } from "../sync/sync.ts";
 import { JiraCloud, type JiraClient } from "../sync/jira.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
+import { lookedSaid, lookForCommits } from "../sync/commits.ts";
 import { jiraLogin, pageToken, saveJiraLogin, tiraHome, type JiraLogin } from "../sync/credentials.ts";
 import { join } from "node:path";
 import { IDEA, OPEN_STAGES, ideaId, ideaRows, placement, stageWord, whatNext, type IdeaFile, type IdeaRow, type Placement } from "../fold/ideas.ts";
@@ -385,21 +386,6 @@ async function connectJira(store: ClosableStore, registry: Registry, stream: str
   saveJiraLogin(site, login, io.env);
   io.out(`connected to Jira ${site} as ${me.name}; the token is kept in ${join(tiraHome(io.env), "credentials.json")}, readable only by you`);
   return 0;
-}
-
-// An agent's sync (tira mcp's complete_task, for the task's newest commits): what it said, or
-// undefined when the project links nothing to sync with. As the agent, with tira's own GitHub and Jira sign-ins.
-async function syncForAgent(store: ClosableStore, registry: Registry, stream: string, actor: string, io: Io): Promise<string | undefined> {
-  const ws = workspaceOf(fold(await store.readStream(stream), registry), stream);
-  if (!ws?.repo && !ws?.jira_project) return undefined;
-  try {
-    const login = ws.jira_site ? jiraLogin(ws.jira_site, io.env) : undefined;
-    const jira = ws.jira_site && login ? io.jira?.(ws.jira_site, login) ?? new JiraCloud(ws.jira_site, login.email, login.token) : undefined;
-    const rep = await sync({ store, registry, stream, by: actor, ...(jira ? { jira } : {}), ...(ws.repo ? { github: io.github ?? new GhCli() } : {}) });
-    return `Synced just now: ${reportLines(rep).join("; ")}.`;
-  } catch (err) {
-    return `Couldn't sync just now (${(err as Error).message}).`;
-  }
 }
 
 async function syncCmd(store: ClosableStore, registry: Registry, stream: string, values: Values, io: Io): Promise<number> {
@@ -917,7 +903,7 @@ async function mcp(open: () => ClosableStore, registry: Registry, values: Values
     io.err(`tira: MCP server for ${stream}, acting as ${actor} (on stdio; it stops when its client does)`);
     await new Promise<void>((resolve) => {
       const handle = serveStdio(() => {
-        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected, syncNow: () => syncForAgent(store, registry, stream, actor, io) });
+        const server = tiraMcpServer({ store, registry, stream, actor, stillConnected, fetchCommits: (task: string) => lookedSaid(task, () => lookForCommits(store, registry, stream, task, io.github ?? new GhCli())) });
         server.server.onclose = () => resolve();
         return server;
       });

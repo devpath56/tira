@@ -52,9 +52,9 @@ async function world() {
 }
 
 // tira mcp's server for the project, with the official MCP client on the other end of a pipe
-async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>, syncNow?: () => Promise<string | undefined>) {
+async function connected(w: Awaited<ReturnType<typeof world>>, actor = "claude-code", stillConnected?: () => Promise<boolean>, fetchCommits?: (task: string) => Promise<string | undefined>) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}), ...(syncNow ? { syncNow } : {}) }).connect(serverSide);
+  await tiraMcpServer({ store: w.store, registry: w.registry, stream: S, actor, ...(stillConnected ? { stillConnected } : {}), ...(fetchCommits ? { fetchCommits } : {}) }).connect(serverSide);
   const client = new Client({ name: "tira-tests", version: "1.0.0" });
   await client.connect(clientSide);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -105,7 +105,7 @@ test("tira mcp reads the board: what's next, the task list in the board's order,
     assert.equal((await call("list_tasks", { state: "weird" })).error, true); // the schema says no
     const api = await call("get_task", { id: "api" });
     assert.equal(api.error, false);
-    assert.match(api.text, /^api · blocked · under site\nTicket: no description, steps, estimate or assignee yet\.\nBlocked: waiting on the key\nCommits: none yet \(push to a branch named api, or write "tira: api" in a pull request; complete_task syncs first\)\nComments: none yet \(add_comment writes one\)\.\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
+    assert.match(api.text, /^api · blocked · under site\nTicket: no description, steps, estimate or assignee yet\.\nBlocked: waiting on the key\nCommits: none yet \(push to a branch named api, or write "tira: api" in a pull request; complete_task looks on GitHub first\)\nComments: none yet \(add_comment writes one\)\.\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
     assert.deepEqual(await call("get_task", { id: "nope" }), { error: true, text: "There is no task nope in demo: list_tasks shows them." });
     // the one in progress, not listed again as next; once done, its proof
     await w.send("header", "START");
@@ -198,25 +198,25 @@ test("agents read a ticket: its words, its comments, what's assigned to them and
   assert.match(page, /<li class="cm" data-comment><div class="cm-h"><b>claude-code<\/b><span class="chip agent-chip">agent<\/span>/); // people see it, marked as an agent's
 });
 
-test("complete_task syncs with GitHub first when the commit isn't there yet, then takes it; a sync that brings none says so", async () => {
+test("complete_task looks on GitHub for the task's commits first when it doesn't know the one given, then takes it; a look that finds none says so", async () => {
   const w = await world();
   let sha = "";
   const synced: string[] = [];
-  const { call } = await connected(w, "claude-code", undefined, async () => {
-    synced.push("sync");
+  const { call } = await connected(w, "claude-code", undefined, async (task) => {
+    synced.push(task);
     if (synced.length === 1) sha = await w.commit("footer", 5, "footer done");
-    return "Synced just now: 1 commit kept for footer.";
+    return `Found 1 commit for ${task} on GitHub just now (1 new).`;
   });
   await w.send("footer", "START");
   assert.match((await call("complete_task", { id: "footer", proof: "00000005dddddd" })).text, /^Complete footer: done \(seq \d+\)\.$/);
-  assert.deepEqual([synced.length, ((await w.store.readStream(S)).at(-1)?.data.payload as { evidenceRef?: string } | undefined)?.evidenceRef], [1, sha]); // a short id, written as the whole sha
+  assert.deepEqual([synced, ((await w.store.readStream(S)).at(-1)?.data.payload as { evidenceRef?: string } | undefined)?.evidenceRef], [["footer"], sha]); // only that task's; a short id, written as the whole sha
   // already there: no sync needed
   await w.send("header", "START");
   await w.commit("header", 6);
   assert.match((await call("complete_task", { id: "header", proof: "00000006dddddd" })).text, /^Complete header: done/);
   assert.equal(synced.length, 1);
   // not there after the sync either: said, with what the sync said
-  assert.match((await call("complete_task", { id: "site", proof: "1234567" })).text, /^site has no commits yet \(Synced just now: 1 commit kept for footer\.\): push the work/);
+  assert.match((await call("complete_task", { id: "site", proof: "1234567" })).text, /^site has no commits yet \(Found 1 commit for site on GitHub just now \(1 new\)\.\): push the work/);
 });
 
 test("tira mcp end to end, as Claude Code starts it: over stdio, on Postgres, with the agent's token (the project and the agent come from it); it says so on stderr only, a revoked agent's next call is refused, and it stops when its client does", { skip: needsPg }, async () => {

@@ -39,16 +39,16 @@ function webRequest(req: IncomingMessage, url: URL): Request {
   return new Request(url, { method: req.method ?? "POST", headers, ...(body ? { body, duplex: "half" } : {}) } as RequestInit);
 }
 
-// syncFor: sync the project as the agent (complete_task brings the task's newest commits in first)
-export interface McpHttp { store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; syncFor?: (stream: string, actor: string) => Promise<string | undefined> }
+// commitsFor: look on GitHub for a task's newest commits (complete_task, before it takes one)
+export interface McpHttp { store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; commitsFor?: (stream: string, task: string) => Promise<string | undefined> }
 export type McpRoute = ((req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>) & { close: () => Promise<void> };
 
 export function mcpRoute(o: McpHttp): McpRoute {
   const handler = createMcpHandler((ctx) => {
     const agent = ctx.authInfo?.extra?.agent as AgentToken | undefined;
     if (!agent) throw new Error("tira: an MCP request reached the server without its agent");
-    const syncFor = o.syncFor;
-    return tiraMcpServer({ store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent, ...(syncFor ? { syncNow: () => syncFor(agent.project, agent.agent) } : {}) });
+    const commitsFor = o.commitsFor;
+    return tiraMcpServer({ store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent, ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent.project, task) } : {}) });
   }, { maxRequestBodySize: MAX_BODY });
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL) => {
     const origin = req.headers.origin;

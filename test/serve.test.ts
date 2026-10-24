@@ -169,8 +169,9 @@ test("every decision shows the ticket beside what the move needs, and a comment:
     assert.doesNotMatch(early.body, /class="verdict/); // allowed: no word from tira
     assert.match(early.body, /<input type="hidden" name="seen" value="11"><input type="hidden" name="dialog" value="1">/);
     assert.match(early.body, /<input type="hidden" name="token" value="t0k3n">/);
-    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits for loading_state yet\. Push the work to a branch named after it \(loading_state\), or write &#34;tira: loading_state&#34; in its pull request, then Complete again: tira syncs first\.<\/p>/);
-    assert.match(early.body, /<button class="act primary" type="submit" disabled>Complete<\/button>/);
+    assert.match(early.body, /<p class="tk-none" data-no-commits>No commits for loading_state yet\. Push the work to a branch named after it \(loading_state\), or write &#34;tira: loading_state&#34; in its pull request, then look again\.<\/p>/);
+    assert.doesNotMatch(early.body, /data-commits-fetch|data-commits-again/); // no repo linked: nowhere to look
+    assert.match(early.body, /<button class="act primary" type="submit">Complete<\/button>/); // never greyed out: sent without a commit, it says so
     assert.match(early.body, /<label class="field comment-field" data-comment-field><span>Comment <small>optional: on the ticket, where its agent reads it<\/small><\/span><textarea name="comment"/);
     // with its ticket written and two commits kept: the work, and the newest commit picked
     await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", task: "loading_state", title: "Loading state for the cards", description: "A spinner while metrics load.", steps: "Add the spinner\nTest on a slow network", estimate: "2h", assignee: "isha" }).toString() });

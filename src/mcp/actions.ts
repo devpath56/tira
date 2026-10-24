@@ -51,7 +51,7 @@ export async function startTask(c: AgentContext, id: string): Promise<ToolText> 
 
 // complete: done, with proof of work anyone can re-check (and a note for the history, if given)
 // complete: the proof of work is one of the task's commits (its sha, or 7 or more of its first
-// characters); one tira hasn't seen yet makes it sync with GitHub first
+// characters); one tira hasn't seen yet makes it look on GitHub for the task's newest commits first
 export async function completeTask(c: AgentContext, id: string, proof: string, note?: string): Promise<ToolText> {
   const commitsNow = async () => commitsOf((await treeNow(c)).r, c.stream).get(id) ?? [];
   const row = (await treeNow(c)).rows.find((x) => x.id === id);
@@ -60,8 +60,8 @@ export async function completeTask(c: AgentContext, id: string, proof: string, n
   const match = (list: Commit[]) => (ref.length >= 7 ? list.filter((x) => x.sha.startsWith(ref)) : []);
   let commits = await commitsNow();
   let synced: string | undefined;
-  if (match(commits).length !== 1 && c.syncNow) {
-    synced = await c.syncNow();
+  if (match(commits).length !== 1 && c.fetchCommits) {
+    synced = await c.fetchCommits(id);
     commits = await commitsNow();
   }
   const found = match(commits);
