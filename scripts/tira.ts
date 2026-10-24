@@ -22,6 +22,7 @@ try {
 }
 
 const { run } = await import("../src/cli/cli.ts");
+const { closeAccounts } = await import("../src/sync/credentials.ts");
 // A secret typed at the terminal (tira connect-jira's API token): nothing echoes. Piped in, the
 // first line is read.
 const secret = (prompt: string) =>
@@ -62,3 +63,7 @@ process.exitCode = await run(process.argv.slice(2), {
   env: process.env,
   secret,
 });
+// People's accounts keep a Postgres pool of their own (credentials.ts): close it on the way out,
+// or the process waits out the pool's idle timeout, 10 seconds, before it exits (tira serve after
+// Ctrl-C, or any command that read an account).
+await closeAccounts();

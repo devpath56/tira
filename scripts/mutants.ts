@@ -829,6 +829,7 @@ const MUTANTS: Mutant[] = [
   { name: "proof: the dialog opens on the command, not the proof", file: "src/serve/app.mjs", find: "  if (proof) {\n    proof.value = valueIn(box.value, \"evidenceRef\");\n    return proof.focus();\n  }\n", replace: "" },
   { name: "proof: typing a proof jumps to the command", file: "src/serve/app.mjs", find: "fill(box, \"evidenceRef\", proof.value, false);", replace: "fill(box, \"evidenceRef\", proof.value);" },
   { name: "proof: a pull request picked as proof doesn't show in the field", file: "src/serve/app.mjs", find: "  if (chip.dataset.fill === \"evidenceRef\" && proof) proof.value = chip.dataset.value ?? \"\"; // a merged pull request as the proof\n", replace: "" },
+  { name: "cli: tira waits out its account connections before it exits", file: "scripts/tira.ts", find: "await closeAccounts();\n", replace: "", needs: "postgres" },
 ];
 // Equivalent, so not listed: dropping the chunks of an oversized body (server.ts readBody)
 // only saves memory; the 413 is the same either way.
