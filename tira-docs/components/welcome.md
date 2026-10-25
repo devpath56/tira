@@ -37,7 +37,7 @@ form can send you back only to tira's own steps.
 
 ## Devtool hook
 
-- `[data-landing]` on the landing's card; `[data-signin-start]` on Continue with GitHub; `[data-setup-github]` on the first-run form.
+- `[data-landing]` on the landing's card; `[data-signup-start]` on Sign up with GitHub (someone new, once there's an admin: a request the admin approves in Team), `[data-signin-start]` on Sign in (Continue with GitHub on a browser someone signed in on, which offers Sign in only); `[data-setup-github]` on the first-run form.
 - `[data-newcomer]` on who to ask for access; `[data-admin-email]` on the admin's email.
 - `[data-signin]` on the code step's card; `[data-user-code]` on the code; `[data-copy]` on Copy; `[data-open-github]` on Open GitHub; `[data-signin-status]` on the status line; `[data-signin-wait]` on the form that waits.
 - `[data-consent-page]` on the page that approves Claude's connection (at a public address): `[data-consent-who]` on who asked, `[data-consent]` on its form, `[data-consent-allow]` and `[data-consent-cancel]` on its buttons.

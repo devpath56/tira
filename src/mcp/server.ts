@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
-import { getTask, listTasks, LIST_STATES, nextTask, type ToolText } from "./tasks.ts";
+import { getTask, listTasks, LIST_STATES, nextTask, taskIdOf, type ToolText } from "./tasks.ts";
 import { addComment, addSubtask, blockTask, completeTask, fileIdea, fillTicket, startTask } from "./actions.ts";
 import { MAX_DESCRIPTION, MAX_STEP, MAX_STEPS } from "../tables/tickets.ts";
 
@@ -30,7 +30,7 @@ export const DISCONNECTED = "This agent was disconnected in Project settings →
 const READS = { readOnlyHint: true, openWorldHint: false };
 // writes change a task's state the board shows; none deletes anything (dropping a task is a person's)
 const WRITES = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
-const taskId = z.string().trim().min(1).describe("the task's id, as list_tasks shows it");
+const taskId = z.string().trim().min(1).describe("the task's id or its key (TIRA_…), as list_tasks shows them");
 const words = (what: string) => z.string().trim().min(1).max(500).describe(what);
 
 // The server for one connection (serveStdio builds one per client): the tools, each reading the
@@ -45,7 +45,7 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   const server = new McpServer({ name: "tira", version: "1.0.0", description: `tira tasks for the project ${ctx.stream}, as ${ctx.actor}` }, { capabilities: { tools: {} } });
   server.registerTool("next_task", {
     title: "What's next",
-    description: "The task being worked on in this project, the next one to pick up (in tira's order), and how many are blocked. Start here.",
+    description: "The task being worked on in this project, the next one to pick up (in tira's order), how many are blocked, what's assigned to you, and where someone mentioned you (@your-name). Start here.",
     annotations: READS,
   }, async () => answer(await guarded(ctx, () => nextTask(ctx))));
   server.registerTool("list_tasks", {
@@ -57,38 +57,38 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   server.registerTool("get_task", {
     title: "Show a task",
     description: "One task: its state and place in the tree, its subtasks, why it's blocked and what it waits on, its proof of work, and its full history (who did what, refusals included).",
-    inputSchema: z.object({ id: z.string().min(1).describe("the task's id, as list_tasks shows it") }),
+    inputSchema: z.object({ id: taskId }),
     annotations: READS,
-  }, async ({ id }) => answer(await guarded(ctx, () => getTask(ctx, id))));
+  }, async ({ id }) => answer(await guarded(ctx, async () => getTask(ctx, await taskIdOf(ctx, id)))));
   server.registerTool("start_task", {
     title: "Start a task",
     description: "Move a task to In progress, as you. One task can be in progress at a time: tira refuses a second and says which to finish or block first.",
     inputSchema: z.object({ id: taskId }),
     annotations: { ...WRITES, idempotentHint: true },
-  }, async ({ id }) => answer(await guarded(ctx, () => startTask(ctx, id))));
+  }, async ({ id }) => answer(await guarded(ctx, async () => startTask(ctx, await taskIdOf(ctx, id)))));
   server.registerTool("complete_task", {
     title: "Complete a task",
     description: "Mark a task Done. The proof of work is a commit or a pull request of the project's GitHub repo: the task's own (get_task lists them; tira looks on GitHub for its newest first) or any other, which tira checks on GitHub. tira refuses anything else, before the task is started, or while its subtasks are open.",
     inputSchema: z.object({ id: taskId, proof: words("a commit (its id, or its first 7 or more characters) or a pull request (#12, or its link) of the project's repo"), note: words("optional: a note for the task's history").optional() }),
     annotations: { ...WRITES, idempotentHint: true },
-  }, async ({ id, proof, note }) => answer(await guarded(ctx, () => completeTask(ctx, id, proof, note))));
+  }, async ({ id, proof, note }) => answer(await guarded(ctx, async () => completeTask(ctx, await taskIdOf(ctx, id), proof, note))));
   server.registerTool("block_task", {
     title: "Block a task",
     description: "Mark a task Blocked, with the reason. Say what it waits on: an open task (waits_on), or a new ticket tira creates under it (new_ticket), not both. A person unblocks it.",
     inputSchema: z.object({
       id: taskId,
       reason: words("why it's blocked"),
-      waits_on: z.string().trim().min(1).optional().describe("optional: the id of an open task it waits on"),
+      waits_on: z.string().trim().min(1).optional().describe("optional: the id or key of an open task it waits on"),
       new_ticket: z.string().trim().min(1).optional().describe("optional: a name for a new ticket, created under this task, that it waits on"),
     }),
     annotations: { ...WRITES, idempotentHint: true },
-  }, async ({ id, reason, waits_on, new_ticket }) => answer(await guarded(ctx, () => blockTask(ctx, id, reason, waits_on, new_ticket))));
+  }, async ({ id, reason, waits_on, new_ticket }) => answer(await guarded(ctx, async () => blockTask(ctx, await taskIdOf(ctx, id), reason, waits_on === undefined ? undefined : await taskIdOf(ctx, waits_on), new_ticket))));
   server.registerTool("add_subtask", {
     title: "Add a subtask",
     description: "Add a new task under one (marked as found while working on it when that task is under way).",
     inputSchema: z.object({ under: taskId, name: z.string().trim().min(1).max(80).describe("the new task's id: a short name, e.g. login_copy") }),
     annotations: { ...WRITES, idempotentHint: false },
-  }, async ({ under, name }) => answer(await guarded(ctx, () => addSubtask(ctx, under, name))));
+  }, async ({ under, name }) => answer(await guarded(ctx, async () => addSubtask(ctx, await taskIdOf(ctx, under), name))));
   server.registerTool("file_idea", {
     title: "File an idea",
     description: "File an idea for later, not a task yet: one sentence and why it's worth doing. tira drafts its file and proposes where it goes; a person approves both before it becomes a task.",
@@ -97,10 +97,10 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ summary, why, under }) => answer(await guarded(ctx, () => fileIdea(ctx, summary, why, under))));
   server.registerTool("add_comment", {
     title: "Comment on a task",
-    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. People see it on the ticket, under your name.",
+    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. Write @name to mention a person (their GitHub login) or another agent. People see it on the ticket, under your name.",
     inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
     annotations: { ...WRITES, idempotentHint: false },
-  }, async ({ id, text }) => answer(await guarded(ctx, () => addComment(ctx, id, text))));
+  }, async ({ id, text }) => answer(await guarded(ctx, async () => addComment(ctx, await taskIdOf(ctx, id), text))));
   server.registerTool("fill_ticket", {
     title: "Fill in a ticket",
     description: "Write what a task's ticket says: its title, description, steps and estimate (get_task shows them). Only what you give changes, and an empty one clears it. Who it's assigned to is a person's to say: it stays as it is. People see it on the ticket, and the history says you wrote it.",
@@ -112,6 +112,6 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
       estimate: z.string().max(12).optional().describe("optional: how long it should take: a number and a unit, e.g. 30m, 2h, 1d (8 hours) or 1w"),
     }),
     annotations: { ...WRITES, idempotentHint: true },
-  }, async ({ id, ...fill }) => answer(await guarded(ctx, () => fillTicket(ctx, id, fill))));
+  }, async ({ id, ...fill }) => answer(await guarded(ctx, async () => fillTicket(ctx, await taskIdOf(ctx, id), fill))));
   return server;
 }

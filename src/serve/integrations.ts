@@ -31,7 +31,7 @@ import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts"
 import { reportLines, sync } from "../sync/sync.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { JiraCloud, projectName, type JiraClient } from "../sync/jira.ts";
-import { access, appKeys, atlassianAuth, displayName, dropSession, forgetGithub, githubAuth, isAdmin, saveDisplayName, signOutEverywhere, jiraLogin, mayEnter, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, type Access, type AtlassianAuth, type JiraLogin } from "../sync/credentials.ts";
+import { access, appKeys, atlassianAuth, displayName, dropSession, forgetGithub, githubAuth, hasAsked, isAdmin, saveDisplayName, signOutEverywhere, jiraLogin, mayEnter, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, type Access, type AtlassianAuth, type JiraLogin } from "../sync/credentials.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
 import type { Dispatcher } from "../write/dispatcher.ts";
@@ -44,6 +44,7 @@ import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } fro
 import { SIGNIN_CSP } from "./csp.ts";
 import type { PublicSite } from "./public.ts";
 import { CONNECTOR_APP } from "../mcp/oauth.ts";
+import { projectCode } from "../fold/tickets.ts";
 
 export const SESSION_COOKIE = "tira_session";
 // Setup's buttons: copy (a tick once copied), and show / hide, as SF Symbols draw them
@@ -55,6 +56,8 @@ const SIGNIN_COOKIE = "tira_signin";
 // where a sign-in goes on to when it started from somewhere that needs one: Claude's connection,
 // waiting to be approved (src/mcp/oauth.ts). Only that page's own address is taken.
 export const NEXT_COOKIE = "tira_next";
+// a browser someone has signed in on: its landing offers Sign in only, not Sign up (Isha, 2026-10-25)
+export const KNOWN_COOKIE = "tira_known";
 const NEXT = /^\/oauth\/authorize\?[^\s"'<>\\]{1,2000}$/;
 const nextOf = (req: IncomingMessage): string | undefined => {
   let v = cookieOf(req, NEXT_COOKIE) ?? "";
@@ -189,9 +192,9 @@ export function accounts(outside: Outside | undefined, site?: PublicSite) {
 export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMessage) => { login?: string; actor?: string; signInOn: boolean }) {
   const acc = accounts(c.outside, c.site);
   const { env, gh, at, jiraOf, githubOf } = acc;
-  const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number }>();
+  const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number; signup: boolean }>();
   const pendingJira = new Map<string, { login: string; until: number; back: string; tab: boolean }>();
-  const pendingGithub = new Map<string, { until: number; w: string | null }>(); // the direct way's sign-ins under way, by state: until when, and the project it left from
+  const pendingGithub = new Map<string, { until: number; w: string | null; signup: boolean }>(); // the direct way's sign-ins under way, by state: until when, the project it left from, whether it's a sign-up
   const back = (res: ServerResponse, to: string, f?: Flash) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: f ? `${to}?r=${c.flash(f)}` : to });
   // where GitHub and Atlassian send people back to: the public address, else the one the page was opened at
   const own = (host: string) => (c.site ? c.site.origin : `http://${host}`);
@@ -212,7 +215,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (me.actor) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: await nextStep(me.login) });
     const flash = c.takeFlash(url.searchParams.get("r") ?? "");
     const a = access(env);
-    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), ...(a.admin ? { admin: { login: a.admin, ...(a.contact ? { contact: a.contact } : {}) } } : {}), ...(flash ? { flash } : {}) }), { "Content-Security-Policy": SIGNIN_CSP });
+    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), known: cookieOf(req, KNOWN_COOKIE) === "1", ...(a.admin ? { admin: { login: a.admin, ...(a.contact ? { contact: a.contact } : {}) } } : {}), ...(flash ? { flash } : {}) }), { "Content-Security-Policy": SIGNIN_CSP });
   };
 
   // ---------- sign in with GitHub ----------
@@ -224,6 +227,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (form === undefined) return;
     const clientId = appKeys(env).github?.clientId;
     if (!clientId) return back(res, "/welcome", { ok: false, text: "GitHub sign-in isn't set up yet: add tira's GitHub app first." });
+    const signup = form.get("signup") === "1"; // Sign up: someone new asks the admin to let them in
     // the direct way, once tira's app has its secret: off to GitHub's page and straight back, at
     // localhost (where tira's GitHub app sends people back to). The state rides in a cookie too, so
     // only the browser that started a sign-in can finish it.
@@ -232,13 +236,13 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       const now = Date.now();
       for (const [s, p] of pendingGithub) if (p.until < now) pendingGithub.delete(s);
       const state = randomBytes(24).toString("hex");
-      pendingGithub.set(state, { until: now + 10 * 60_000, w: url.searchParams.get("w") });
+      pendingGithub.set(state, { until: now + 10 * 60_000, w: url.searchParams.get("w"), signup });
       return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: gh.authorizeUrl(clientId, githubBack(host), state), "Set-Cookie": `${SIGNIN_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600` });
     }
     try {
       const s = await gh.start(clientId);
       const id = randomBytes(16).toString("hex");
-      pendingSignIns.set(id, { deviceCode: s.deviceCode, userCode: s.userCode, verifyAt: s.verifyAt, interval: s.interval, until: Date.now() + s.expiresIn * 1000 });
+      pendingSignIns.set(id, { deviceCode: s.deviceCode, userCode: s.userCode, verifyAt: s.verifyAt, interval: s.interval, until: Date.now() + s.expiresIn * 1000, signup });
       // the code at its own address, so Back from GitHub (when it opened in this tab) or a reload comes back to it
       c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/signin/code?id=${id}` });
     } catch (err) {
@@ -269,20 +273,22 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const error = url.searchParams.get("error");
     if (error) return back(res, "/welcome", { ok: false, text: error === "access_denied" ? "You turned it down on GitHub: sign in again when you're ready." : `GitHub sign-in stopped: ${error}.` });
     try {
-      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false, nextOf(req));
+      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false, nextOf(req), p.signup);
     } catch (err) {
       back(res, "/welcome", { ok: false, text: `GitHub sign-in stopped (${(err as Error).message}).` });
     }
   };
 
   // In, with GitHub's token (either way): only the admin and the people they added get in (the first
-  // person in becomes the admin); anyone else is told who to ask, and tira keeps nothing of theirs.
+  // person in becomes the admin). Anyone else who signed up is asked for: their GitHub login waits in
+  // the admin's Team for approval (Isha, 2026-10-25); tira keeps nothing else of theirs.
   // fragment: signin.mjs asked, and goes where the answer says. next: where it started from, if anywhere.
-  const enter = async (res: ServerResponse, token: string, fragment: boolean, next?: string) => {
+  const enter = async (res: ServerResponse, token: string, fragment: boolean, next?: string, signup = false) => {
     const me = await gh.user(token);
     const a = access(env);
     if (!mayEnter(a, me.login)) {
-      const key = c.flash({ ok: false, text: `${me.login} doesn't have access to this tira yet. ${askAdmin(a)}` });
+      if (signup && !hasAsked(a, me.login)) await saveAccess((x) => ({ ...x, requests: [...(x.requests ?? []), me.login] }), env);
+      const key = c.flash(notInYet(a, me.login, signup || hasAsked(a, me.login)));
       return fragment ? c.send(res, 200, html, `<div data-go="/welcome?r=${key}"></div>`) : back(res, "/welcome", c.takeFlash(key));
     }
     const first = a.admin === undefined;
@@ -297,6 +303,14 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const go = next ?? `${await nextStep(me.login)}?r=${key}`;
     if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
     c.send(res, 303, "text/plain; charset=utf-8", "", { Location: go, "Set-Cookie": cookie });
+  };
+
+  // what someone who can't get in yet is told: their request is with the admin, or how to ask
+  const notInYet = (a: Access, login: string, asked: boolean): Flash => {
+    const admin = a.contact?.name ?? a.admin ?? "the admin";
+    return asked
+      ? { ok: true, text: `Thanks, ${login}: your request is with ${admin}. You can sign in once they approve it.` }
+      : { ok: false, text: `${login} doesn't have access to this tira yet: Sign up to ask ${admin}.` };
   };
 
   const signinPoll = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
@@ -322,7 +336,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         return fragment ? c.send(res, 202, html, `<div data-waiting data-interval="${p.interval}"></div>`) : signinPage(res, id, p, "Not approved on GitHub yet.");
       }
       pendingSignIns.delete(id);
-      await enter(res, got.token, fragment, nextOf(req));
+      await enter(res, got.token, fragment, nextOf(req), p.signup);
     } catch (err) {
       fail(`GitHub sign-in stopped (${(err as Error).message}).`);
     }
@@ -410,6 +424,26 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const appearanceGroup = () => `<section class="grp" id="appearance" data-int="appearance"><h2 class="grp-h">Appearance</h2><p class="grp-desc">${esc(DESC.appearance)}</p>`
     + `<div class="appear" data-theme-switch>${LOOKS.map(lookOption).join("")}</div></section>`;
 
+  // one button that approves or declines someone's request, back to Project settings
+  const personForm = (t: string, what: string, login: string, label: string, cls: string) =>
+    `<form method="post" action="/integrations/people" class="inline">${t}<input type="hidden" name="do" value="${what}"><input type="hidden" name="login" value="${esc(login)}"><input type="hidden" name="back" value="/integrations"><button class="${cls}" type="submit">${label}</button></form>`;
+  // the team: who works on this project, the people who can sign in to this tira and the agents
+  // connected to it (Isha, 2026-10-25). Its admin adds people here as in Account settings; anyone
+  // else sees who to ask.
+  const teamGroup = async (login: string | undefined, t: string) => {
+    const a = access(env);
+    const admin = a.admin ? `<div class="grp-row"><span class="grp-k">${esc(a.admin)}</span><span class="pill">Admin</span></div>` : "";
+    const people = (a.members ?? []).map((m) => `<div class="grp-row" data-team-member><span class="grp-k">${esc(m)}</span><span class="grp-v">Can sign in</span></div>`).join("");
+    const agents = ((await tokensNow()?.list(c.stream)) ?? []).map((x) => `<div class="grp-row" data-team-agent><span class="grp-k">${esc(x.agent)}</span><span class="pill">Agent</span></div>`).join("");
+    const admin2 = !!login && isAdmin(a, login);
+    const decide = (r: string) => `<div class="grp-row" data-team-request><span class="grp-k">${esc(r)}</span><span class="grp-v">Wants to join</span>${personForm(t, "approve", r, "Approve", "act primary")}${personForm(t, "decline", r, "Decline", "how")}</div>`;
+    const requests = admin2 ? (a.requests ?? []).map(decide).join("") : "";
+    const add = login && isAdmin(a, login)
+      ? `<form method="post" action="/integrations/people" class="grp-row" data-team-add>${t}<input type="hidden" name="do" value="add"><input type="hidden" name="back" value="/integrations"><input type="text" name="login" aria-label="GitHub username" autocomplete="off" spellcheck="false" placeholder="GitHub username" required><button class="act primary" type="submit">Add</button></form>`
+      : "";
+    const foot = add ? "Everyone here can sign in, work in every project, be assigned and be @mentioned. Agents join in Connect agents." : `${askAdmin(a)} Agents join in Connect agents.`;
+    return `<section class="grp" id="team" data-int="team"><h2 class="grp-h">Team</h2><p class="grp-desc">${esc(DESC.team)}</p><div class="grp-list" data-team>${requests}${admin}${people}${agents}${add}</div><div class="grp-foot">${esc(foot)}</div></section>`;
+  };
   // people: who may sign in (the admin changes it; everyone else sees who to ask)
   const memberRow = (m: string, t: string) => `<form method="post" action="/integrations/people" class="grp-row">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(m)}"><span class="grp-k">${esc(m)}</span><button class="how" type="submit">Remove</button></form>`;
   const peopleGroups = (login: string | undefined, ghName: string | undefined, t: string) => {
@@ -748,7 +782,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const general = `<section class="grp" id="general" data-int="general"><h2 class="grp-h">General</h2><p class="grp-desc">${esc(DESC.general)}</p>`
       + `<form method="post" action="/projects/rename" class="grp-list" data-rename-project>${t}<label class="grp-row"><span class="grp-k">Project name</span><input type="text" name="title" value="${name}" required maxlength="80" autocomplete="off" spellcheck="false" aria-label="Project name"></label>`
       + `<div class="grp-row"><span class="grp-k"></span><button class="act primary" type="submit">Rename</button></div></form>`
-      + `<div class="grp-foot">Its address and its history keep the name it was made with: <code>${esc(c.stream)}</code>.</div></section>`;
+      + `<div class="grp-row"><span class="grp-k">Project id</span><code class="grp-v" data-project-id>${esc(c.stream)}</code></div>`
+      + `<div class="grp-foot">The id never changes: it's in the project's address and its tickets' keys (<code>TIRA_${esc(projectCode(c.stream))}_1</code>, …). Names and ids are each unique on this tira.</div></section>`;
 
     // delete: type the project's name to be sure (not the one tira serve was started with)
     const startedHere = row("Delete", `<span class="grp-v">This is the project tira serve was started with: start it on another to delete this one</span>`);
@@ -760,38 +795,49 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 
     const fromAgents = url.searchParams.get("from") === "agents"; // its result shows in the section
     const agents = await agentsGroup(url, me, t, host);
-    const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${name}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + github + jira + syncCard + agents + remove;
-    c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]] }, body, helpPanel(portOf(host), me.actor), scripts));
+    const team = await teamGroup(me.login, t);
+    const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${name}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + team + github + jira + syncCard + agents + remove;
+    c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["general", "General"], ["team", "Team"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]] }, body, helpPanel(portOf(host), me.actor), scripts));
   };
 
   // ---------- people: the admin adds and removes who may sign in ----------
+  // how people reach the admin to be added, as the sign-in page shows it
+  const saveContact = async (form: URLSearchParams): Promise<Flash> => {
+    const name = (form.get("name") ?? "").trim();
+    const email = (form.get("email") ?? "").trim();
+    if ((name && !NAME.test(name)) || (email && !EMAIL.test(email))) return { ok: false, text: "That isn't a name and an email people can use." };
+    await saveAccess((x) => ({ ...x, contact: { ...(name ? { name } : {}), ...(email ? { email } : {}) } }), env);
+    return { ok: true, text: "Saved: the sign-in page shows how to reach you." };
+  };
   const peoplePost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
     if (form === undefined) return;
     const login = who(req).login;
     const a = access(env);
-    if (!login || !isAdmin(a, login)) return back(res, "/settings", { ok: false, text: "Only this tira's admin can change who may sign in." });
+    const to = backOf(form.get("back"), "/settings"); // Account settings, or Project settings' Team
+    if (!login || !isAdmin(a, login)) return back(res, to, { ok: false, text: "Only this tira's admin can change who may sign in." });
     const what = form.get("do");
-    if (what === "contact") {
-      const name = (form.get("name") ?? "").trim();
-      const email = (form.get("email") ?? "").trim();
-      if ((name && !NAME.test(name)) || (email && !EMAIL.test(email))) return back(res, "/settings", { ok: false, text: "That isn't a name and an email people can use." });
-      await saveAccess((x) => ({ ...x, contact: { ...(name ? { name } : {}), ...(email ? { email } : {}) } }), env);
-      return back(res, "/settings", { ok: true, text: "Saved: the sign-in page shows how to reach you." });
-    }
+    if (what === "contact") return back(res, to, await saveContact(form));
     const who2 = (form.get("login") ?? "").trim().replace(/^@/, "");
-    if (!GITHUB_LOGIN.test(who2)) return back(res, "/settings", { ok: false, text: "That isn't a GitHub username." });
-    if (what === "add") {
-      if (mayEnter(a, who2)) return back(res, "/settings", { ok: true, text: `${who2} can already sign in.` });
-      await saveAccess((x) => ({ ...x, members: [...(x.members ?? []), who2] }), env);
-      return back(res, "/settings", { ok: true, text: `Added ${who2}: they can sign in with GitHub now.` });
+    if (!GITHUB_LOGIN.test(who2)) return back(res, to, { ok: false, text: "That isn't a GitHub username." });
+    const without = (list: string[] | undefined) => (list ?? []).filter((m) => m.toLowerCase() !== who2.toLowerCase());
+    // added by the admin, or a sign-up approved: in, and no longer waiting
+    if (what === "add" || what === "approve") {
+      if (mayEnter(a, who2)) return back(res, to, { ok: true, text: `${who2} can already sign in.` });
+      await saveAccess((x) => ({ ...x, members: [...(x.members ?? []), who2], requests: without(x.requests) }), env);
+      const done = what === "add" ? "Added" : "Approved";
+      return back(res, to, { ok: true, text: `${done} ${who2}: they can sign in with GitHub now.` });
+    }
+    if (what === "decline") {
+      await saveAccess((x) => ({ ...x, requests: without(x.requests) }), env);
+      return back(res, to, { ok: true, text: `Declined ${who2}'s request: tira keeps nothing of theirs.` });
     }
     if (what === "remove" && !isAdmin(a, who2)) {
       await saveAccess((x) => ({ ...x, members: (x.members ?? []).filter((m) => m.toLowerCase() !== who2.toLowerCase()) }), env);
       await signOutEverywhere(who2, env);
-      return back(res, "/settings", { ok: true, text: `Removed ${who2}: they're signed out and can't sign in. Their GitHub and Jira links stay until they unlink them.` });
+      return back(res, to, { ok: true, text: `Removed ${who2}: they're signed out and can't sign in. Their GitHub and Jira links stay until they unlink them.` });
     }
-    back(res, "/settings", { ok: false, text: "Nothing changed." });
+    back(res, to, { ok: false, text: "Nothing changed." });
   };
 
   // ---------- you: the name you're shown by, and unlinking your GitHub ----------
@@ -1058,6 +1104,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 // What each settings section is for, in a line (GitHub's settings say it under the title).
 const DESC = {
   general: "What everyone sees this project called, everywhere in tira.",
+  team: "Who works on this project: the people who can sign in to this tira, and the agents connected to it.",
   account: "Who you are here, and the GitHub and Jira accounts tira uses for you, in every project.",
   agents: "Connect your AI agents (Claude Code, Cursor, VS Code, Claude Desktop) to this project through tira's MCP server. Each has its own token and name, and its moves show on the board as its own.",
   appearance: "How tira looks in this browser: it follows your computer unless you pick one.",

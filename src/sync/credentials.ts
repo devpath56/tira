@@ -164,10 +164,16 @@ export const access = (env: Env = process.env): Access => {
 export async function saveAccess(change: (a: Access) => Access, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveAccess(change);
-  update(env, (s) => { s.access = change(s.access ?? {}); });
+  update(env, (s) => {
+    const next = change(s.access ?? {});
+    if (next.requests?.length === 0) delete next.requests; // none waiting: as Postgres reads it
+    s.access = next;
+  });
 }
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 export const isAdmin = (a: Access, login: string): boolean => a.admin !== undefined && same(a.admin, login);
+// someone who signed up and waits for the admin to approve them
+export const hasAsked = (a: Access, login: string): boolean => (a.requests ?? []).some((r) => same(r, login));
 // anyone, until there is an admin (the first to sign in becomes it); then the admin and the people they added
 export const mayEnter = (a: Access, login: string): boolean => a.admin === undefined || isAdmin(a, login) || (a.members ?? []).some((m) => same(m, login));
 

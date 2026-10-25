@@ -26,7 +26,7 @@ import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
-import { attentionSince, brand, CSS, proofsOf, renderHtml, THEME_RADIOS, type DivergencePanel } from "../render/html.ts";
+import { attentionSince, brand, CSS, mentionedHtml, proofsOf, renderHtml, THEME_RADIOS, type DivergencePanel } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
 import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
@@ -38,12 +38,12 @@ import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
-import { commitsOf, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { commitsOf, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { access, appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
-import { accounts, integrationRoutes, NEXT_COOKIE, whoIs, type Outside } from "./integrations.ts";
+import { accounts, cookieOf, integrationRoutes, KNOWN_COOKIE, NEXT_COOKIE, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 import { consentCsp, CSP } from "./csp.ts";
 import { consentPage } from "./welcome.ts";
@@ -95,7 +95,8 @@ export interface ServeOptions {
   site?: PublicSite;
 }
 
-export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string; next: boolean }
+// ticket: its TIRA_<PROJECT>_<n> (src/fold/tickets.ts)
+export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string; next: boolean; ticket: string }
 
 // The palette's index: every tree task, in the page's drawer order (#t<i>); `next` marks the
 // task tira says comes next, which the palette offers first.
@@ -107,10 +108,11 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
   const walk = (row: (typeof rows)[number]) => row.children.forEach((c) => { parentOf.set(c.key, row.key); walk(c); });
   roots.forEach(walk);
   const idOf = new Map(rows.map((x) => [x.key, x.id]));
+  const keys = ticketKeys(r, stream);
   return rows.map((row, i) => {
     const up: string[] = [];
     for (let p = parentOf.get(row.key); p !== undefined; p = parentOf.get(p)) up.unshift(idOf.get(p) ?? p);
-    return { key: row.key, type: row.type, id: row.id, state: row.state, path: up.join(" › "), drawer: `t${i}`, next: row.key === view.cursor };
+    return { key: row.key, type: row.type, id: row.id, state: row.state, path: up.join(" › "), drawer: `t${i}`, next: row.key === view.cursor, ticket: keys.get(row.id) ?? "" };
   });
 }
 
@@ -370,8 +372,8 @@ function noticesHtml(opts: ConfirmOpts): string {
 
 // The ticket, beside the move: what the work is (its title, description, steps, estimate and
 // assignee), under tira's word when it would refuse, or when nothing would change, and what to do.
-const paragraph = (x: string) => `<p>${esc(x.trim()).replaceAll("\n", "<br>")}</p>`;
-const listItem = (x: string) => `<li>${esc(x)}</li>`;
+const paragraph = (x: string) => `<p>${mentionedHtml(x.trim()).replaceAll("\n", "<br>")}</p>`; // @mentions marked
+const listItem = (x: string) => `<li>${mentionedHtml(x)}</li>`;
 const factHtml = ([k, v]: [string, string | undefined]) => (v ? `<span><span class="lk">${k}</span>${esc(v)}</span>` : "");
 // what a ticket says, as the dialog shows it (the task's own dialog: src/render/html.ts)
 function ticketWordsHtml(t: Ticket | undefined): string {
@@ -1079,9 +1081,22 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const site = key !== "" && login ? atlassianAuth(login, acc.env)?.site : undefined;
     if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return { problem: [400, "jira", "Pick a Jira project from your connected site, or none for now."] };
     const before = await opts.store.readStream(at.stream);
-    if (before.length === 0) return { at, site, actor };
+    if (before.length === 0) {
+      const clash = await nameTaken(name);
+      return clash ? { problem: [409, "name", `Another project is already called ${clash}: name this one differently.`] } : { at, site, actor };
+    }
     const deleted = workspaceOf(fold(before, opts.registry), at.stream)?.deleted;
     return { problem: [409, "name", deleted ? `${name} was a project here, since deleted: pick another name.` : `There is a project named ${name} already: pick it in Projects, or name this one differently.`] };
+  };
+  // a project's id and its name are each unique on this tira, whatever their case (Isha, 2026-10-25): the
+  // live project a new one's name would clash with (by its id, or the name it's shown by), if any
+  const nameTaken = async (name: string): Promise<string | undefined> => {
+    const all = await opts.store.readAll();
+    const r = fold(all, opts.registry);
+    const same = (x: string) => x.toLowerCase() === name.toLowerCase();
+    const live = [...new Set(all.map((e) => e.stream))].filter((s) => !workspaceOf(r, s)?.deleted);
+    const hit = live.find((s) => same(s) || same(workspaceOf(r, s)?.title ?? s));
+    return hit === undefined ? undefined : workspaceOf(r, hit)?.title ?? hit;
   };
   // a new project's link: its repo and, when one was picked, its Jira project (with Jira's name for it)
   const newLink = (repo: string, site: string | undefined, key: string, jiraName: string | undefined) => {
@@ -1298,7 +1313,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (route !== liveSeq) await accountsNow(); // the live check reads no one's account
     const ws = workspaceIn(url, opts.stream);
     if (!ws) return send(res, 400, text, "that can't be a project's name\n");
-    return current.run({ ...who(req), ws }, () => route(req, res, url, host, ws));
+    const me = who(req);
+    // someone signed in on this browser: from now on its landing offers Sign in only
+    if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
+    return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => (res.headersSent ? res.destroy() : send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`)));

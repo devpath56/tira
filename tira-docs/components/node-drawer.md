@@ -47,6 +47,7 @@ under `tira serve` (which also moves focus into the dialog, and back to the task
 - `.modal-box` on the centred box, `.scrim` on the dimmed page behind it (a link that closes the dialog).
 - `.tk-crumbs` on where it sits, `[data-siblings]` on a subtask's place among its sisters; `.tk-side` on the properties, `[data-parent]` on the parent there.
 - `[data-subtasks]` on the subtasks, `.kids-list` on their rows, `[data-subtask]` on each row (its key); `[data-proof]` on a done task's proof of work; `[data-links]` on the blocks link.
+- `[data-ticket-key]` under the ticket's title: its `TIRA_<PROJECT>_<n>` (and its id, when a title shows instead).
 - `[data-ticket]` on the ticket, with `[data-ticket-description]`, `[data-ticket-steps]`, `[data-ticket-estimate]` and `[data-ticket-assignee]`; `[data-ticket-form]` on the ticket's form (live only).
 - `[data-comments]` on the comments, `[data-comment]` on each, `[data-comment-form]` on the one to add (live only).
 - `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only).

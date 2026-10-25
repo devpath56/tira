@@ -21,7 +21,7 @@ import { esc } from "./escape.ts";
 import { foundPath, fx, layout, tint, treePath } from "../serve/layout.mjs";
 import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
 import { linksOf as taskLinksOf, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
-import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, firstLine, MENTION, mentionName, shortSha, ticketKeys, ticketsOf, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import { LINK_TYPES } from "../tables/links.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -384,6 +384,8 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .card .row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--mut);font-size:12px}
 .chip{display:inline-flex;align-items:center;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}
 .hist{margin-left:auto;display:inline-flex;align-items:center;gap:4px}.hist svg,.chip svg{width:12px;height:12px}
+.card .tkey{display:inline-block;margin:0 6px 4px 0;font:600 11px var(--mono);letter-spacing:.02em;color:var(--dim)}.mention{color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:0 3px;font-weight:550}
+.mention-menu{position:fixed;z-index:60;min-width:180px;max-height:220px;overflow:auto;margin:0;padding:4px;list-style:none;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-raised)}.mention-menu li{display:flex;justify-content:space-between;gap:12px;padding:6px 8px;border-radius:6px;font-size:13px;cursor:pointer}.mention-menu li[aria-selected="true"]{background:var(--accent-bg);color:var(--accent-text)}.mention-menu small{color:var(--dim);font-size:11px}
 .pin{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:6px;padding:1px 6px;margin-bottom:6px}
 .card.is-next{border-left:3px solid var(--accent)}
 .card.is-gone .t{text-decoration:line-through;color:var(--dim)}
@@ -926,9 +928,10 @@ const locate = (key: string, live: boolean) => (live ? `<button type="button" cl
 // and Connect Jira, each through its own decision.
 // form: under tira serve, what the ticket's own forms need (the page's token, who it can be
 // assigned to: the project's people and its connected agents)
+// keys: each task's TIRA_<PROJECT>_<n> (src/fold/tickets.ts)
 interface Ext {
   links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined
-  tickets: ReadonlyMap<string, Ticket>; comments: ReadonlyMap<string, Comment[]>; commits: ReadonlyMap<string, Commit[]>
+  tickets: ReadonlyMap<string, Ticket>; comments: ReadonlyMap<string, Comment[]>; commits: ReadonlyMap<string, Commit[]>; keys: ReadonlyMap<string, string>
   form?: { token: string; people: string[]; agents: string[] }
 }
 
@@ -990,8 +993,13 @@ const when = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 const hiddenOf = (fields: [string, string][]) => fields.map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
-const listItem = (x: string) => `<li>${esc(x)}</li>`;
+// words people wrote, escaped, each @mention marked (who it names: a person or an agent)
+export const mentionedHtml = (text: string): string => esc(text).replaceAll(MENTION, (_m, before: string, said: string) => {
+  const name = mentionName(said);
+  return `${before}<span class="mention" data-mention="${name}">@${name}</span>${said.slice(name.length)}`;
+});
+const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${mentionedHtml(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
+const listItem = (x: string) => `<li>${mentionedHtml(x)}</li>`;
 const formOf = (n: Placed) => `tk-${n.i}`; // the ticket form's id: its fields beside belong to it
 
 function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefined, formId: string): string {
@@ -1001,9 +1009,15 @@ function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefi
   return `<select name="assignee" form="${formId}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option>${group("Team", people)}${group("Agents", form.agents)}</select>`;
 }
 
+// a ticket's key, and its id when its title shows instead
+function keyLineHtml(r: TreeRow, t: Ticket | undefined, key: string | undefined): string {
+  const id = t?.title ? esc(r.id) : "";
+  const parts = [key ? `<span data-ticket-key>${esc(key)}</span>` : "", id].filter(Boolean);
+  return parts.length === 0 ? "" : `<p class="tk-id">${parts.join(" · ")}</p>`;
+}
 // the ticket's title and words, read
-function ticketReadHtml(r: TreeRow, t: Ticket | undefined): string {
-  const head = t?.title ? `<h2>${esc(t.title)}</h2><p class="tk-id">${esc(r.id)}</p>` : `<h2>${esc(r.id)}</h2>`;
+function ticketReadHtml(r: TreeRow, t: Ticket | undefined, key: string | undefined): string {
+  const head = `<h2>${esc(t?.title ?? r.id)}</h2>${keyLineHtml(r, t, key)}`;
   const desc = t?.description ? `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>` : "";
   const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><h3>Steps</h3><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
   return `<div class="ticket" data-ticket>${head}${desc}${steps}</div>`;
@@ -1012,9 +1026,9 @@ function ticketReadHtml(r: TreeRow, t: Ticket | undefined): string {
 function ticketHtml(n: Placed, ext: Ext, back: string, q: string): string {
   const r = n.row;
   const t = ext.tickets.get(r.id);
-  if (!ext.form) return ticketReadHtml(r, t);
+  if (!ext.form) return ticketReadHtml(r, t, ext.keys.get(r.id));
   const title = `<h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="${esc(t?.title ?? "")}" placeholder="${esc(r.id)}" aria-label="Title" autocomplete="off"></h2>`;
-  const id = t?.title ? `<p class="tk-id">${esc(r.id)}</p>` : "";
+  const id = keyLineHtml(r, t, ext.keys.get(r.id));
   const lines = (text: string) => Math.max(1, text.split("\n").length); // a box as tall as its words
   const words = t?.description ?? "";
   const list = (t?.steps ?? []).join("\n");
@@ -1290,7 +1304,11 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
         + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
       const last = (trail.get(r.key) ?? []).filter((x) => !x.refused).at(-1)?.actor;
-      return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${r.cursor ? `<span class="pin">◆ ${r.active ? "now" : "next"}</span>` : ""}<div class="t">${wraps(r.id)}</div>`
+      const key = ext.keys.get(r.id);
+      const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
+      const cursorWord = r.active ? "now" : "next";
+      const pin = r.cursor ? `<span class="pin">◆ ${cursorWord}</span>` : "";
+      return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}<div class="t">${wraps(r.id)}</div>`
         + `<div class="row">${parent}${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     });
     const colAttr = moves ? ` data-col="${s}"` : "";
@@ -1615,14 +1633,16 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
   const board = v.roots.length > 0 || ghosts.length > 0;
   const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [] } : undefined;
-  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), ...(form ? { form } : {}) };
+  // who an @ can name, for the page's script (app.mjs): the project's people and its agents
+  const mentionable = form ? ` data-people="${esc(form.people.join(" "))}" data-agents="${esc(form.agents.join(" "))}"` : "";
+  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
   const name = ext.ws?.title ?? stream; // as people see it (renamed in Project settings)
   const first = !board && lanesFirst ? "lanes" : "board";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(name)}</title><style>${CSS}</style></head>
 <body>${views.map(([t, label]) => `<input class="view-radio" type="radio" name="view" id="v-${t}"${t === first ? " checked" : ""} aria-label="${label} view">`).join("")}${THEME_RADIOS}${SIDE_SHUT}
-<main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}"${q === "" ? "" : ` data-q="${esc(q)}"`}>
+<main data-stream="${esc(stream)}" data-last-seq="${v.lastSeq}" data-node-count="${v.nodeCount}" data-fold-tree-count="${foldTreeCount}" data-dump-hash="${esc(dumpHash)}"${mentionable}${q === "" ? "" : ` data-q="${esc(q)}"`}>
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}${esc(name)}</h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>

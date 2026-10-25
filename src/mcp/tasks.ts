@@ -5,7 +5,7 @@ import { fold } from "../fold/fold.ts";
 import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
 import { attentionSince, proofsOf, trails } from "../render/html.ts";
 import { taskIndex, type TaskEntry } from "../serve/server.ts";
-import { commentsOf, commitsOf, firstLine, shortSha, ticketsOf, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, firstLine, mentionsIn, shortSha, taskOfKey, ticketKeys, ticketsOf, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import type { AgentContext } from "./server.ts";
 
 // A tool's answer: its text, and whether it did what was asked (false: the tool reports an error).
@@ -29,6 +29,12 @@ async function projectNow(c: AgentContext) {
   const view = streamView(r, c.stream);
   const index = new Map(taskIndex(r, c.stream).map((t) => [t.key, t]));
   return { events, r, view, rows: flatten(view.roots), index, tickets: ticketsOf(r, c.stream), comments: commentsOf(r, c.stream), commits: commitsOf(r, c.stream) };
+}
+
+// the task an agent named: its id, or its key (TIRA_<PROJECT>_<n>, src/fold/tickets.ts)
+export async function taskIdOf(c: AgentContext, said: string): Promise<string> {
+  if (!/^tira_/i.test(said.trim())) return said;
+  return taskOfKey(ticketKeys(fold(await c.store.readStream(c.stream), c.registry), c.stream), said);
 }
 
 // comments since the agent's own last one, from someone else: the feedback it hasn't answered
@@ -60,12 +66,28 @@ export async function nextTask(c: AgentContext): Promise<ToolText> {
   if (blocked > 0) lines.push(`Blocked: ${blocked} (list_tasks with state "blocked" shows them)`);
   const mine = rows.filter((x) => !CLOSED.has(x.state) && tickets.get(x.id)?.assignee === c.actor);
   if (mine.length > 0) lines.push(`Assigned to you: ${mine.map((x) => x.id).join(", ")}`);
-  for (const row of rows.filter((x) => x.active || mine.includes(x))) {
+  const followed = rows.filter((x) => x.active || mine.includes(x));
+  for (const row of followed) {
     const fresh = unanswered(comments.get(row.id) ?? [], c.actor);
     const last = fresh.at(-1);
     if (last) lines.push(`Feedback on ${row.id}: ${fresh.length} new, latest from ${last.by}: "${clip(last.text.replaceAll("\n", " "), 160)}" (get_task shows it; add_comment replies)`);
   }
+  lines.push(...mentionLines(rows.filter((x) => !CLOSED.has(x.state) && !followed.includes(x)), tickets, comments, c.actor));
   return { ok: true, text: lines.join("\n") };
+}
+
+// where someone named this agent (@name) on an open task it isn't already following: a comment it
+// hasn't answered since, or the ticket's own words
+function mentionLines(rows: readonly TreeRow[], tickets: ReadonlyMap<string, Ticket>, comments: ReadonlyMap<string, Comment[]>, actor: string): string[] {
+  const out: string[] = [];
+  for (const row of rows) {
+    const asked = unanswered(comments.get(row.id) ?? [], actor).filter((x) => mentionsIn(x.text).includes(actor)).at(-1);
+    if (asked) out.push(`Mentioned on ${row.id} by ${asked.by}: "${clip(asked.text.replaceAll("\n", " "), 160)}" (get_task shows it; add_comment replies)`);
+  }
+  const words = (t: Ticket | undefined) => [t?.description ?? "", ...(t?.steps ?? [])].join("\n");
+  const named = rows.filter((row) => mentionsIn(words(tickets.get(row.id))).includes(actor)).map((row) => row.id);
+  if (named.length > 0) out.push(`Mentioned in the ticket: ${named.join(", ")} (get_task shows it)`);
+  return out;
 }
 
 const fits = (state: string, wanted: ListState) => {
@@ -82,7 +104,7 @@ export async function listTasks(c: AgentContext, wanted: ListState = "open"): Pr
     const k = tickets.get(t.id);
     return (k?.title ? ` "${k.title}"` : "") + (k?.assignee ? ` · assigned to ${k.assignee}` : "");
   };
-  const lines = tasks.slice(0, LIST_MAX).map((t) => `${t.id} · ${stateWord(t.state)} · ${where(t.path)}${t.next ? " · ◆ next" : ""}${about(t)}`);
+  const lines = tasks.slice(0, LIST_MAX).map((t) => `${t.id} · ${t.ticket} · ${stateWord(t.state)} · ${where(t.path)}${t.next ? " · ◆ next" : ""}${about(t)}`);
   if (tasks.length > LIST_MAX) lines.push(`…and ${tasks.length - LIST_MAX} more: narrow it with state.`);
   return { ok: true, text: lines.join("\n") };
 }
@@ -120,7 +142,7 @@ export async function getTask(c: AgentContext, id: string): Promise<ToolText> {
   if (!row || !t) return { ok: false, text: `There is no task ${id} in ${c.stream}: list_tasks shows them.` };
   const skip = new Set(r.anomalies.map((a) => a.seq));
   const marks = [row.cursor && !row.active ? "◆ next" : "", row.discoveredDuring ? `found during ${bare(row.discoveredDuring)}` : ""].filter(Boolean);
-  const lines = [`${row.id} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...ticketLines(tickets.get(row.id)), ...kidsLine(row)];
+  const lines = [`${row.id} · ${t.ticket} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...ticketLines(tickets.get(row.id)), ...kidsLine(row)];
   const since = row.state === "blocked" ? attentionSince(events, c.stream, skip).blocked.get(row.key) : undefined;
   if (since?.reason) lines.push(`Blocked: ${since.reason}`);
   if (since?.blocker) lines.push(`Waiting on: ${bare(since.blocker)}`);
