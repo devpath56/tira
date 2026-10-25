@@ -13,7 +13,7 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { tiraServer } from "../src/serve/server.ts";
-import { publicPageToken, publicProblem, publicSite } from "../src/serve/public.ts";
+import { listenAt, publicPageToken, publicProblem, publicSite } from "../src/serve/public.ts";
 import { access, appKeys } from "../src/sync/credentials.ts";
 import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
 import { clientId, clientOf, CLAUDE_CALLBACK, Codes, registered, registrationOf, s256 } from "../src/mcp/oauth.ts";
@@ -39,6 +39,11 @@ test("a public address, read: https with no path (http only on this computer); t
   assert.match(publicProblem({ ...ready, TIRA_ADMIN: "not a login" }, undefined) ?? "", /^set TIRA_ADMIN/);
   assert.match(publicProblem({ ...ready, TIRA_GITHUB_CLIENT_SECRET: "" }, undefined) ?? "", /^set TIRA_GITHUB_CLIENT_ID and TIRA_GITHUB_CLIENT_SECRET/);
   assert.match(publicProblem({ ...ready, TIRA_PUBLIC_URL: "http://tira.example.com" }, undefined) ?? "", /^TIRA_PUBLIC_URL must be/);
+  // where it listens: at a public address on every address, at the host's $PORT unless --port says otherwise
+  const site = { origin: ORIGIN, host: HOST };
+  assert.deepEqual(listenAt(undefined, { PORT: "10000" }, site), { host: "0.0.0.0", port: 10000, asked: "10000" });
+  assert.deepEqual(listenAt("5000", { PORT: "10000" }, site), { host: "0.0.0.0", port: 5000, asked: "5000" });
+  assert.deepEqual(listenAt(undefined, { PORT: "10000" }, undefined), { host: "127.0.0.1", port: 4747, asked: undefined }); // this computer: $PORT isn't tira's
   assert.equal(publicPageToken(SECRET), publicPageToken(SECRET));
   assert.match(publicPageToken(SECRET), /^[0-9a-f]{48}$/);
   assert.notEqual(publicPageToken(SECRET), publicPageToken(`${SECRET}-other`));

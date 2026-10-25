@@ -51,6 +51,13 @@ export function publicProblem(env: Env, actor: string | undefined): string | und
   ].find((x) => x !== "");
 }
 
+// Where tira serve listens: at a public address, on every address at $PORT (the host's) unless
+// --port says otherwise; else on this computer only, at --port or 4747. `asked`: the port as given.
+export function listenAt(port: string | undefined, env: Env, site: PublicSite | undefined): { host: string; port: number; asked: string | undefined } {
+  const asked = port ?? (site ? env.PORT : undefined);
+  return { host: site ? "0.0.0.0" : "127.0.0.1", port: asked === undefined ? 4747 : Number(asked), asked };
+}
+
 // The page token at a public address: the same on every start and every instance (forms on pages
 // left open across a deploy still work), and no one can work it out without TIRA_SECRET_KEY.
 export const publicPageToken = (secret: string): string => createHmac("sha256", secret).update("tira page token").digest("hex").slice(0, 48);
