@@ -1299,6 +1299,12 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
   const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref) });
+  // someone signed in on this browser: from now on its landing offers Sign in only
+  const remembered = (req: IncomingMessage, res: ServerResponse, login: string | undefined) => {
+    if (!login || cookieOf(req, KNOWN_COOKIE)) return;
+    const secure = opts.site ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`);
+  };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (req.method === "GET" && req.url === "/healthz") return send(res, 200, text, "ok\n"); // the host's check that tira is up: says nothing else
@@ -1314,8 +1320,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const ws = workspaceIn(url, opts.stream);
     if (!ws) return send(res, 400, text, "that can't be a project's name\n");
     const me = who(req);
-    // someone signed in on this browser: from now on its landing offers Sign in only
-    if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
+    remembered(req, res, me.login);
     return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {
