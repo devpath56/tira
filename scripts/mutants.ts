@@ -879,7 +879,7 @@ const MUTANTS: Mutant[] = [
   { name: "public: listens on this computer only at a public address", file: "src/serve/public.ts", find: `host: site ? "0.0.0.0" : "127.0.0.1"`, replace: `host: "127.0.0.1"` },
   { name: "public: the host's port isn't read", file: "src/serve/public.ts", find: "port ?? (site ? env.PORT : undefined)", replace: "port ?? undefined" },
   { name: "public: tira serve starts without checking", file: "src/cli/cli.ts", find: "  if (problem) throw new UsageError(problem);\n", replace: "" },
-  { name: "accounts: the server's apps aren't read", file: "src/sync/credentials.ts", find: "({ ...(read(env).apps ?? {}), ...settingsApps(env) })", replace: "({ ...(read(env).apps ?? {}) })" },
+  { name: "accounts: the server's apps aren't read", file: "src/sync/credentials.ts", find: "({ ...read(env).apps, ...settingsApps(env) })", replace: "({ ...read(env).apps })" },
   { name: "accounts: the server's admin isn't read", file: "src/sync/credentials.ts", find: "  return a.admin === undefined && named ? { ...a, admin: named } : a;", replace: "  return a;" },
   { name: "public: browsers aren't kept to https", file: "src/serve/server.ts", find: `"Strict-Transport-Security": "max-age=31536000", `, replace: "" },
   { name: "public: cookies go over http too", file: "src/serve/server.ts", find: "...(cookie ? { \"Set-Cookie\": `${cookie}; Secure` } : {})", replace: "...({})" },

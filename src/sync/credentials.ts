@@ -129,7 +129,7 @@ const settingsApps = (env: Env): AppKeys => {
   if (at && atSecret) keys.atlassian = { clientId: at, secret: atSecret };
   return keys;
 };
-export const appKeys = (env: Env = process.env): AppKeys => ({ ...(read(env).apps ?? {}), ...settingsApps(env) });
+export const appKeys = (env: Env = process.env): AppKeys => ({ ...read(env).apps, ...settingsApps(env) });
 export async function saveAppKeys(keys: AppKeys, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveApps(keys);
