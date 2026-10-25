@@ -203,6 +203,25 @@ if (!url) {
     }
   });
 
+  test("postgres: account tables made before sign-up requests get their column on first use; requests are saved, read and cleared", async () => {
+    const schema = fresh();
+    const before = new PostgresAccounts(url, schema, KEY);
+    let after: PostgresAccounts | undefined;
+    try {
+      await before.saveAccess(() => ({ admin: "isha-gh" }));
+      await before.query(`ALTER TABLE ${schema}.account_access DROP COLUMN requests`); // as the tables were made before 2026-10-25
+      after = new PostgresAccounts(url, schema, KEY);
+      await after.saveAccess((a) => ({ ...a, requests: ["octo", "newbie"] }));
+      assert.deepEqual(after.snapshot().access, { admin: "isha-gh", requests: ["octo", "newbie"] });
+      await after.saveAccess((a) => ({ ...a, members: ["octo"], requests: ["newbie"] }));
+      await after.saveAccess((a) => ({ ...a, requests: [] }));
+      assert.deepEqual(after.snapshot().access, { admin: "isha-gh", members: ["octo"] }); // none waiting: none read
+    } finally {
+      await after?.close();
+      await before.close();
+    }
+  });
+
   test("postgres: a login that may use the account tables but create nothing works once the owner has made them (production's least-privilege tira login)", async () => {
     const schema = fresh();
     const owner = new PostgresAccounts(url, schema, KEY);

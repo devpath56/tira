@@ -10,8 +10,10 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry, Registry } from "../src/tables/registry.ts";
 import { loadTable } from "../src/tables/table.ts";
 import { WritePath } from "../src/write/write-path.ts";
+import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
-import { renderHtml } from "../src/render/html.ts";
+import { mentionedHtml, renderHtml } from "../src/render/html.ts";
+import { mentionsIn, projectCode, taskOfKey, ticketKeys } from "../src/fold/tickets.ts";
 import { CSP, changedBy, hintFor, inOrder, packetFor, taskIndex, tiraServer, withQ, workspaceIn, workspaceList } from "../src/serve/server.ts";
 import { esc } from "../src/render/escape.ts";
 import { filesMatching, srcCode } from "./src-text.ts";
@@ -138,7 +140,7 @@ test("the palette's index lists every task in drawer order, with its path", asyn
   try {
     const tasks = JSON.parse((await s.http("GET", "/api/tasks")).body) as { id: string; state: string; path: string; drawer: string }[];
     assert.deepEqual(tasks.map((t) => t.id), ["dashboard", "metrics_card", "fetch_metrics", "improve_visual", "colors", "loading_state", "font", "table", "filters"]);
-    assert.deepEqual(tasks.find((t) => t.id === "colors"), { key: "node:colors", type: "node", id: "colors", state: "blocked", path: "dashboard › metrics_card › improve_visual", drawer: "t4", next: false });
+    assert.deepEqual(tasks.find((t) => t.id === "colors"), { key: "node:colors", type: "node", id: "colors", state: "blocked", path: "dashboard › metrics_card › improve_visual", drawer: "t4", next: false, ticket: "TIRA_TASKTREE_DASH_5" }); // the fifth task made
     // the task tira says comes next is marked, once: the palette offers it first
     assert.deepEqual(tasks.filter((t) => (t as { next?: boolean }).next).map((t) => t.id), ["fetch_metrics"]);
     const page = (await s.http("GET", "/")).body;
@@ -206,7 +208,7 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
       return { at, page: (await s.http("GET", at)).body };
     };
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
-    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><textarea name="steps" class="tk-in tk-steps-in" rows="1" placeholder="Add steps, one per line…"[^>]*><\/textarea><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // no Edit fold: the ticket is its form
+    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><textarea name="steps" class="tk-in tk-steps-in" rows="1" placeholder="Add steps, one per line…"[^>]*><\/textarea><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // no Edit fold: the ticket is its form
     const form = /id="(tk-\d+)" data-ticket/.exec(ls)?.[1] ?? "";
     assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><input type="text" name="estimate" form="${form}" class="prop-in" maxlength="10" value="" placeholder="2h, 1d…"`)); // beside, in the same form
     assert.match(ls, /<div class="subtasks" data-subtasks><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div>/); // none yet: just the way to add one
@@ -223,7 +225,7 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     assert.match(saved.at, new RegExp(`^/\\?r=\\d+${back}$`));
     assert.match(saved.page, /data-flash>Saved\.<\/div>/);
     ls = dialog(saved.page, "loading_state");
-    assert.match(ls, /value="Loading state" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id">loading_state<\/p>/);
+    assert.match(ls, /value="Loading state" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p>/);
     assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><h3 class="tk-steps-h">Steps<\/h3><textarea name="steps" class="tk-in tk-steps-in" rows="2" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>Add the spinner\nTest on 3G<\/textarea>/);
     assert.match(ls, /name="estimate" form="tk-\d+" class="prop-in" maxlength="10" value="2h"/); // properties, beside
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
@@ -832,7 +834,7 @@ test("after an action, what it changed glows once: the task it moved, or a block
     const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     const page = (await s.http("GET", String(ok.headers.location))).body;
     assert.deepEqual(glowing(page), ["node:loading_state"]);
-    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><div class="t">loading_<wbr>state<\/div>/);
+    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span><div class="t">loading_<wbr>state<\/div>/);
     assert.deepEqual(glowing((await s.http("GET", "/")).body), []); // once: the next load is quiet
     // a refusal changed nothing
     await s.send("filters", "START");
@@ -1032,6 +1034,50 @@ test("live: the page asks /api/live where its log is (the last event only), with
     const after = (JSON.parse((await s.http("GET", "/api/live")).body) as { seq: number }).seq;
     assert.ok(after > before, `${after} > ${before}`);
     assert.match(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /fetch\(withW\("\/api\/live"\), \{ cache: "no-store" \}\)[^]*?const at = Number\(seq\);\s*if \(!Number\.isSafeInteger\(at\) \|\| at < 0\) return;\s*latest = at;[^]*?if \(at > seen && at > triedFor\)/);
+  } finally {
+    await s.done();
+  }
+});
+
+test("every ticket has a key, TIRA_<PROJECT>_<n>, numbered in the order its project's tasks were made: first on its card, on the ticket, and the search finds it", async () => {
+  assert.equal(projectCode("tasktree-dash"), "TASKTREE_DASH");
+  assert.equal(projectCode("factory.ui v2"), "FACTORY_UI_V2");
+  assert.equal(projectCode("--"), "PROJECT");
+  const s = await serving();
+  try {
+    const r = fold(await s.store.readStream(S), s.registry);
+    const keys = ticketKeys(r, S);
+    assert.deepEqual([...keys].slice(0, 3), [["dashboard", "TIRA_TASKTREE_DASH_1"], ["metrics_card", "TIRA_TASKTREE_DASH_2"], ["fetch_metrics", "TIRA_TASKTREE_DASH_3"]]);
+    assert.equal(keys.get("filters"), "TIRA_TASKTREE_DASH_9");
+    assert.equal(taskOfKey(keys, "tira_tasktree_dash_6"), "loading_state"); // any case
+    assert.equal(taskOfKey(keys, "loading_state"), "loading_state"); // an id stays an id
+    const page = (await s.http("GET", "/")).body;
+    assert.match(page, /data-card-key="node:fetch_metrics" data-state="unstarted"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_3<\/span><span class="pin">◆ next<\/span>/); // its key, then the cursor
+    assert.match(page, /data-card-key="node:loading_state" data-state="in_progress"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_6<\/span><div class="t">/);
+    assert.match(page, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_9<\/span><\/p>/);
+    const tasks = JSON.parse((await s.http("GET", "/api/tasks")).body) as { id: string; ticket: string; state: string; path: string }[];
+    assert.deepEqual((rank("6", tasks).results as { id: string }[]).map((t) => t.id), ["loading_state"]); // its number alone
+    assert.equal(rank("TIRA_TASKTREE_DASH_7", tasks).results[0]?.id, "font");
+    assert.equal(rank("t", tasks).results[0]?.id, "table"); // a word, not every key's TIRA
+    assert.deepEqual(rank("tasktree", tasks).results, []); // the project's part of every key finds nothing on its own
+  } finally {
+    await s.done();
+  }
+});
+
+test("@mentions: who a text names (a person's login, an agent's name), marked where tira shows it; the page lists who an @ can name, and its script offers them as you type", async () => {
+  assert.deepEqual(mentionsIn("Thanks @isha, and @claude-code: over to you. Mail a@b.com (@cursor-agent)."), ["isha", "claude-code", "cursor-agent"]);
+  assert.equal(mentionedHtml("ask @isha. <b>"), `ask <span class="mention" data-mention="isha">@isha</span>. &#60;b&#62;`);
+  const s = await serving();
+  try {
+    await new Dispatcher(s.store, s.registry).submit({ stream: S, kind: "create", entity: { type: "comment", id: "c-m" }, actor: "isha", payload: { task: "table", text: "@isha can you check the header row?" } });
+    const page = (await s.http("GET", "/")).body;
+    assert.match(page, /<li class="cm" data-comment>[^]*?<p><span class="mention" data-mention="isha">@isha<\/span> can you check the header row\?<\/p>/);
+    assert.match(page, /<main data-stream="tasktree-dash"[^>]* data-people="isha" data-agents="">/);
+    const app = readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8");
+    assert.match(app, /const hits = at \? mentionable\.filter\(\(x\) => x\.name\.toLowerCase\(\)\.startsWith\(at\.typed\)\)\.slice\(0, 8\) : \[\];/);
+    assert.match(app, /\} else if \(e\.key === "Enter" \|\| e\.key === "Tab"\) \{\n      e\.preventDefault\(\);\n      pickMention/);
+    assert.match(app, /\(field\.closest\("dialog"\) \?\? document\.body\)\.append\(mentionMenu\);/); // above a modal dialog too
   } finally {
     await s.done();
   }

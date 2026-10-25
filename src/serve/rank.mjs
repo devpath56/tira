@@ -54,13 +54,21 @@ export function parse(query) {
 const FIRST = { in_progress: 3, blocked: 2, unstarted: 1 };
 export const priority = (task) => (task.next ? 4 : FIRST[task.state] ?? 0);
 
+// A task's key (TIRA_<PROJECT>_<n>) counts once the query is one: its number alone, or the key itself.
+// Not before, or "t" would find every task by its key's TIRA.
+function keyScore(q, ticket) {
+  if (!ticket) return 0;
+  if (/^\d+$/.test(q)) return ticket.endsWith(`_${q}`) ? 950 : 0;
+  return /^tira[\s_]/i.test(q) ? score(q, ticket) : 0;
+}
+
 // The best matches, best first. With a verb, only tasks whose state allows it.
 export function rank(query, tasks, limit = 8) {
   const { verb, q } = parse(query);
   const scored = [];
   tasks.forEach((task, order) => {
     if (verb && !(VERBS_BY_STATE[task.state] ?? []).includes(verb)) return;
-    const s = q === "" ? 1 + priority(task) : Math.max(score(q, task.id), Math.floor(score(q, task.path ?? "") / 4));
+    const s = q === "" ? 1 + priority(task) : Math.max(score(q, task.id), keyScore(q.trim(), task.ticket), Math.floor(score(q, task.path ?? "") / 4));
     if (s > 0) scored.push({ task, s, order });
   });
   scored.sort((a, b) => b.s - a.s || a.order - b.order);

@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 913 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 941 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -667,7 +667,7 @@ claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope us
 | `add_comment` | A reply on a task's comments, shown on its ticket |
 | `fill_ticket` | Writes a ticket's title, description, steps and estimate as the agent; what it leaves out stays. Who it's assigned to stays a person's to say |
 
-Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. At tira's public address (below), Claude's own Connectors add it too: claude.ai, Claude Desktop and mobile sign in with OAuth, and the person picks the project and approves.
+Every tool takes a task's id or its key (`TIRA_<PROJECT>_<n>`), and next_task says where someone wrote `@agent-name`. Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. At tira's public address (below), Claude's own Connectors add it too: claude.ai, Claude Desktop and mobile sign in with OAuth, and the person picks the project and approves.
 
 ## Hosting tira on Render
 
@@ -685,7 +685,7 @@ It won't start until it's safe. It needs:
 - `TIRA_ADMIN` (the admin's GitHub login);
 - `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
 
-There is no first-run setup for whoever arrives first, and no `--actor`.
+There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Sign up** and **Sign in**, both with GitHub: a sign-up is a request the admin approves in Project settings → Team (or declines), and a browser someone has signed in on offers Sign in only.
 
 Claude's Connectors (`src/mcp/oauth.ts`): tira is its own small OAuth server.
 - **Discovery:** `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. A call to `/mcp` without a token gets a 401 pointing at them.

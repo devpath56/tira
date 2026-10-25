@@ -2,10 +2,33 @@
 // the fold (src/tables/tickets.ts). Read-only: the page, tira's MCP server and the CLI share it.
 import type { FoldResult } from "./fold.ts";
 import { COMMENT, COMMIT, TICKET } from "../tables/tickets.ts";
+import { byBirth } from "./view.ts";
 
 export interface Ticket { version: number; title?: string; description?: string; steps: string[]; estimate?: string; assignee?: string; by?: string }
 export interface Comment { id: string; text: string; by: string; seq: number; at: string }
 export interface Commit { sha: string; message: string; pr?: number; branch?: string; repo: string; seq: number }
+
+// Each task's key, as people say it: TIRA_<PROJECT>_<n> (Isha, 2026-10-25), numbered in the order the
+// project's tasks were made, so a key never changes (a dropped task keeps its number). The project
+// part is its id (the name it was made with, which a rename doesn't change), in capitals.
+export const projectCode = (stream: string): string => stream.toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_").replace(/^_/, "").replace(/_$/, "") || "PROJECT";
+export function ticketKeys(r: FoldResult, stream: string): Map<string, string> {
+  const code = projectCode(stream);
+  const tasks = r.entities.filter((e) => e.stream === stream && e.type === "node").sort(byBirth);
+  return new Map(tasks.map((e, i) => [e.id, `TIRA_${code}_${i + 1}`]));
+}
+// the task a key names (any case), else what was said: a task's id
+export function taskOfKey(keys: ReadonlyMap<string, string>, said: string): string {
+  const want = said.trim().toUpperCase();
+  for (const [id, key] of keys) if (key === want) return id;
+  return said;
+}
+
+// Who a text mentions: each @name in it (a person's GitHub login, an agent's name), once, without
+// the full stop or colon after it. An address like a@b.com isn't a mention.
+export const MENTION = /(^|[\s([{,;])@([A-Za-z0-9][\w.:-]{0,63})/g;
+export const mentionName = (said: string): string => said.replace(/[.:-]+$/, "");
+export const mentionsIn = (text: string): string[] => [...new Set([...text.matchAll(MENTION)].map((m) => mentionName(m[2] ?? "")))];
 
 const str = (b: Record<string, unknown>, k: string) => (typeof b[k] === "string" && (b[k] as string) !== "" ? { [k]: b[k] as string } : {});
 

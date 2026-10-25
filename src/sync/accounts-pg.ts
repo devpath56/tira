@@ -22,6 +22,16 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
 export interface AppKeys { github?: { clientId: string; secret?: string }; atlassian?: { clientId: string; secret: string } }
 export interface GitHubAuth { token: string; name?: string }
 type AppsRow = { github_client_id: string | null; github_secret: string | null; atlassian_client_id: string | null; atlassian_secret: string | null };
+// who may sign in, from its row: the admin, the people added, those waiting to be, how to reach the admin
+type AccessRow = { admin: string | null; members: string[]; requests: string[]; contact_name: string | null; contact_email: string | null };
+function accessOf(r: AccessRow): Access {
+  const a: Access = {};
+  if (r.admin) a.admin = r.admin;
+  if (r.members.length > 0) a.members = r.members;
+  if (r.requests.length > 0) a.requests = r.requests;
+  if (r.contact_name || r.contact_email) a.contact = { ...(r.contact_name ? { name: r.contact_name } : {}), ...(r.contact_email ? { email: r.contact_email } : {}) };
+  return a;
+}
 export interface AtlassianAuth {
   access: string;
   refresh?: string;
@@ -30,7 +40,8 @@ export interface AtlassianAuth {
   site?: string; // its address, e.g. https://acme.atlassian.net
   sites?: { id: string; url: string; name: string }[]; // every site the sign-in can reach
 }
-export interface Access { admin?: string; members?: string[]; contact?: { name?: string; email?: string } }
+// requests: GitHub logins that signed up and wait for the admin to approve them (Isha, 2026-10-25)
+export interface Access { admin?: string; members?: string[]; requests?: string[]; contact?: { name?: string; email?: string } }
 
 // what the accounts hold, as credentials.ts reads it
 export interface Accounts {
@@ -94,6 +105,7 @@ CREATE TABLE IF NOT EXISTS ${s}.account_access (
   admin TEXT, members TEXT[] NOT NULL DEFAULT '{}', contact_name TEXT, contact_email TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE ${s}.account_access ADD COLUMN IF NOT EXISTS requests TEXT[] NOT NULL DEFAULT '{}';
 CREATE TABLE IF NOT EXISTS ${s}.account_github (login TEXT PRIMARY KEY, token TEXT NOT NULL, name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_atlassian (login TEXT PRIMARY KEY, auth TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_names (login TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
@@ -123,8 +135,9 @@ export class PostgresAccounts {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-accounts:${this.schema}`]);
       const made = await c.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = $1 AND tablename = ANY($2)", [this.schema, TABLES]);
       // tables made before the GitHub app kept a secret (2026-10-23) get its column the same way
-      const secret = await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'account_apps' AND column_name = 'github_secret'", [this.schema]);
-      if ((made.rows[0]?.n ?? 0) < TABLES.length || secret.rowCount === 0) await c.query(ddl(this.schema));
+      // and tables made before sign-up requests (2026-10-25) get theirs: the columns each must have
+      const cols = await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND ((table_name = 'account_apps' AND column_name = 'github_secret') OR (table_name = 'account_access' AND column_name = 'requests'))", [this.schema]);
+      if ((made.rows[0]?.n ?? 0) < TABLES.length || cols.rowCount !== 2) await c.query(ddl(this.schema));
     }).catch((err: unknown) => {
       this.setup = undefined; // try again next time
       throw err;
@@ -158,7 +171,7 @@ export class PostgresAccounts {
     const s = this.schema;
     const [apps, acc, gh, at, names, sessions] = await Promise.all([
       this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
-      this.pool.query(`SELECT admin, members, contact_name, contact_email FROM ${s}.account_access`),
+      this.pool.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
       this.pool.query(`SELECT login, auth FROM ${s}.account_atlassian`),
       this.pool.query(`SELECT login, name FROM ${s}.account_names`),
@@ -167,11 +180,8 @@ export class PostgresAccounts {
     const out: Accounts = {};
     const a = apps.rows[0] as AppsRow | undefined;
     if (a) out.apps = this.appsOf(a);
-    const x = acc.rows[0] as { admin: string | null; members: string[]; contact_name: string | null; contact_email: string | null } | undefined;
-    if (x) {
-      const contact = { ...(x.contact_name ? { name: x.contact_name } : {}), ...(x.contact_email ? { email: x.contact_email } : {}) };
-      out.access = { ...(x.admin ? { admin: x.admin } : {}), ...(x.members.length > 0 ? { members: x.members } : {}), ...(Object.keys(contact).length > 0 ? { contact } : {}) };
-    }
+    const x = acc.rows[0] as AccessRow | undefined;
+    if (x) out.access = accessOf(x);
     out.github = Object.fromEntries((gh.rows as { login: string; token: string; name: string | null }[]).map((r) => [r.login, { token: this.key.open(r.token, `github:${r.login}`), ...(r.name ? { name: r.name } : {}) }]));
     out.atlassian = Object.fromEntries((at.rows as { login: string; auth: string }[]).map((r) => [r.login, JSON.parse(this.key.open(r.auth, `atlassian:${r.login}`)) as AtlassianAuth]));
     out.names = Object.fromEntries((names.rows as { login: string; name: string }[]).map((r) => [r.login, r.name]));
@@ -215,11 +225,10 @@ export class PostgresAccounts {
     const s = this.schema;
     await this.transaction(async (c) => {
       await c.query(`INSERT INTO ${s}.account_access (one) VALUES (TRUE) ON CONFLICT DO NOTHING`);
-      const r = (await c.query(`SELECT admin, members, contact_name, contact_email FROM ${s}.account_access WHERE one FOR UPDATE`)).rows[0] as { admin: string | null; members: string[]; contact_name: string | null; contact_email: string | null };
-      const was: Access = { ...(r.admin ? { admin: r.admin } : {}), ...(r.members.length > 0 ? { members: r.members } : {}), ...(r.contact_name || r.contact_email ? { contact: { ...(r.contact_name ? { name: r.contact_name } : {}), ...(r.contact_email ? { email: r.contact_email } : {}) } } : {}) };
-      const next = change(was);
-      await c.query(`UPDATE ${s}.account_access SET admin = $1, members = $2, contact_name = $3, contact_email = $4, updated_at = now() WHERE one`,
-        [next.admin ?? null, next.members ?? [], next.contact?.name ?? null, next.contact?.email ?? null]);
+      const r = (await c.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access WHERE one FOR UPDATE`)).rows[0] as AccessRow;
+      const next = change(accessOf(r));
+      await c.query(`UPDATE ${s}.account_access SET admin = $1, members = $2, requests = $3, contact_name = $4, contact_email = $5, updated_at = now() WHERE one`,
+        [next.admin ?? null, next.members ?? [], next.requests ?? [], next.contact?.name ?? null, next.contact?.email ?? null]);
     });
     await this.refresh();
   }

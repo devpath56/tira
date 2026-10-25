@@ -68,6 +68,7 @@ every task and scrolls.
 - `[data-from]` and `[data-to]` on each line (parent and child), `[data-found]` on each found-while line, `[data-blocks]` on each blocks arc and on a Kanban card's "blocks" chip; `[data-parent]` on each node with a parent.
 - `[data-graph]` on the box the live page turns into a canvas; `.canvas-tools` (`[data-canvas-tools]`) holds its tools; `.fold` with `[data-fold]` (the parent's key) under each parent; `.canvas-flash` repeats an action's result in full screen.
 - `.more` (`[data-more]`: how many it holds) on the older Done or Dropped cards; `.more-btn` on its Show more / Show fewer, after them.
+- `[data-ticket-key]` on each card's first line: the ticket's key, `TIRA_<PROJECT>_<n>`, numbered in the order the project's tasks were made (before the ◆ now/next cursor, where there is one).
 - `[data-card-key]` (the task's key) and `[data-state]` on each Kanban card, which the live page compares across a reload; `.mover` on the card's who-moved-it (`.mover.agent` for an agent).
 - Live only: `[data-moves]` on the Kanban's `.cols` (what each move means, from the rules), `[data-col]` on each status column (its state); while a card drags, `[data-drop]` on each column (home, ok or no) and `[data-dragging]` on the page.
 - `.minimap` (`[data-minimap]`) on the canvas's map; `.branch-label` on each branch's zoomed-out label (below 50% the canvas carries the class far).

@@ -115,7 +115,7 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.deepEqual(Object.keys(kanbanColumns(html))[0], "Ideas");
   assert.deepEqual(kanbanColumns(html), { Ideas: ["7"], "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "tokens", "colors"], Dropped: ["font"] });
   assert.match(html, /<div class="t">improve_<wbr>visual<\/div><div class="row"><span class="chip">metrics_card<\/span><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
-  assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span><div class="t">table<\/div>/);
+  assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span><span class="pin">◆ now<\/span><div class="t">table<\/div>/); // its key first, then the cursor
   // the halo marks the active task only; payloads read as words, not JSON
   assert.equal((html.match(/<a class="gn [^"]*is-active/g) ?? []).length, 1);
   assert.match(html, /<div class="ev-detail">under dashboard<\/div>/);
@@ -891,7 +891,7 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
     else assert.match(live, new RegExp(`<a class="gn[^"]*" href="#${id}"[^>]*data-key="${key}"`), `${id}: its graph box is ${key}`);
   }
   // the changed task: its card, its graph box; the idea's card and ghost
-  assert.match(live, /<a class="card changed" href="#t\d+"[^>]*><div class="t">colors<\/div>/);
+  assert.match(live, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span><div class="t">colors<\/div>/);
   assert.match(live, /<a class="gn st-done changed" href="#t\d+"[^>]*data-key="node:colors"/);
   assert.match(live, /<a class="card idea changed" href="#i0"/);
   assert.match(live, /<a class="ghost changed" href="#i0"/);

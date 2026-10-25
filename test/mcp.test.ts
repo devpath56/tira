@@ -100,21 +100,21 @@ test("tira mcp reads the board: what's next, the task list in the board's order,
     assert.deepEqual(tools.slice(0, 3).map((x) => x.name), ["next_task", "list_tasks", "get_task"]);
     for (const tool of tools.slice(0, 3)) assert.equal(tool.annotations?.readOnlyHint, true, tool.name);
     assert.deepEqual(await call("next_task"), { error: false, text: 'In progress: nothing.\nNext: header (under site)\nBlocked: 1 (list_tasks with state "blocked" shows them)' });
-    assert.deepEqual(await call("list_tasks"), { error: false, text: "site · to do · top level\nheader · to do · under site · ◆ next\nfooter · to do · under site\napi · blocked · under site" });
-    assert.deepEqual(await call("list_tasks", { state: "blocked" }), { error: false, text: "api · blocked · under site" });
+    assert.deepEqual(await call("list_tasks"), { error: false, text: "site · TIRA_DEMO_1 · to do · top level\nheader · TIRA_DEMO_2 · to do · under site · ◆ next\nfooter · TIRA_DEMO_3 · to do · under site\napi · TIRA_DEMO_4 · blocked · under site" });
+    assert.deepEqual(await call("list_tasks", { state: "blocked" }), { error: false, text: "api · TIRA_DEMO_4 · blocked · under site" });
     assert.deepEqual(await call("list_tasks", { state: "done" }), { error: false, text: "No done tasks in demo." });
     assert.equal((await call("list_tasks", { state: "weird" })).error, true); // the schema says no
     const api = await call("get_task", { id: "api" });
     assert.equal(api.error, false);
-    assert.match(api.text, /^api · blocked · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nBlocked: waiting on the key\nCommits: none yet \(push to a branch named api, or write "tira: api" in a pull request; complete_task looks on GitHub first\)\nComments: none yet \(add_comment writes one\)\.\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
+    assert.match(api.text, /^api · TIRA_DEMO_4 · blocked · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nBlocked: waiting on the key\nCommits: none yet \(push to a branch named api, or write "tira: api" in a pull request; complete_task looks on GitHub first\)\nComments: none yet \(add_comment writes one\)\.\nHistory:\n  seq 4 · node.born · isha · under site\n  seq 5 · node.start · isha\n  seq 6 · node.block · isha · reason waiting on the key$/);
     assert.deepEqual(await call("get_task", { id: "nope" }), { error: true, text: "There is no task nope in demo: list_tasks shows them." });
     // the one in progress, not listed again as next; once done, its proof
     await w.send("header", "START");
     assert.match((await call("next_task")).text, /^In progress: header \(under site\)\nBlocked: 1/);
     await w.send("header", "COMPLETE", { evidenceRef: "header.png" });
-    assert.deepEqual(await call("list_tasks"), { error: false, text: "site · to do · top level\nfooter · to do · under site · ◆ next\napi · blocked · under site" }); // done: off the open list
-    assert.match((await call("get_task", { id: "header" })).text, /^header · done · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nProof: header.png \(from isha, seq 8\)\nComments: none yet/); // done: no commits to pick
-    assert.match((await call("get_task", { id: "site" })).text, /^site · to do · top level\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nSubtasks: header \(done\), footer \(to do\), api \(blocked\)\n/);
+    assert.deepEqual(await call("list_tasks"), { error: false, text: "site · TIRA_DEMO_1 · to do · top level\nfooter · TIRA_DEMO_3 · to do · under site · ◆ next\napi · TIRA_DEMO_4 · blocked · under site" }); // done: off the open list
+    assert.match((await call("get_task", { id: "header" })).text, /^header · TIRA_DEMO_2 · done · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nProof: header.png \(from isha, seq 8\)\nComments: none yet/); // done: no commits to pick
+    assert.match((await call("get_task", { id: "site" })).text, /^site · TIRA_DEMO_1 · to do · top level\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nSubtasks: header \(done\), footer \(to do\), api \(blocked\)\n/);
   } finally {
     await client.close();
   }
@@ -135,7 +135,7 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
     assert.deepEqual(await call("start_task", { id: "footer" }), { error: true, text: "Start footer: refused (gate: one active task: node:header is already active). The refusal is in the log (seq 8). What to do: Only one task can be in progress. Complete or block header first, then start footer." });
     // a subtask under work in progress is found while working on it
     assert.deepEqual(await call("add_subtask", { under: "header", name: "header_logo" }), { error: false, text: "Add subtask header_logo under header: done (seq 9)." });
-    assert.match((await call("get_task", { id: "header_logo" })).text, /^header_logo · to do · under site › header · ◆ next · found during header\n/);
+    assert.match((await call("get_task", { id: "header_logo" })).text, /^header_logo · TIRA_DEMO_\d+ · to do · under site › header · ◆ next · found during header\n/);
     assert.match((await call("add_subtask", { under: "footer", name: "footer_links" })).text, /^Add subtask footer_links under footer: done/);
     assert.doesNotMatch((await call("get_task", { id: "footer_links" })).text, /found during/); // footer isn't under way
     // proof of work, and the rules' order
@@ -157,7 +157,7 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
     // blocked, waiting on a new ticket made under it, found while working on it
     assert.match((await call("block_task", { id: "footer", reason: "waiting on copy", new_ticket: "footer_copy" })).text, /^Add subtask footer_copy under footer: done \(seq \d+\)\. Block footer: done \(seq \d+\)\.$/);
     const footer = (await call("get_task", { id: "footer" })).text;
-    assert.match(footer, /^footer · blocked · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nSubtasks: footer_links \(to do\), footer_copy \(to do\)\nBlocked: waiting on copy\nWaiting on: footer_copy\n/);
+    assert.match(footer, /^footer · TIRA_DEMO_3 · blocked · under site\nTicket: no description, steps, estimate or assignee yet \(fill_ticket writes all but the assignee\)\.\nSubtasks: footer_links \(to do\), footer_copy \(to do\)\nBlocked: waiting on copy\nWaiting on: footer_copy\n/);
     assert.match(footer, /node.block · claude-code · reason waiting on copy · blocked by footer_copy$/);
     assert.match((await call("get_task", { id: "footer_copy" })).text, /found during footer/);
     // or on an open task; never on one that isn't there, nor on two things; nothing written then
@@ -185,9 +185,9 @@ test("agents read a ticket: its words, its comments, what's assigned to them and
   await d.submit({ stream: S, kind: "create", entity: { type: "comment", id: "c-1" }, actor: "isha", payload: { task: "footer", text: "Use the brand blue for the links." } });
   const { call } = await connected(w);
   assert.match((await call("next_task")).text, /\nAssigned to you: footer\nFeedback on footer: 1 new, latest from isha: "Use the brand blue for the links\." \(get_task shows it; add_comment replies\)$/);
-  assert.match((await call("list_tasks")).text, /\nfooter · to do · under site "Site footer" · assigned to claude-code\n/);
+  assert.match((await call("list_tasks")).text, /\nfooter · TIRA_DEMO_3 · to do · under site "Site footer" · assigned to claude-code\n/);
   const footer = (await call("get_task", { id: "footer" })).text;
-  assert.match(footer, /^footer · to do · under site\nTitle: Site footer\nDescription:\n  Links and the copyright line\.\n  Dark, like the header\.\nSteps:\n  1\. Add the links\n  2\. Add the copyright\nEstimate: 1d\nAssignee: claude-code\n/);
+  assert.match(footer, /^footer · TIRA_DEMO_3 · to do · under site\nTitle: Site footer\nDescription:\n  Links and the copyright line\.\n  Dark, like the header\.\nSteps:\n  1\. Add the links\n  2\. Add the copyright\nEstimate: 1d\nAssignee: claude-code\n/);
   assert.match(footer, /\nComments \(1, oldest first\):\n  seq \d+ · isha: Use the brand blue for the links\.\nHistory:/);
   // a reply: on the ticket, as the agent; answered, the feedback leaves what's next
   assert.match((await call("add_comment", { id: "footer", text: "Done: links are brand blue." })).text, /^Commented on footer \(seq \d+\): people see it on the ticket\.$/);
@@ -208,7 +208,7 @@ test("agents fill in a ticket: its title, description, steps and estimate, as th
   const filled = await call("fill_ticket", { id: "header", title: "  Site   header ", description: "Logo and the menu.\r\nSticky on scroll.", steps: [" Add the logo", "", "Add the menu "], estimate: "2h" });
   assert.match(filled.text, /^Filled in header(?:'|’)s ticket \(seq \d+\): people see it on the ticket\. get_task shows it\.$/);
   assert.equal(filled.error, false);
-  assert.equal(await ticket(), "header · to do · under site · ◆ next\nTitle: Site header\nDescription:\n  Logo and the menu.\n  Sticky on scroll.\nSteps:\n  1. Add the logo\n  2. Add the menu\nEstimate: 2h");
+  assert.equal(await ticket(), "header · TIRA_DEMO_2 · to do · under site · ◆ next\nTitle: Site header\nDescription:\n  Logo and the menu.\n  Sticky on scroll.\nSteps:\n  1. Add the logo\n  2. Add the menu\nEstimate: 2h");
   const written = (await w.store.readStream(S)).at(-1);
   assert.equal(written?.metadata.actor, "claude-code"); // the history says the agent wrote it
   // a person assigns it; the agent changes the estimate alone: the rest stays, the assignee too, even when it names one
@@ -218,7 +218,7 @@ test("agents fill in a ticket: its title, description, steps and estimate, as th
   assert.match(await ticket(), /\nSteps:\n  1\. Add the logo\n  2\. Add the menu\nEstimate: 1d\nAssignee: isha$/);
   // an empty one clears it
   assert.equal((await call("fill_ticket", { id: "header", description: "", steps: [] })).error, false);
-  assert.equal(await ticket(), "header · to do · under site · ◆ next\nTitle: Site header\nEstimate: 1d\nAssignee: isha");
+  assert.equal(await ticket(), "header · TIRA_DEMO_2 · to do · under site · ◆ next\nTitle: Site header\nEstimate: 1d\nAssignee: isha");
   // nothing new, nothing given, a bad estimate, no such task: nothing is written
   const before = await logged();
   assert.deepEqual(await call("fill_ticket", { id: "header", title: "Site header" }), { error: false, text: "Nothing changed: header's ticket already says that." });
@@ -231,7 +231,23 @@ test("agents fill in a ticket: its title, description, steps and estimate, as th
   assert.equal(await logged(), before);
   // people see the agent's words on the ticket
   const page = renderHtml(fold(await w.store.readStream(S), w.registry), S, "h");
-  assert.match(page, /<h2>Site header<\/h2><p class="tk-id">header<\/p>/);
+  assert.match(page, /<h2>Site header<\/h2><p class="tk-id"><span data-ticket-key>TIRA_DEMO_2<\/span> · header<\/p>/);
+});
+
+test("agents name a task by its key (TIRA_<PROJECT>_<n>) as well as its id, and next_task says where someone @mentioned them, until they answer", async () => {
+  const w = await world();
+  const d = new Dispatcher(w.store, w.registry);
+  const { call } = await connected(w);
+  assert.match((await call("get_task", { id: "tira_demo_2" })).text, /^header · TIRA_DEMO_2 · to do · under site/); // any case
+  assert.deepEqual(await call("get_task", { id: "TIRA_DEMO_99" }), { error: true, text: "There is no task TIRA_DEMO_99 in demo: list_tasks shows them." });
+  await d.submit({ stream: S, kind: "create", entity: { type: "comment", id: "c-1" }, actor: "isha", payload: { task: "header", text: "@claude-code can you take the logo?" } });
+  await d.submit({ stream: S, kind: "create", entity: { type: "comment", id: "c-2" }, actor: "isha", payload: { task: "header", text: "Thanks @cursor-agent" } }); // someone else's
+  await d.submit({ stream: S, kind: "create", entity: { type: "ticket", id: "footer", version: 1 }, actor: "isha", payload: { task: "footer", description: "Links and copyright. Ask @claude-code for the dark theme." } });
+  const next = (await call("next_task")).text;
+  assert.match(next, /\nMentioned on header by isha: "@claude-code can you take the logo\?" \(get_task shows it; add_comment replies\)\nMentioned in the ticket: footer \(get_task shows it\)$/);
+  assert.doesNotMatch(next, /cursor-agent/);
+  assert.match((await call("add_comment", { id: "TIRA_DEMO_2", text: "On it." })).text, /^Commented on header/); // by its key
+  assert.doesNotMatch((await call("next_task")).text, /Mentioned on header/); // answered
 });
 
 test("complete_task looks on GitHub for the task's commits first when it doesn't know the one given, then takes it; a look that finds none says so", async () => {

@@ -49,7 +49,7 @@ function draw() {
     li.setAttribute("aria-selected", String(i === sel));
     li.dataset.paletteKey = task.key; // not data-key: that one marks each task once on the page (M1)
     const id = document.createElement("span"); id.className = "pid"; id.textContent = task.id;
-    const path = document.createElement("span"); path.className = "ppath"; path.textContent = task.path;
+    const path = document.createElement("span"); path.className = "ppath"; path.textContent = [task.ticket, task.path].filter(Boolean).join(" · ");
     const what = document.createElement("span"); what.className = "pverb"; what.textContent = verb ? `${VERB_LABEL[verb]} →` : task.next ? "◆ next" : task.state.replace("_", " ");
     li.append(id, path, what);
     li.addEventListener("mousedown", (e) => { e.preventDefault(); sel = i; go(); });
@@ -131,6 +131,91 @@ document.addEventListener("input", (e) => {
   const form = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ? e.target.form : null;
   if (form?.matches("[data-ticket-form]")) form.dataset.dirty = "1";
 });
+// @mentions: typing @ in a ticket's words or a comment lists the project's people and agents (the
+// page's data-people and data-agents, src/render/html.ts) whose names start with what follows it.
+// Arrows move, Enter or Tab picks, Escape closes; a click picks too. The name goes in as @name.
+const mainEl = document.querySelector("main[data-people]");
+const mentionable = [
+  ...(mainEl?.dataset.people ?? "").split(" ").filter(Boolean).map((name) => ({ name, kind: "person" })),
+  ...(mainEl?.dataset.agents ?? "").split(" ").filter(Boolean).map((name) => ({ name, kind: "agent" })),
+];
+const mentionMenu = document.createElement("ul");
+mentionMenu.className = "mention-menu";
+mentionMenu.setAttribute("role", "listbox");
+mentionMenu.setAttribute("aria-label", "People and agents to mention");
+mentionMenu.hidden = true;
+let mentionAt = null; // the @ being typed: its field, where it starts, where the caret is
+const hideMentions = () => {
+  mentionMenu.hidden = true;
+  mentionAt = null;
+};
+// the @name being typed just before the caret, if any
+function mentionTyped(field) {
+  const upto = field.value.slice(0, field.selectionStart ?? 0);
+  const m = /(?:^|[\s([{,;])@([\w.:-]{0,64})$/.exec(upto);
+  return m ? { start: upto.length - (m[1] ?? "").length - 1, typed: (m[1] ?? "").toLowerCase() } : null;
+}
+function showMentions(field) {
+  const at = mentionTyped(field);
+  const hits = at ? mentionable.filter((x) => x.name.toLowerCase().startsWith(at.typed)).slice(0, 8) : [];
+  if (!at || hits.length === 0) return hideMentions();
+  mentionAt = { field, start: at.start, end: field.selectionStart ?? 0 };
+  mentionMenu.replaceChildren(...hits.map((x, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(i === 0));
+    li.dataset.name = x.name;
+    const kind = document.createElement("small");
+    kind.textContent = x.kind;
+    li.append(x.name, kind);
+    return li;
+  }));
+  (field.closest("dialog") ?? document.body).append(mentionMenu); // above a modal dialog too
+  const box = field.getBoundingClientRect();
+  mentionMenu.style.left = `${Math.round(box.left)}px`;
+  mentionMenu.style.top = `${Math.round(Math.min(box.bottom + 4, innerHeight - 230))}px`;
+  mentionMenu.hidden = false;
+}
+function pickMention(name) {
+  if (!mentionAt) return;
+  const { field, start, end } = mentionAt;
+  const said = `@${name} `;
+  field.value = field.value.slice(0, start) + said + field.value.slice(end);
+  const caret = start + said.length;
+  field.focus();
+  field.setSelectionRange(caret, caret);
+  hideMentions();
+  field.dispatchEvent(new Event("input", { bubbles: true })); // a ticket's Save shows: it changed
+}
+if (mentionable.length > 0) {
+  document.addEventListener("input", (e) => {
+    if (e.target instanceof HTMLTextAreaElement) showMentions(e.target);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (mentionMenu.hidden || !mentionAt) return;
+    const items = [...mentionMenu.querySelectorAll("li")];
+    const now = items.findIndex((li) => li.getAttribute("aria-selected") === "true");
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = (now + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items.forEach((li, i) => li.setAttribute("aria-selected", String(i === next)));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      pickMention(items[Math.max(0, now)]?.dataset.name ?? "");
+    } else if (e.key === "Escape") {
+      e.preventDefault(); // the list closes, not the dialog
+      hideMentions();
+    }
+  }, true);
+  mentionMenu.addEventListener("mousedown", (e) => {
+    e.preventDefault(); // the field keeps its focus and caret
+    const li = e.target instanceof Element ? e.target.closest("li") : null;
+    if (li) pickMention(li.dataset.name ?? "");
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target === mentionAt?.field) hideMentions();
+  });
+}
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(e.target instanceof HTMLTextAreaElement) || !e.target.closest(".drawer")) return;
   e.preventDefault();

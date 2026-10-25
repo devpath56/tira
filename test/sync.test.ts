@@ -489,8 +489,8 @@ async function serving(home: string, actor: string | null = "isha") {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as AddressInfo).port;
   let cookie = "";
-  const http = (method: string, path: string, body?: string, host = `localhost:${port}`) => new Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }>((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, method, path, headers: { host, ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}) } }, (res) => {
+  const http = (method: string, path: string, body?: string, host = `localhost:${port}`, more = "") => new Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }>((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, method, path, headers: { host, ...(cookie || more ? { cookie: [cookie, more].filter(Boolean).join("; ") } : {}), ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}) } }, (res) => {
       let b = "";
       res.on("data", (c) => (b += c));
       res.on("end", () => resolve({ status: res.statusCode ?? 0, body: b, headers: res.headers }));
@@ -547,7 +547,7 @@ test("before setup: the board points to Project settings, and Account settings o
     // Project settings: the project's own (its GitHub, Jira, Sync and Delete), none of yours
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);
-    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "github", "jira", "sync", "agents", "delete"]);
+    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "team", "github", "jira", "sync", "agents", "delete"]);
     assert.doesNotMatch(project, /data-int="(?:account|appearance|people|setup)"/);
     // without sign-in set up, tira serve's own name still acts
     assert.equal((await s.post("/integrations/link", { what: "repo", repo: "acme/app" })).status, 303);
@@ -883,20 +883,57 @@ test("access: the first person to sign in is the admin; after that only people t
     assert.equal(await s.flash(await s.post("/integrations/people", { do: "contact", name: "Isha", email: "isha@example.com" })), "Saved: the sign-in page shows how to reach you.");
     assert.equal(await s.flash(await s.post("/integrations/people", { do: "contact", name: "Isha", email: "not an email" })), "That isn't a name and an email people can use.");
     s.signOut();
-    assert.match((await s.http("GET", "/welcome")).body, /<p class="land-foot" data-newcomer>New here\? Ask Isha \(<a href="mailto:isha@example\.com" data-admin-email>isha@example\.com<\/a>\) for access\.<\/p>/);
+    // a browser no one has signed in on: Sign up (a request Isha approves) and Sign in
+    const landing = (await s.http("GET", "/welcome")).body;
+    assert.match(landing, /<h1>Welcome to tira<\/h1><form method="post" action="\/signin\/start"><input type="hidden" name="token" value="k"><input type="hidden" name="signup" value="1"><button class="land-btn blue" type="submit" data-signup-start>[^]*?<span>Sign up with GitHub<\/span><\/button><\/form><form method="post" action="\/signin\/start">[^]*?data-signin-start>[^]*?<span>Sign in with GitHub<\/span>/);
+    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up, and Isha \(<a href="mailto:isha@example\.com" data-admin-email>isha@example\.com<\/a>\) approves you\.<\/p>/);
+    // one someone signed in on: Sign in only
+    const known = (await s.http("GET", "/welcome", undefined, undefined, "tira_known=1")).body;
+    assert.match(known, /<h1>Sign in to tira<\/h1><form method="post" action="\/signin\/start">[^]*?<span>Continue with GitHub<\/span>/);
+    assert.doesNotMatch(known, /data-signup-start|data-newcomer/);
     // someone else: refused, told who to ask, and nothing of theirs is kept
     s.githubAuthApi.login = "octo";
     const refused = await s.signInWithGitHub();
     assert.equal(refused.headers["set-cookie"], undefined);
     assert.match(refused.body, /^<div data-go="\/welcome\?r=\d+"><\/div>$/);
-    assert.equal(await s.flash(refused), "octo doesn't have access to this tira yet. Ask the admin, Isha (isha@example.com), to add your GitHub account.");
+    assert.equal(await s.flash(refused), "octo doesn't have access to this tira yet: Sign up to ask Isha.");
+    assert.equal(githubAuth("octo", s.env), undefined);
+    // they sign up: a request, kept as their GitHub login and nothing else; signing in says it's still waiting
+    const signUp = async () => {
+      s.githubAuthApi.approveAfter = 0;
+      const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", { signup: "1" })).headers.location))?.[1] ?? "";
+      return s.post("/signin/poll", { id, fragment: "1" });
+    };
+    const asked = await signUp();
+    assert.equal(asked.headers["set-cookie"], undefined);
+    assert.equal(await s.flash(asked), "Thanks, octo: your request is with Isha. You can sign in once they approve it.");
+    assert.deepEqual(access(s.env).requests, ["octo"]);
+    await signUp(); // twice: asked once
+    assert.deepEqual(access(s.env).requests, ["octo"]);
+    assert.equal(await s.flash(await s.signInWithGitHub()), "Thanks, octo: your request is with Isha. You can sign in once they approve it.");
     assert.equal(githubAuth("octo", s.env), undefined);
     assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
     // the admin adds them (any case, with or without @); then they get in
     s.githubAuthApi.login = "isha-gh";
     await s.signInWithGitHub();
-    const admin = (await s.http("GET", "/connect")).status === 200 ? "ok" : "no";
-    assert.equal(admin, "ok");
+    const signedIn = await s.http("GET", "/connect");
+    assert.equal(signedIn.status, 200);
+    assert.match(String(signedIn.headers["set-cookie"]), /^tira_known=1; HttpOnly; SameSite=Lax; Path=\/; Max-Age=31536000$/); // this browser's landing offers Sign in only from now on
+    // the request shows in Team, with Approve and Decline; approved, they're in and no longer waiting
+    assert.match((await s.http("GET", "/integrations")).body, /<div class="grp-row" data-team-request><span class="grp-k">octo<\/span><span class="grp-v">Wants to join<\/span><form method="post" action="\/integrations\/people" class="inline"><input type="hidden" name="token" value="k"><input type="hidden" name="do" value="approve"><input type="hidden" name="login" value="octo"><input type="hidden" name="back" value="\/integrations"><button class="act primary" type="submit">Approve<\/button><\/form>/);
+    const approved = await s.post("/integrations/people", { do: "approve", login: "octo", back: "/integrations" });
+    assert.match(String(approved.headers.location), /^\/integrations\?r=\d+$/);
+    assert.equal(await s.flash(approved), "Approved octo: they can sign in with GitHub now.");
+    assert.deepEqual([access(s.env).members, access(s.env).requests], [["octo"], undefined]);
+    // another declined: no longer waiting, and nothing of theirs kept
+    s.githubAuthApi.login = "newbie";
+    s.signOut();
+    await signUp();
+    s.githubAuthApi.login = "isha-gh";
+    await s.signInWithGitHub();
+    assert.equal(await s.flash(await s.post("/integrations/people", { do: "decline", login: "newbie", back: "/integrations" })), "Declined newbie's request: tira keeps nothing of theirs.");
+    assert.equal(access(s.env).requests, undefined);
+    assert.equal(await s.flash(await s.post("/integrations/people", { do: "remove", login: "octo" })), "Removed octo: they're signed out and can't sign in. Their GitHub and Jira links stay until they unlink them.");
     assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "@octo" })), "Added octo: they can sign in with GitHub now.");
     assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "OCTO" })), "OCTO can already sign in.");
     assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "not a login!" })), "That isn't a GitHub username.");
@@ -1208,6 +1245,19 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     // no one signed in: the landing first
     s.signOut();
     assert.equal((await s.http("GET", "/projects/new")).headers.location, "/welcome");
+    // a project's id and its name are each unique, whatever their case: not another project's id, nor the name it's shown by
+    await s.signInWithGitHub();
+    assert.match((await s.post("/projects", { name: "MOBILE", repo: "acme/x" })).body, /data-np-problem>Another project is already called Mobile App: name this one differently\.<\/div>/); // its id
+    await s.post("/projects/rename?w=mobile", { title: "mobile-app" });
+    assert.match((await s.post("/projects", { name: "Mobile-APP", repo: "acme/x" })).body, /data-np-problem>Another project is already called mobile-app: name this one differently\.<\/div>/); // its name
+    // Project settings: its id, which never changes, and its tickets' keys; the team, and the admin adds people here
+    const settings = (await s.http("GET", "/integrations?w=mobile")).body;
+    assert.match(settings, /<span class="grp-k">Project id<\/span><code class="grp-v" data-project-id>mobile<\/code><\/div><div class="grp-foot">The id never changes: it(?:'|&#39;)s in the project(?:'|&#39;)s address and its tickets(?:'|&#39;) keys \(<code>TIRA_MOBILE_1<\/code>, …\)\./);
+    assert.match(settings, /<section class="grp" id="team" data-int="team">[^]*?<div class="grp-row"><span class="grp-k">isha-gh<\/span><span class="pill">Admin<\/span><\/div>[^]*?<form method="post" action="\/integrations\/people\?w=mobile" class="grp-row" data-team-add>/);
+    const added = await s.post("/integrations/people?w=mobile", { do: "add", login: "devansh", back: "/integrations" });
+    assert.match(String(added.headers.location), /^\/integrations\?r=\d+&w=mobile$/); // back to Project settings, not Account settings
+    assert.equal(await s.flash(added), "Added devansh: they can sign in with GitHub now.");
+    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<div class="grp-row" data-team-member><span class="grp-k">devansh<\/span><span class="grp-v">Can sign in<\/span><\/div>/);
   } finally {
     await s.done();
   }
@@ -1232,8 +1282,8 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     const at = (id: string) => page.indexOf(`data-int="${id}"`);
     assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
     assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
-    assert.deepEqual(nav(project), [["general", "General"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    assert.deepEqual(nav(project), [["general", "General"], ["team", "Team"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]]);
+    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "team", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);
