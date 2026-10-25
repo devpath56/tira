@@ -769,7 +769,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // the same origin, within the size cap, with this process's token
   const formOf = async (req: IncomingMessage, res: ServerResponse, host: string): Promise<URLSearchParams | undefined> => {
     const origin = req.headers.origin;
-    const own = opts.site && host === opts.site.host ? opts.site.origin : `http://${host}`;
+    const own = host === opts.site?.host ? opts.site.origin : `http://${host}`;
     if (origin !== undefined && origin !== own) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
     let form: URLSearchParams;
     try {

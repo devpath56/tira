@@ -124,7 +124,10 @@ const settingsApps = (env: Env): AppKeys => {
   const ghSecret = env.TIRA_GITHUB_CLIENT_SECRET?.trim();
   const at = env.TIRA_ATLASSIAN_CLIENT_ID?.trim();
   const atSecret = env.TIRA_ATLASSIAN_CLIENT_SECRET?.trim();
-  return { ...(gh ? { github: { clientId: gh, ...(ghSecret ? { secret: ghSecret } : {}) } } : {}), ...(at && atSecret ? { atlassian: { clientId: at, secret: atSecret } } : {}) };
+  const keys: AppKeys = {};
+  if (gh) keys.github = ghSecret ? { clientId: gh, secret: ghSecret } : { clientId: gh };
+  if (at && atSecret) keys.atlassian = { clientId: at, secret: atSecret };
+  return keys;
 };
 export const appKeys = (env: Env = process.env): AppKeys => ({ ...(read(env).apps ?? {}), ...settingsApps(env) });
 export async function saveAppKeys(keys: AppKeys, env: Env = process.env): Promise<void> {

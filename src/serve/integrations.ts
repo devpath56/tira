@@ -668,11 +668,18 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     return `<div class="agent-app" data-agent-app="${app}"><b>${APP_NAME[app]}</b>${steps(setup)}${codeBlock("manual-" + app, setup.code, APP_NAME[app])}<p class="agent-undo">To remove it: <code>${esc(setup.remove)}</code></p></div>`;
   };
   const morePart = (title: string, body: string) => `<div class="agent-more-part"><h4>${title}</h4>${body}</div>`;
+  // whether Claude Desktop's agent would reach this tira's database (on this computer only: at a
+  // public address Claude Desktop connects as Claude does)
+  const databasePart = (db: DatabaseCheck, envFile: string) => {
+    if (c.site) return "";
+    const ready = db === "ready" ? "agent-db" : "agent-db no";
+    return morePart("Claude Desktop's database", `<p class="${ready}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`);
+  };
   const more = (at: Where, db: DatabaseCheck, envFile: string) => `<details class="agent-more" data-agent-more><summary>More</summary>`
     + morePart("tira's MCP address", `<p>For any app that speaks MCP over HTTP: this address, with the agent's token in the header <code>Authorization: Bearer ${esc(TOKEN_HERE)}</code>. It answers while tira serve runs.</p>${codeBlock("agent-url", at.url, "the address")}`)
     + morePart("Each app by hand", `<p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${appsHere().map((app) => manualApp(app, at)).join("")}`)
     + morePart("What agents can do", `<ul class="agent-tools">${TOOLS_SAID.map(toolItem).join("")}</ul><p>Cancelling, reopening and unblocking stay with people.</p>`)
-    + (c.site ? "" : morePart("Claude Desktop's database", `<p class="${db === "ready" ? "agent-db" : "agent-db no"}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`))
+    + databasePart(db, envFile)
     + (c.site ? "" : morePart("Claude's Connectors", `<p data-agent-connectors>Claude's own Connectors settings (Add custom connector) can't add tira yet: Anthropic's servers reach a connector over the internet, at a public https address, and tira answers on this computer only. That comes once tira is hosted. Until then, connect Claude Code by its command and Claude Desktop by its config entry, above.</p>`))
     + `</details>`;
   // at a public address: the apps that connect by a token here (Claude Desktop's local entry has no
