@@ -20,7 +20,7 @@
 // refused in the dialog with a plain reason, and the placement's parent is checked before the
 // approval is written: the task the idea becomes must fit there.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
@@ -37,17 +37,21 @@ import { IDEA, ideaRows, placeProblem, type IdeaRow } from "../fold/ideas.ts";
 import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
-import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, TICKET, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
+import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
 import { commitsOf, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { access, appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
-import { accounts, integrationRoutes, whoIs, type Outside } from "./integrations.ts";
+import { accounts, integrationRoutes, NEXT_COOKIE, whoIs, type Outside } from "./integrations.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
-import { CSP } from "./csp.ts";
+import { consentCsp, CSP } from "./csp.ts";
+import { consentPage } from "./welcome.ts";
+import { agentNameProblem } from "../mcp/names.ts";
+import { askingOf, authorizationServer, AUTHORIZATION_SERVER, clientId, Codes, CONNECTOR_APP, PROTECTED_RESOURCE, protectedResource, registrationOf, withQuery, type Asking } from "../mcp/oauth.ts";
 import { MCP_PATH, mcpRoute } from "../mcp/http.ts";
-import { agentTokensFor } from "../mcp/tokens.ts";
+import { agentTokensFor, freeName } from "../mcp/tokens.ts";
+import type { PublicSite } from "./public.ts";
 
 export { PAGE_VERBS } from "./command.ts";
 export { CSP } from "./csp.ts";
@@ -87,6 +91,8 @@ export interface ServeOptions {
   // GitHub and Jira (the Integrations page, src/serve/integrations.ts); tests pass stand-ins.
   // Absent: the real GitHub and Atlassian, and the private store under $TIRA_HOME.
   links?: Outside;
+  // the public https address tira is reached at (src/serve/public.ts); absent: this computer only
+  site?: PublicSite;
 }
 
 export interface TaskEntry { key: string; type: string; id: string; state: string; path: string; drawer: string; next: boolean }
@@ -243,12 +249,19 @@ export async function packetFor(ask: PacketAsk): Promise<Packet> {
   const hint = pv.ok ? undefined : hintFor(pv.code, pv.detail, event, id, state);
   const suggestions = verb.field?.suggest ? reasonSuggestions(ask.events, stream, r, event, id) : [];
   return {
-    ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found,
-    ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
-    ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
+    ok: pv.ok, title, verdict: verdictOf(pv), ...(hint ? { hint } : {}), seen, suggestions, found, ...packetExtras(ask, pv),
     brief: briefFor(factsFor(ask, state, cfg.region, pv, found)),
     command: commandFor(type, id, event, found),
-    ...(ticketsOf(r, stream).has(id) ? { ticket: ticketsOf(r, stream).get(id) as Ticket } : {}),
+  };
+}
+// what only some decisions carry: to block, the open tasks it could wait on; the finished parents
+// tira closes too; the task's ticket, once written
+function packetExtras({ r, stream, id, event }: PacketAsk, pv: Preview): Partial<Packet> {
+  const ticket = ticketsOf(r, stream).get(id);
+  return {
+    ...(event === "BLOCK" ? { waitables: waitable(r, stream, id) } : {}),
+    ...(pv.ok && pv.closes.length > 0 ? { closes: pv.closes.map(bareKey) } : {}),
+    ...(ticket ? { ticket } : {}),
   };
 }
 
@@ -654,14 +667,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const actorNow = () => current.getStore()?.actor;
   const previews = new WritePath(opts.store, opts.registry);
   const flashes = new Map<string, { ok: boolean; text: string; changed?: string[] }>();
-  let flashSeq = 0;
+  const flashKey = () => String(randomInt(1, 2 ** 47)); // unguessable: one person's result isn't another's to read
   const now = async (stream: string) => {
     const events = await opts.store.readStream(stream);
     const r = fold(events, opts.registry);
     return { events, r, hash: fingerprint(r) };
   };
+  // at a public address: browsers keep to https, and cookies go over https only
   const send = (res: ServerResponse, status: number, type: string, body: string, extra: Record<string, string> = {}) => {
-    res.writeHead(status, { ...HEADERS, "Content-Type": type, ...extra });
+    const cookie = extra["Set-Cookie"];
+    const secure = opts.site ? { "Strict-Transport-Security": "max-age=31536000", ...(cookie ? { "Set-Cookie": `${cookie}; Secure` } : {}) } : {};
+    res.writeHead(status, { ...HEADERS, "Content-Type": type, ...extra, ...secure });
     res.end(body);
   };
   const text = "text/plain; charset=utf-8";
@@ -690,19 +706,24 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
 
   // GET /api/live: where the project's log is now (its last seq), asked every few seconds by the
   // page so it follows the log by itself (app.mjs). The one event at the end only: cheap to ask.
+  // what only someone signed in may read: the projects, their tasks, how far each log has got
+  const signedOut = (res: ServerResponse) => actorNow() === undefined && (send(res, 401, text, "sign in first\n"), true);
   const liveSeq = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    if (signedOut(res)) return;
     const [last] = await opts.store.readStream(ws.stream, { direction: "backwards", limit: 1 });
     send(res, 200, "application/json; charset=utf-8", JSON.stringify({ seq: last?.seq ?? 0 }));
   };
 
   // GET /api/tasks: the palette's index
   const tasks = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    if (signedOut(res)) return;
     const { r } = await now(ws.stream);
     send(res, 200, "application/json; charset=utf-8", JSON.stringify(taskIndex(r, ws.stream)));
   };
 
   // GET /api/workspaces: the switcher's list, read when it opens (every stream, folded once)
   const workspaces = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+    if (signedOut(res)) return;
     const all = await opts.store.readAll();
     send(res, 200, "application/json; charset=utf-8", JSON.stringify(workspaceList(fold(all, opts.registry), all.map((e) => e.stream), opts.stream, ws.stream)));
   };
@@ -748,7 +769,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // the same origin, within the size cap, with this process's token
   const formOf = async (req: IncomingMessage, res: ServerResponse, host: string): Promise<URLSearchParams | undefined> => {
     const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `http://${host}`) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
+    const own = host === opts.site?.host ? opts.site.origin : `http://${host}`;
+    if (origin !== undefined && origin !== own) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
     let form: URLSearchParams;
     try {
       form = new URLSearchParams(await readBody(req));
@@ -760,21 +782,23 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return form;
   };
 
+  // from a decision's own fields (the dialog): what it asks for, else the dialog again with what's wrong
+  const dialogAsked = async (res: ServerResponse, form: URLSearchParams, ws: Workspace, fragment: boolean, seen: string | null): Promise<Asked | undefined> => {
+    const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
+    const values = valuesOf(form);
+    const got = fromDialog(form, opts.registry, (await now(ws.stream)).r, ws.stream);
+    if (!got) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
+    const long = (values.comment ?? "").trim().length > MAX_COMMENT ? `Keep the comment to ${MAX_COMMENT} characters.` : undefined;
+    const why = "why" in got ? got.why : long;
+    if (why !== undefined || "why" in got) { await decide(res, ws, opened, { error: why ?? "", values }, fragment, 422); return undefined; }
+    return { ws, fragment, typed: null, seen, ask: withDefaults(got.ask), ticket: got.ticket, target: targetOf(got.ask), dialog: true, values };
+  };
   // what it asks for: the command as you left it, read strictly; without one, the posted fields
   const askedOf = async (res: ServerResponse, form: URLSearchParams, ws: Workspace): Promise<Asked | undefined> => {
     const fragment = form.get("fragment") === "1";
     const seen = form.get("seen");
     const typed = form.get("command");
-    if (form.get("dialog") === "1") {
-      const opened = { type: form.get("type") ?? "", id: form.get("id") ?? "", event: form.get("event") ?? "" };
-      const values = valuesOf(form);
-      const got = fromDialog(form, opts.registry, (await now(ws.stream)).r, ws.stream);
-      if (!got) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
-      const long = (values.comment ?? "").trim().length > MAX_COMMENT ? `Keep the comment to ${MAX_COMMENT} characters.` : undefined;
-      const why = "why" in got ? got.why : long;
-      if (why !== undefined || "why" in got) { await decide(res, ws, opened, { error: why ?? "", values }, fragment, 422); return undefined; }
-      return { ws, fragment, typed: null, seen, ask: withDefaults(got.ask), ticket: got.ticket, target: targetOf(got.ask), dialog: true, values };
-    }
+    if (form.get("dialog") === "1") return dialogAsked(res, form, ws, fragment, seen);
     if (typed === null) {
       const ask = actionFrom(form, opts.registry);
       if (!ask) { send(res, 400, text, "the page can only start, unblock, complete, block, cancel or reopen a task, add a subtask with a name, or approve or reject an idea\n"); return undefined; }
@@ -801,11 +825,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (lacking !== undefined) return back({ error: lacking }, 422);
     const problem = await waitProblem(a);
     if (problem) return back({ error: `tira can't run that: ${problem}.` }, 422);
-    const atStart = String((await now(a.ws.stream)).r.lastSeq);
-    const proof = await commitProblem(a);
-    if (proof.why && !shown(a)) { send(res, 409, text, `${proof.why}\n`); return true; }
-    if (proof.why) return back({ error: proof.why }, 422);
-    if (proof.kept && a.seen === atStart) a.seen = String((await now(a.ws.stream)).r.lastSeq); // its own keeping moved the log
+    if (await proofHeldBack(res, a, back)) return true;
     const misplaced = await placeCheck(a);
     if (misplaced && !shown(a)) { send(res, 409, text, `tira can't run that: ${misplaced}\n`); return true; }
     if (misplaced) return back({ error: `tira can't run that: ${misplaced}.` }, 422);
@@ -820,6 +840,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (!shown(a)) return false;
     const refused = await refusal(a, cmd, first);
     if (refused) return back({ error: refused }, 409);
+    return false;
+  };
+
+  // a Complete's proof of work that can't be: said, or the dialog again with why; keeping it for the
+  // task moves the log, which doesn't count as the log moving under the decision
+  const proofHeldBack = async (res: ServerResponse, a: Asked, back: (o: Partial<ConfirmOpts>, status?: number) => Promise<boolean>): Promise<boolean> => {
+    const atStart = String((await now(a.ws.stream)).r.lastSeq);
+    const proof = await commitProblem(a);
+    if (proof.why && !shown(a)) { send(res, 409, text, `${proof.why}\n`); return true; }
+    if (proof.why) return back({ error: proof.why }, 422);
+    if (proof.kept && a.seen === atStart) a.seen = String((await now(a.ws.stream)).r.lastSeq); // its own keeping moved the log
     return false;
   };
 
@@ -909,7 +940,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   };
   // a ticket's own forms come back to its dialog (#t<i>), with what happened
   const toTicket = (res: ServerResponse, ws: Workspace, form: URLSearchParams, f: { ok: boolean; text: string }, task?: string) => {
-    const key = String(++flashSeq);
+    const key = flashKey();
     flashes.set(key, task && f.ok ? { ...f, changed: [entityKey({ type: "node", id: task })] } : f);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
     const back = /^#t\d+$/.test(form.get("back") ?? "") ? form.get("back") ?? "" : "";
@@ -923,7 +954,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // a ticket's Edit form, read: each field trimmed, the steps one per line
   type TicketAsked = TicketWords & { assignee: string };
   const ticketAsked = (form: URLSearchParams): TicketAsked => ({
-    title: (form.get("title") ?? "").trim().replace(/\s+/g, " "),
+    title: (form.get("title") ?? "").trim().replaceAll(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
     steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
     estimate: (form.get("estimate") ?? "").trim(),
@@ -950,10 +981,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { people, agents } = await assignees(ws.stream, actor);
     const why = ticketProblem(asked, [...people, ...agents, before?.assignee]);
     if (why) return said({ ok: false, text: `The ticket wasn't saved: ${why}` });
-    const { title, description, steps, estimate, assignee } = asked;
-    const payload = { task, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(steps.length > 0 ? { steps } : {}), ...(estimate ? { estimate } : {}), ...(assignee ? { assignee } : {}) };
-    const same = before && JSON.stringify([before.title, before.description, before.steps, before.estimate, before.assignee]) === JSON.stringify([payload.title, payload.description, payload.steps ?? [], payload.estimate, payload.assignee]);
-    if (same || (!before && Object.keys(payload).length === 1)) return said({ ok: true, text: "Nothing changed." });
+    const payload = ticketPayload(task, asked, asked.assignee);
+    if (saysSame(before, payload)) return said({ ok: true, text: "Nothing changed." });
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
     if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
     said({ ok: true, text: "Saved." }, task);
@@ -1005,7 +1034,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       const why = await writeComment(ws.stream, ask.id, comment, actor);
       flash = { ...flash, text: why === undefined ? `${flash.text} Comment added.` : `${flash.text} The comment wasn't added (${why}).` };
     }
-    const key = String(++flashSeq);
+    const key = flashKey();
     flashes.set(key, flash.ok ? { ...flash, changed: changedBy(ask, ticket) } : flash);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
     const back = withQ(`/?r=${key}`, ws.q); // the result, in the workspace it was written to
@@ -1016,7 +1045,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // GET /projects/new: + New project's page (new-project.ts), opened from the board you're on, which
   // Cancel and the tira mark go back to. It offers what your accounts hold: your GitHub repos, and
   // your Jira's projects (or a way to connect it). No one who can act yet: the landing first.
-  const acc = accounts(opts.links);
+  const acc = accounts(opts.links, opts.site);
   // A task's newest commits, looked up on GitHub (only that task's) and kept: what the look said.
   const commitsSaid = (stream: string, task: string, login: string | undefined) =>
     lookedSaid(task, () => lookForCommits(opts.store, opts.registry, stream, task, acc.githubOf(login)));
@@ -1075,7 +1104,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor: by, payload: newLink(repo, site, key, jiraName) })).result;
     if (w.status !== "appended") return again(400, "name", `${name} wasn't created (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
     const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${jiraName ?? key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
-    const k = String(++flashSeq);
+    const k = flashKey();
     flashes.set(k, { ok: true, text: made });
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
     send(res, 303, text, "", { Location: withQ(`/?r=${k}`, at.q) });
@@ -1088,7 +1117,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
     const go = (f: { ok: boolean; text: string }, to: (key: string) => string) => {
-      const k = String(++flashSeq);
+      const k = flashKey();
       flashes.set(k, f);
       if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
       send(res, 303, text, "", { Location: to(k) });
@@ -1114,7 +1143,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
     const done = (f: { ok: boolean; text: string }) => {
-      const k = String(++flashSeq);
+      const k = flashKey();
       flashes.set(k, f);
       if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
       send(res, 303, text, "", { Location: withQ(`/integrations?r=${k}`, ws.q) });
@@ -1140,7 +1169,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // redirects and links keep it: carryQ)
   const wsNow = (): Workspace => current.getStore()?.ws ?? { stream: opts.stream, q: "" };
   const integrations = integrationRoutes({
-    store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, home: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links,
+    store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, home: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links, ...(opts.site ? { site: opts.site } : {}),
     now: async () => ({ r: (await now(wsNow().stream)).r }), formOf,
     send: (res, status, type, body, extra = {}) => {
       const q = wsNow().q;
@@ -1148,7 +1177,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       send(res, status, type, type.startsWith("text/html") ? carryQ(body, q) : body, at?.startsWith("/") && !/[?&]w=/.test(at) ? { ...extra, Location: withQ(at, q) } : extra);
     },
     flash: (f) => {
-      const key = String(++flashSeq);
+      const key = flashKey();
       flashes.set(key, f);
       if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
       return key;
@@ -1159,14 +1188,109 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       return f;
     },
   }, who);
-  const routes: Record<string, Route> = { "GET /": page, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
+  // ---------- Claude's connectors sign in (src/mcp/oauth.ts): at a public address only ----------
+  const oauthSecret = linkEnv.TIRA_SECRET_KEY ?? "";
+  const codes = new Codes();
+  const tokensNow = () => opts.links?.agentTokens ?? agentTokensFor(linkEnv);
+  const asJson = (res: ServerResponse, status: number, body: unknown) => send(res, status, "application/json; charset=utf-8", JSON.stringify(body), { "Access-Control-Allow-Origin": "*" });
+  // registration: Claude's, by JSON; its id is the registration, signed
+  const register = async (req: IncomingMessage, res: ServerResponse) => {
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return asJson(res, 400, { error: "invalid_client_metadata", error_description: "send the registration as JSON" });
+    }
+    const got = registrationOf(body);
+    if ("error" in got) return asJson(res, 400, { error: got.error, error_description: got.why });
+    asJson(res, 201, { client_id: clientId(oauthSecret, got.client), client_id_issued_at: Math.floor(Date.now() / 1000), ...got.client, token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"] });
+  };
+  // the code's exchange: the agent the person approved is connected now, and its token is the answer
+  const exchange = async (req: IncomingMessage, res: ServerResponse) => {
+    let form: URLSearchParams;
+    try {
+      form = new URLSearchParams(await readBody(req));
+    } catch {
+      return asJson(res, 400, { error: "invalid_request", error_description: "too large" });
+    }
+    const got = codes.exchange(form);
+    if ("error" in got) return asJson(res, 400, { error: got.error, error_description: got.why });
+    const tokens = tokensNow();
+    if (!tokens) return asJson(res, 503, { error: "temporarily_unavailable", error_description: "connecting agents needs tira's Postgres database" });
+    const { project, agent, login } = got.grant;
+    const name = freeName(agent, (await tokens.list(project)).map((x) => x.agent));
+    const made = await tokens.create(project, name, login, CONNECTOR_APP);
+    asJson(res, 200, { access_token: made.token, token_type: "Bearer" });
+  };
+  // the side Claude's servers call: discovery, registration, the exchange (true: answered)
+  const oauthMachine = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> => {
+    const site = opts.site;
+    if (!site) return false;
+    const answers: Record<string, () => unknown> = {
+      [`GET ${PROTECTED_RESOURCE}`]: () => asJson(res, 200, protectedResource(site.origin)),
+      [`GET ${PROTECTED_RESOURCE}/mcp`]: () => asJson(res, 200, protectedResource(site.origin)),
+      [`GET ${AUTHORIZATION_SERVER}`]: () => asJson(res, 200, authorizationServer(site.origin)),
+      "POST /oauth/register": () => register(req, res),
+      "POST /oauth/token": () => exchange(req, res),
+    };
+    const answer = answers[`${req.method} ${url.pathname}`];
+    if (answer) await answer();
+    return answer !== undefined;
+  };
+  // the person's side: approving Claude's connection, signed in with GitHub
+  const projectsNow = async (current: string) => {
+    const all = await opts.store.readAll();
+    return workspaceList(fold(all, opts.registry), [opts.stream, ...all.map((e) => e.stream)], opts.stream, current).map((w) => ({ stream: w.stream, ...(w.title ? { title: w.title } : {}) }));
+  };
+  const consent = async (res: ServerResponse, login: string, asking: Asking, current: string, status = 200, flash?: { ok: boolean; text: string }) => {
+    const fields = { client_id: asking.client_id, redirect_uri: asking.redirect_uri, ...(asking.state ? { state: asking.state } : {}), code_challenge: asking.challenge };
+    const body = consentPage({ token, login, fields, projects: await projectsNow(current), project: current, agent: "claude", ...(flash ? { flash } : {}) });
+    send(res, status, html, body, { "Content-Security-Policy": consentCsp(asking.redirect_uri), "Set-Cookie": `${NEXT_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0` });
+  };
+  const authorizeGet = async (req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
+    if (!opts.site) return send(res, 404, text, "not found\n");
+    const got = askingOf(oauthSecret, opts.site.origin, url.searchParams);
+    if ("show" in got) return send(res, 400, text, `${got.show}\n`);
+    if ("back" in got) return send(res, 303, text, "", { Location: got.back });
+    const login = who(req).login;
+    if (!login) { // sign in first, then back here
+      const key = flashKey();
+      flashes.set(key, { ok: true, text: "Sign in to connect Claude to tira." });
+      return send(res, 303, text, "", { Location: `/welcome?r=${key}`, "Set-Cookie": `${NEXT_COOKIE}=${encodeURIComponent(url.pathname + url.search)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600` });
+    }
+    await consent(res, login, got.asking, ws.stream);
+  };
+  const authorizePost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    if (!opts.site) return send(res, 404, text, "not found\n");
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const got = askingOf(oauthSecret, opts.site.origin, form);
+    if ("show" in got) return send(res, 400, text, `${got.show}\n`);
+    if ("back" in got) return send(res, 303, text, "", { Location: got.back });
+    const { asking } = got;
+    const login = who(req).login;
+    if (!login) return send(res, 303, text, "", { Location: "/welcome" });
+    const state = asking.state ? { state: asking.state } : {};
+    if (form.get("decision") !== "allow") return send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { error: "access_denied", error_description: "the person didn't allow it", ...state }) });
+    const project = form.get("project") ?? "";
+    const agent = (form.get("agent") ?? "").trim();
+    const known = (await projectsNow(ws.stream)).some((p) => p.stream === project);
+    const why = known ? agentNameProblem(agent) : "Pick one of this tira's projects.";
+    if (why) return consent(res, login, asking, ws.stream, 422, { ok: false, text: why });
+    const code = codes.issue(asking, { project, agent, login });
+    send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { code, ...state, iss: opts.site.origin }) });
+  };
+
+  const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
-  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (stream, task) => commitsSaid(stream, task, undefined), proofFor: (stream, task, ref) => proveWith(opts.store, opts.registry, stream, task, acc.githubOf(undefined), ref) });
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref) });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
-    if (!LOCAL_HOST.test(host)) return send(res, 403, "text/plain; charset=utf-8", "tira serve answers on 127.0.0.1 only\n");
+    if (req.method === "GET" && req.url === "/healthz") return send(res, 200, text, "ok\n"); // the host's check that tira is up: says nothing else
+    if (!LOCAL_HOST.test(host) && host !== opts.site?.host) return send(res, 403, "text/plain; charset=utf-8", opts.site ? `tira answers at ${opts.site.origin} only\n` : "tira serve answers on 127.0.0.1 only\n");
     const url = new URL(req.url ?? "/", `http://${host}`);
     if (url.pathname === MCP_PATH) return mcp(req, res, url); // agents, by their own token: no page, no sign-in
+    if (await oauthMachine(req, res, url)) return; // Claude's servers, signing a connector in
     const asset = req.method === "GET" ? ASSETS[url.pathname] : undefined;
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
     const route = routes[`${req.method} ${url.pathname}`];

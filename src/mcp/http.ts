@@ -14,6 +14,8 @@ import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { tiraMcpServer } from "./server.ts";
 import type { AgentToken, AgentTokens } from "./tokens.ts";
+import type { PublicSite } from "../serve/public.ts";
+import { resourceMetadataUrl } from "./oauth.ts";
 
 export const MCP_PATH = "/mcp";
 // a web page's origin on this computer; a page anywhere else is refused (its fetch could carry no
@@ -40,11 +42,13 @@ function webRequest(req: IncomingMessage, url: URL): Request {
 }
 
 // commitsFor: look on GitHub for a task's newest commits (complete_task, before it takes one);
-// proofFor: check a commit or pull request named as proof, and keep it for the task
+// proofFor: check a commit or pull request named as proof, and keep it for the task. Both as the
+// agent's own (on GitHub, as the person who connected it).
+// site: tira's public address, where Claude's connectors sign in (src/mcp/oauth.ts)
 export interface McpHttp {
-  store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined
-  commitsFor?: (stream: string, task: string) => Promise<string | undefined>
-  proofFor?: (stream: string, task: string, ref: string) => Promise<{ ref: string } | { why: string }>
+  store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; site?: PublicSite
+  commitsFor?: (agent: AgentToken, task: string) => Promise<string | undefined>
+  proofFor?: (agent: AgentToken, task: string, ref: string) => Promise<{ ref: string } | { why: string }>
 }
 export type McpRoute = ((req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>) & { close: () => Promise<void> };
 
@@ -55,18 +59,20 @@ export function mcpRoute(o: McpHttp): McpRoute {
     const { commitsFor, proofFor } = o;
     return tiraMcpServer({
       store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent,
-      ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent.project, task) } : {}),
-      ...(proofFor ? { proveWith: (task: string, ref: string) => proofFor(agent.project, task, ref) } : {}),
+      ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent, task) } : {}),
+      ...(proofFor ? { proveWith: (task: string, ref: string) => proofFor(agent, task, ref) } : {}),
     });
   }, { maxRequestBodySize: MAX_BODY });
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL) => {
     const origin = req.headers.origin;
-    if (origin !== undefined && !LOCAL_ORIGIN.test(origin)) return refuse(res, 403, "tira answers MCP only to apps on this computer, not to a web page.");
+    if (origin !== undefined && !LOCAL_ORIGIN.test(origin) && origin !== o.site?.origin) return refuse(res, 403, "tira answers MCP only to apps on this computer, not to a web page.");
     const tokens = o.tokens();
     if (!tokens) return refuse(res, 503, "Connecting agents needs tira's Postgres database.");
     const token = BEARER.exec(req.headers.authorization ?? "")?.[1];
     const agent = token === undefined ? undefined : await tokens.find(token);
-    if (token === undefined || !agent) return refuse(res, 401, token === undefined ? NO_TOKEN : NOT_CONNECTED, { "WWW-Authenticate": 'Bearer realm="tira"' });
+    // at a public address, the way to sign in: where tira's OAuth metadata is
+    const challenge = o.site ? `Bearer resource_metadata="${resourceMetadataUrl(o.site.origin)}"` : 'Bearer realm="tira"';
+    if (token === undefined || !agent) return refuse(res, 401, token === undefined ? NO_TOKEN : NOT_CONNECTED, { "WWW-Authenticate": challenge });
     await tokens.used(agent.id);
     const answer = await handler.fetch(webRequest(req, url), { authInfo: { token, clientId: agent.agent, scopes: [], extra: { agent } } });
     res.writeHead(answer.status, { ...Object.fromEntries(answer.headers), "X-Content-Type-Options": "nosniff" });

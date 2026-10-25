@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 878 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 913 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -646,7 +646,7 @@ Calls made here, for the PM:
 
 ## Agents through MCP: `/mcp` and `tira mcp`
 
-Claude Code, Cursor, VS Code, Claude Desktop or any MCP client can work a project's tasks directly, each agent with its own token, which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, three steps: choose your app, name your agent (its token is made then), and do the one thing step 3 shows in that app (Cursor's and VS Code's **Add to** button, which asks first; Claude Code's command; Claude Desktop's config entry), then **Test connection**. Claude's own Connectors settings can't add tira yet: they reach a connector over the internet, at a public https address, so that waits until tira is hosted. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call.
+Claude Code, Cursor, VS Code, Claude Desktop or any MCP client can work a project's tasks directly, each agent with its own token, which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, three steps: choose your app, name your agent (its token is made then), and do the one thing step 3 shows in that app (Cursor's and VS Code's **Add to** button, which asks first; Claude Code's command; Claude Desktop's config entry), then **Test connection**. Claude's own Connectors reach a connector over the internet, so they add tira at its public address (Hosting tira on Render, below); on this computer they can't. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call.
 
 Claude Code, Cursor and VS Code reach `tira serve` itself, at `http://127.0.0.1:<port>/mcp`, with the token in an `Authorization: Bearer` header: it answers on 127.0.0.1 only, while `tira serve` runs. Claude Desktop can only start a program, so it starts `tira mcp`, an MCP server on stdio with the token in `TIRA_AGENT_TOKEN`, which reads the database as every tira command does (tira's own `.env`; the section says whether it would reach this board). Claude Code's, for example:
 
@@ -667,7 +667,33 @@ claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope us
 | `add_comment` | A reply on a task's comments, shown on its ticket |
 | `fill_ticket` | Writes a ticket's title, description, steps and estimate as the agent; what it leaves out stays. Who it's assigned to stays a person's to say |
 
-Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. A remote endpoint for cloud agents waits on the shared server.
+Every write goes through the same dispatcher and rules as a person's, under the agent's name, and a refusal comes back with what to do. An agent's name must read as an agent's (`claude-…`, `codex-…`, `…-agent`, `…-bot`), never a person's, so the board marks its moves with the agent spark. There is no tool to cancel, reopen, unblock, delete or change settings: those stay with people. At tira's public address (below), Claude's own Connectors add it too: claude.ai, Claude Desktop and mobile sign in with OAuth, and the person picks the project and approves.
+
+## Hosting tira on Render
+
+One shared tira at an https address, so everyone (and Claude's Connectors) reaches the same board. `render.yaml` is the service: Node 22, `npm ci`, `tira serve`, one instance on Render's Free plan, Render's own check at `/healthz`. Free sleeps after 15 minutes with no visits and takes about a minute to wake; Claude gives a connector 10 seconds to answer, so the first connector call after a quiet spell can fail until tira is awake (Starter, $7 a month, stays awake).
+
+Setting `TIRA_PUBLIC_URL` turns on public mode (`src/serve/public.ts`). tira then:
+- listens on every address at `$PORT`, and answers only that address;
+- builds GitHub's and Jira's way back from it;
+- marks its cookies Secure, and keeps browsers to https;
+- shows nothing to anyone signed out.
+
+It won't start until it's safe. It needs:
+- `TIRA_DATABASE_URL` (Postgres, `?sslmode=require`);
+- `TIRA_SECRET_KEY` (Render makes it);
+- `TIRA_ADMIN` (the admin's GitHub login);
+- `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
+
+There is no first-run setup for whoever arrives first, and no `--actor`.
+
+Claude's Connectors (`src/mcp/oauth.ts`): tira is its own small OAuth server.
+- **Discovery:** `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. A call to `/mcp` without a token gets a 401 pointing at them.
+- **Registration:** open, as Claude registers itself. Only Claude's callback or this computer's are taken, and the client id is the registration, signed.
+- **Approval** at `/oauth/authorize`: sign in with GitHub, pick the project and the agent's name, Allow.
+- **Exchange** at `/oauth/token`: the code with its PKCE verifier (S256) gets the agent's own token, the same kind Connect agents makes. It's listed there and revoked there.
+
+In Claude: Settings → Connectors → Add custom connector, with `<address>/mcp`.
 
 ## Workspaces linked to git and Jira
 

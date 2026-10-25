@@ -12,7 +12,6 @@ import { BRAND_MARK, CSS, THEME_RADIOS } from "../render/html.ts";
 
 export const GITHUB_MARK = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>`;
 const JIRA_MARK = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M5.5 2.5v11M10.5 2.5v11"/></svg>`;
-const CHECK = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`;
 
 // what tira does, as the landing's steps (illustration only: nothing about a workspace shows before sign-in)
 const FLOW = ["Sign in with GitHub", "Connect a repo", "Add Jira (optional)", "Work the board"];
@@ -219,4 +218,32 @@ export function jiraTabPage(ok: boolean, text: string, back: string): string {
   const card = `<div class="land-card one"${ok ? " data-jira-done" : ""}><div class="land-body"><header><h1>${ok ? "Jira connected" : "Jira wasn't connected"}</h1><p>${esc(text)}</p></header>`
     + `<p class="land-foot" style="text-align:center">${ok ? "You can close this tab. " : ""}<a href="${esc(back)}">Back to tira</a></p></div></div>`;
   return page("Jira · tira", card, TABS);
+}
+
+export interface ConsentOpts {
+  token: string;
+  login: string;
+  // what Claude asked with, carried by the form
+  fields: { client_id: string; redirect_uri: string; state?: string; code_challenge: string };
+  projects: { stream: string; title?: string }[];
+  project: string; // the one picked first
+  agent: string;
+  flash?: Flash;
+}
+
+// Approving Claude's connection: which project it works in, and the agent's name. Who asked shows
+// plainly, by the address it goes back to (an app on this computer says so).
+export function consentPage(o: ConsentOpts): string {
+  const back = new URL(o.fields.redirect_uri);
+  const who = back.hostname === "claude.ai" ? "<b>Claude</b>" : `An app on this computer (<b>${esc(back.host)}</b>)`;
+  const hidden = Object.entries({ ...o.fields, code_challenge_method: "S256", response_type: "code" }).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
+  const options = o.projects.map((p) => `<option value="${esc(p.stream)}"${p.stream === o.project ? " selected" : ""}>${esc(p.title ?? p.stream)}</option>`).join("");
+  const form = `<form method="post" action="/oauth/authorize" data-consent>${hiddenToken(o.token)}${hidden}`
+    + `<label class="land-field"><span>Project</span><select name="project" required>${options}</select></label>`
+    + `<label class="land-field"><span>Agent's name</span><input type="text" name="agent" value="${esc(o.agent)}" maxlength="64" autocomplete="off" spellcheck="false" required></label>`
+    + `<button class="land-btn blue" type="submit" name="decision" value="allow" data-consent-allow>Allow</button>`
+    + `<button class="land-quiet" type="submit" name="decision" value="cancel" formnovalidate data-consent-cancel>Cancel</button></form>`;
+  const card = `<div class="land-mark">${BRAND_MARK}</div><h1>Connect to tira</h1><p class="land-foot" data-consent-who>${who} wants to work in tira as an agent.</p>${flashHtml(o.flash)}${form}`
+    + `<p class="land-foot">It works by tira's rules, under its own name. Disconnect it any time in Project settings. Signed in as ${esc(o.login)}.</p>`;
+  return page("Connect to tira", `<div class="land-card one" data-consent-page><section class="land-form">${card}</section></div>`);
 }

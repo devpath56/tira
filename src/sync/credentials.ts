@@ -117,7 +117,19 @@ export function pageToken(env: Env = process.env): string {
 }
 
 // ---------- everyone's ----------
-export const appKeys = (env: Env = process.env): AppKeys => read(env).apps ?? {};
+// tira's apps as the server's settings name them (a public tira's: src/serve/public.ts), over the
+// keys typed into Account settings
+const settingsApps = (env: Env): AppKeys => {
+  const gh = env.TIRA_GITHUB_CLIENT_ID?.trim();
+  const ghSecret = env.TIRA_GITHUB_CLIENT_SECRET?.trim();
+  const at = env.TIRA_ATLASSIAN_CLIENT_ID?.trim();
+  const atSecret = env.TIRA_ATLASSIAN_CLIENT_SECRET?.trim();
+  const keys: AppKeys = {};
+  if (gh) keys.github = ghSecret ? { clientId: gh, secret: ghSecret } : { clientId: gh };
+  if (at && atSecret) keys.atlassian = { clientId: at, secret: atSecret };
+  return keys;
+};
+export const appKeys = (env: Env = process.env): AppKeys => ({ ...read(env).apps, ...settingsApps(env) });
 export async function saveAppKeys(keys: AppKeys, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveApps(keys);
@@ -143,7 +155,12 @@ export async function saveAtlassianAuth(login: string, auth: AtlassianAuth | und
   });
 }
 
-export const access = (env: Env = process.env): Access => read(env).access ?? {};
+// who may sign in; with no admin yet, the one the server's settings name (TIRA_ADMIN), if any
+export const access = (env: Env = process.env): Access => {
+  const a = read(env).access ?? {};
+  const named = env.TIRA_ADMIN?.trim();
+  return a.admin === undefined && named ? { ...a, admin: named } : a;
+};
 export async function saveAccess(change: (a: Access) => Access, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveAccess(change);

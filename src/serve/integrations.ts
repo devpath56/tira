@@ -42,6 +42,8 @@ import { brand, CSS, projectMark, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from ".
 import { quote } from "./command.ts";
 import { codePage, connectPage, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
 import { SIGNIN_CSP } from "./csp.ts";
+import type { PublicSite } from "./public.ts";
+import { CONNECTOR_APP } from "../mcp/oauth.ts";
 
 export const SESSION_COOKIE = "tira_session";
 // Setup's buttons: copy (a tick once copied), and show / hide, as SF Symbols draw them
@@ -50,6 +52,19 @@ const EYE = `<svg class="i-show" viewBox="0 0 16 16" fill="none" stroke="current
 
 // a direct GitHub sign-in under way, in the browser that started it (integrations.ts: signinStart)
 const SIGNIN_COOKIE = "tira_signin";
+// where a sign-in goes on to when it started from somewhere that needs one: Claude's connection,
+// waiting to be approved (src/mcp/oauth.ts). Only that page's own address is taken.
+export const NEXT_COOKIE = "tira_next";
+const NEXT = /^\/oauth\/authorize\?[^\s"'<>\\]{1,2000}$/;
+const nextOf = (req: IncomingMessage): string | undefined => {
+  let v = cookieOf(req, NEXT_COOKIE) ?? "";
+  try {
+    v = decodeURIComponent(v);
+  } catch {
+    return undefined;
+  }
+  return NEXT.test(v) ? v : undefined;
+};
 
 type Env = Record<string, string | undefined>;
 type Flash = { ok: boolean; text: string; wait?: boolean }; // wait: not yet, and nothing wrong (Test connection)
@@ -78,6 +93,7 @@ export interface IntegrationsContext {
   formOf: (req: IncomingMessage, res: ServerResponse, host: string) => Promise<URLSearchParams | undefined>;
   flash: (f: Flash) => string; // keeps it once, returns its key
   takeFlash: (key: string) => Flash | undefined;
+  site?: PublicSite; // the public https address tira is reached at (src/serve/public.ts)
 }
 
 const html = "text/html; charset=utf-8";
@@ -122,7 +138,8 @@ export type JiraState = ConnectOpts["jira"];
 
 // A person's accounts, for any page that offers them: their GitHub (pull requests, their repos)
 // and their Jira (their Atlassian sign-in or, failing that, an API-token login for the site).
-export function accounts(outside: Outside | undefined) {
+// site: tira's public address, which Atlassian can send people back to as it does localhost.
+export function accounts(outside: Outside | undefined, site?: PublicSite) {
   const env = outside?.env ?? process.env;
   const gh = outside?.githubAuth ?? new GitHubDevice();
   const at = outside?.atlassian ?? new AtlassianOAuth();
@@ -154,7 +171,7 @@ export function accounts(outside: Outside | undefined) {
   const jira = async (login: string, host: string, back: string, ws?: WorkspaceLink): Promise<JiraState> => {
     if (!appKeys(env).atlassian) return { state: "unset" };
     const a = atlassianAuth(login, env);
-    if (!a) return /^localhost(:\d+)?$/.test(host) ? { state: "disconnected" } : { state: "elsewhere", localhost: `http://localhost:${portOf(host)}${back}` };
+    if (!a) return site || /^localhost(:\d+)?$/.test(host) ? { state: "disconnected" } : { state: "elsewhere", localhost: `http://localhost:${portOf(host)}${back}` };
     let projects: { key: string; name: string }[] = [];
     let problem: string | undefined;
     if (a.cloudId) {
@@ -170,19 +187,21 @@ export function accounts(outside: Outside | undefined) {
 }
 
 export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMessage) => { login?: string; actor?: string; signInOn: boolean }) {
-  const acc = accounts(c.outside);
+  const acc = accounts(c.outside, c.site);
   const { env, gh, at, jiraOf, githubOf } = acc;
   const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number }>();
   const pendingJira = new Map<string, { login: string; until: number; back: string; tab: boolean }>();
   const pendingGithub = new Map<string, { until: number; w: string | null }>(); // the direct way's sign-ins under way, by state: until when, and the project it left from
   const back = (res: ServerResponse, to: string, f?: Flash) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: f ? `${to}?r=${c.flash(f)}` : to });
-  const redirectUri = (host: string) => `http://${host}/integrations/jira/callback`;
-  const githubBack = (host: string) => `http://${host}/signin/github/callback`;
+  // where GitHub and Atlassian send people back to: the public address, else the one the page was opened at
+  const own = (host: string) => (c.site ? c.site.origin : `http://${host}`);
+  const redirectUri = (host: string) => `${own(host)}/integrations/jira/callback`;
+  const githubBack = (host: string) => `${own(host)}/signin/github/callback`;
 
 
   // who may see and change tira's own apps: its admin, once GitHub sign-in is on; before that,
-  // whoever runs this tira (there is no one else to ask)
-  const mayChangeApps = (login: string | undefined) => (appKeys(env).github ? !!login && isAdmin(access(env), login) : true);
+  // whoever runs this tira (there is no one else to ask). At a public address, only its admin.
+  const mayChangeApps = (login: string | undefined) => (c.site || appKeys(env).github ? !!login && isAdmin(access(env), login) : true);
 
   // the step after signing in: connect a repo while the workspace has none, else the board
   const nextStep = async (login: string | undefined): Promise<string> => (login && !workspaceOf((await c.now()).r, c.stream)?.repo ? "/connect" : "/");
@@ -209,7 +228,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     // localhost (where tira's GitHub app sends people back to). The state rides in a cookie too, so
     // only the browser that started a sign-in can finish it.
     const secret = appKeys(env).github?.secret;
-    if (secret && /^localhost(:\d+)?$/.test(host)) {
+    if (secret && (c.site || /^localhost(:\d+)?$/.test(host))) {
       const now = Date.now();
       for (const [s, p] of pendingGithub) if (p.until < now) pendingGithub.delete(s);
       const state = randomBytes(24).toString("hex");
@@ -250,7 +269,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const error = url.searchParams.get("error");
     if (error) return back(res, "/welcome", { ok: false, text: error === "access_denied" ? "You turned it down on GitHub: sign in again when you're ready." : `GitHub sign-in stopped: ${error}.` });
     try {
-      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false);
+      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false, nextOf(req));
     } catch (err) {
       back(res, "/welcome", { ok: false, text: `GitHub sign-in stopped (${(err as Error).message}).` });
     }
@@ -258,8 +277,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 
   // In, with GitHub's token (either way): only the admin and the people they added get in (the first
   // person in becomes the admin); anyone else is told who to ask, and tira keeps nothing of theirs.
-  // fragment: signin.mjs asked, and goes where the answer says.
-  const enter = async (res: ServerResponse, token: string, fragment: boolean) => {
+  // fragment: signin.mjs asked, and goes where the answer says. next: where it started from, if anywhere.
+  const enter = async (res: ServerResponse, token: string, fragment: boolean, next?: string) => {
     const me = await gh.user(token);
     const a = access(env);
     if (!mayEnter(a, me.login)) {
@@ -275,7 +294,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const key = c.flash({ ok: true, text: first
       ? `Signed in as ${me.login}: you're this tira's admin. Add the people who may sign in in Account settings.`
       : `Signed in as ${me.login}. tira records your changes as ${me.login}.` });
-    const go = `${await nextStep(me.login)}?r=${key}`;
+    const go = next ?? `${await nextStep(me.login)}?r=${key}`;
     if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
     c.send(res, 303, "text/plain; charset=utf-8", "", { Location: go, "Set-Cookie": cookie });
   };
@@ -303,7 +322,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         return fragment ? c.send(res, 202, html, `<div data-waiting data-interval="${p.interval}"></div>`) : signinPage(res, id, p, "Not approved on GitHub yet.");
       }
       pendingSignIns.delete(id);
-      await enter(res, got.token, fragment);
+      await enter(res, got.token, fragment, nextOf(req));
     } catch (err) {
       fail(`GitHub sign-in stopped (${(err as Error).message}).`);
     }
@@ -638,7 +657,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   const agentRow = (row: AgentToken, me: { login?: string; actor?: string }, t: string) => {
     const app = APPS.find((a) => a === row.app);
     const used = row.lastUsedAt ? "last used " + day(row.lastUsedAt) : "not used yet";
-    const about = [app ? APP_NAME[app] : "", `tira_${esc(row.id)}…`, `connected by ${esc(row.createdBy)} on ${day(row.createdAt)}`, used].filter(Boolean).join(" · ");
+    const label = row.app === CONNECTOR_APP ? "Claude's Connectors" : "";
+    const about = [app ? APP_NAME[app] : label, `tira_${esc(row.id)}…`, `connected by ${esc(row.createdBy)} on ${day(row.createdAt)}`, used].filter(Boolean).join(" · ");
     const revoke = mayRevoke(me, row) ? `<form method="post" action="/integrations/agents/revoke">${t}<input type="hidden" name="id" value="${esc(row.id)}"><button class="how" type="submit">Revoke</button></form>` : "";
     return `<div class="agent-row" data-agent="${esc(row.agent)}"><span class="agent-who"><b>${esc(row.agent)}</b><small>${about}</small></span>${revoke}</div>`;
   };
@@ -648,13 +668,26 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     return `<div class="agent-app" data-agent-app="${app}"><b>${APP_NAME[app]}</b>${steps(setup)}${codeBlock("manual-" + app, setup.code, APP_NAME[app])}<p class="agent-undo">To remove it: <code>${esc(setup.remove)}</code></p></div>`;
   };
   const morePart = (title: string, body: string) => `<div class="agent-more-part"><h4>${title}</h4>${body}</div>`;
+  // whether Claude Desktop's agent would reach this tira's database (on this computer only: at a
+  // public address Claude Desktop connects as Claude does)
+  const databasePart = (db: DatabaseCheck, envFile: string) => {
+    if (c.site) return "";
+    const ready = db === "ready" ? "agent-db" : "agent-db no";
+    return morePart("Claude Desktop's database", `<p class="${ready}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`);
+  };
   const more = (at: Where, db: DatabaseCheck, envFile: string) => `<details class="agent-more" data-agent-more><summary>More</summary>`
     + morePart("tira's MCP address", `<p>For any app that speaks MCP over HTTP: this address, with the agent's token in the header <code>Authorization: Bearer ${esc(TOKEN_HERE)}</code>. It answers while tira serve runs.</p>${codeBlock("agent-url", at.url, "the address")}`)
-    + morePart("Each app by hand", `<p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${APPS.map((app) => manualApp(app, at)).join("")}`)
+    + morePart("Each app by hand", `<p>Put the agent's token where it says ${esc(TOKEN_HERE)}.</p>${appsHere().map((app) => manualApp(app, at)).join("")}`)
     + morePart("What agents can do", `<ul class="agent-tools">${TOOLS_SAID.map(toolItem).join("")}</ul><p>Cancelling, reopening and unblocking stay with people.</p>`)
-    + morePart("Claude Desktop's database", `<p class="${db === "ready" ? "agent-db" : "agent-db no"}" data-agent-database="${db}">${DB_SAID[db](envFile)}</p>`)
-    + morePart("Claude's Connectors", `<p data-agent-connectors>Claude's own Connectors settings (Add custom connector) can't add tira yet: Anthropic's servers reach a connector over the internet, at a public https address, and tira answers on this computer only. That comes once tira is hosted. Until then, connect Claude Code by its command and Claude Desktop by its config entry, above.</p>`)
+    + databasePart(db, envFile)
+    + (c.site ? "" : morePart("Claude's Connectors", `<p data-agent-connectors>Claude's own Connectors settings (Add custom connector) can't add tira yet: Anthropic's servers reach a connector over the internet, at a public https address, and tira answers on this computer only. That comes once tira is hosted. Until then, connect Claude Code by its command and Claude Desktop by its config entry, above.</p>`))
     + `</details>`;
+  // at a public address: the apps that connect by a token here (Claude Desktop's local entry has no
+  // place there: it connects as Claude does), and Claude's own way in, by its Connectors
+  const appsHere = () => (c.site ? APPS.filter((a) => a !== "claude-desktop") : APPS);
+  const connectorPart = (at: Where) => (c.site
+    ? `<div class="agent-connector" data-agent-connector><h3 class="agent-list-h">Claude, by its Connectors</h3><p>For claude.ai, Claude Desktop and mobile: in Claude, Settings → Connectors → Add custom connector. Paste this address, then Connect and allow it on tira's page.</p>${codeBlock("agent-connector-url", at.url, "the address")}</div>`
+    : "");
   const agentsGroup = async (url: URL, me: { login?: string; actor?: string }, t: string, host: string) => {
     const head = `<section class="grp" id="agents" data-int="agents"><h2 class="grp-h">Connect agents</h2><p class="grp-desc">${esc(DESC.agents)}</p>`;
     const said = url.searchParams.get("from") === "agents" ? flashOf(url) : "";
@@ -665,7 +698,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const shown = madeFor(key, me);
     const made = shown && rows.some((x) => x.id === shown.id) ? shown : undefined; // not once it's revoked
     const app = made?.app ?? APPS.find((a) => a === url.searchParams.get("app"));
-    const at: Where = { url: mcpUrl(host), launch };
+    const at: Where = { url: mcpUrl(host, c.site?.origin), launch };
     const envFile = c.outside?.envFile ?? TIRA_ENV_FILE;
     const db = databaseCheck(envFile, env);
     const gone = key && !made ? `<div class="flash no" role="status">That setup isn't shown any more (it shows for 10 minutes, to whoever made it). Its agent is in the list below: revoke it and connect it again for a new token.</div>` : "";
@@ -681,13 +714,13 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         + `<form method="post" action="/integrations/agents/connect" class="agent-name-form" data-agent-name>${t}<input type="hidden" name="app" value="${app}"><input type="text" name="name" value="${esc(suggested)}" maxlength="64" required autocomplete="off" spellcheck="false" aria-label="Agent's name"><button class="act primary" type="submit">Connect</button></form>` + said);
       three = step(3, `Finish in ${APP_NAME[app]}`, "later", `<p>One thing to do in ${APP_NAME[app]}, then test the connection.</p>`);
     } else {
-      one = step(1, "Choose your app", "now", `<p>Which app will your agent work in?</p><div class="agent-tiles">${APPS.map(tile).join("")}</div>`);
+      one = step(1, "Choose your app", "now", `<p>Which app will your agent work in?</p><div class="agent-tiles">${appsHere().map(tile).join("")}</div>`);
       two = step(2, "Name your agent", "later", "<p>Its name is how its moves show on the board.</p>");
       three = step(3, "Finish in your app", "later", "<p>One thing to do in your app, then test the connection.</p>");
     }
     const top = made || app ? gone : said + gone; // a step's own result shows in that step
     const list = rows.length === 0 ? '<p class="agent-none">No agents connected yet.</p>' : rows.map((x) => agentRow(x, me, t)).join("");
-    return head + top + one + two + three
+    return head + top + one + two + three + connectorPart(at)
       + `<h3 class="agent-list-h">Connected agents</h3><div class="agent-list" data-agents>${list}</div>`
       + more(at, db, envFile)
       + `<div class="grp-foot">A token works for this project only. Revoke it here and the agent's next call is refused.</div></section>`;

@@ -1,0 +1,34 @@
+# tira on Render: one shared server at an https address (README: "Hosting tira on Render").
+# Values marked `sync: false` are typed into Render's dashboard when the service is made, never
+# written here; TIRA_SECRET_KEY is made by Render itself (it seals everyone's GitHub and Jira tokens:
+# keep it, or the sign-ins stored with it can't be opened).
+services:
+  - type: web
+    name: tira
+    runtime: node
+    region: oregon # beside the database
+    plan: free # no cost (Isha, 2026-10-24). It sleeps after 15 minutes with no visits and takes about
+    # a minute to wake, so the first visit or connector call after a quiet spell can time out: try again.
+    numInstances: 1 # sign-ins under way are kept in memory: one instance
+    buildCommand: npm ci
+    startCommand: node --disable-warning=ExperimentalWarning scripts/tira.ts serve
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+      - key: TIRA_STREAM # the project tira opens on
+        value: tira
+      - key: TIRA_PUBLIC_URL # the service's own address: https://<name>.onrender.com
+        sync: false
+      - key: TIRA_DATABASE_URL # Postgres, with ?sslmode=require
+        sync: false
+      - key: TIRA_SCHEMA
+        value: tira_hosted
+      - key: TIRA_SECRET_KEY
+        generateValue: true
+      - key: TIRA_ADMIN # the admin's GitHub login
+        sync: false
+      - key: TIRA_GITHUB_CLIENT_ID # tira's GitHub OAuth app, its callback <address>/signin/github/callback
+        sync: false
+      - key: TIRA_GITHUB_CLIENT_SECRET
+        sync: false

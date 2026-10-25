@@ -44,6 +44,22 @@ export const ticketWordsProblem = ({ title, description, steps, estimate }: Tick
   estimate !== "" && !ESTIMATE.test(estimate) ? "A time estimate is a number and a unit: 30m, 2h, 1d or 1w." : "",
 ].find((x) => x !== "");
 
+// A ticket as it's written, the whole of it each time: its task and each part it says (an empty one
+// isn't written); and whether a ticket already says just that (none yet: whether this says nothing).
+export type TicketPayload = { task: string; title?: string; description?: string; steps?: string[]; estimate?: string; assignee?: string };
+export function ticketPayload(task: string, words: TicketWords, assignee: string | undefined): TicketPayload {
+  const p: TicketPayload = { task };
+  if (words.title) p.title = words.title;
+  if (words.description) p.description = words.description;
+  if (words.steps.length > 0) p.steps = words.steps;
+  if (words.estimate) p.estimate = words.estimate;
+  if (assignee) p.assignee = assignee;
+  return p;
+}
+type Said = { title?: string; description?: string; steps: string[]; estimate?: string; assignee?: string };
+export const saysSame = (before: Said | undefined, p: TicketPayload) =>
+  JSON.stringify([before?.title, before?.description, before?.steps ?? [], before?.estimate, before?.assignee]) === JSON.stringify([p.title, p.description, p.steps ?? [], p.estimate, p.assignee]);
+
 const s = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 const optional = (v: unknown, ok: (x: string) => boolean) => v === undefined || (typeof v === "string" && ok(v));
 const line = (x: string) => x.trim().length > 0 && x.length <= MAX_STEP && !/\p{Cc}/u.test(x);
