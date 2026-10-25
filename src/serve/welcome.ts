@@ -105,8 +105,9 @@ function newcomer(admin: LandingOpts["admin"]): string {
   if (!admin) return `The first person to sign in becomes the admin.`;
   const { name, email } = admin.contact ?? {};
   const mail = email ? `<a href="mailto:${esc(email)}" data-admin-email>${esc(email)}</a>` : "";
-  const named = name ? esc(name) : `@${esc(admin.login)}`;
-  const who = name && email ? `${esc(name)} (${mail})` : email && !name ? mail : named;
+  let who = name ? esc(name) : `@${esc(admin.login)}`;
+  if (name && email) who = `${esc(name)} (${mail})`;
+  else if (email) who = mail;
   return `New here? Sign up, and ${who} approves you.`;
 }
 // signing in with GitHub, and (for someone new) signing up: a request the admin approves
