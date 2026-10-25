@@ -27,11 +27,7 @@ export function taskOfKey(keys: ReadonlyMap<string, string>, said: string): stri
 // Who a text mentions: each @name in it (a person's GitHub login, an agent's name), once, without
 // the full stop or colon after it. An address like a@b.com isn't a mention.
 export const MENTION = /(^|[\s([{,;])@([A-Za-z0-9][\w.:-]{0,63})/g;
-export const mentionName = (said: string): string => {
-  let end = said.length;
-  while (end > 0 && ".:-".includes(said[end - 1] ?? "")) end--; // a step at a time: no pattern to backtrack over
-  return said.slice(0, end);
-};
+export const mentionName = (said: string): string => said.replace(/[.:-]+$/, "");
 export const mentionsIn = (text: string): string[] => [...new Set([...text.matchAll(MENTION)].map((m) => mentionName(m[2] ?? "")))];
 
 const str = (b: Record<string, unknown>, k: string) => (typeof b[k] === "string" && (b[k] as string) !== "" ? { [k]: b[k] as string } : {});

@@ -993,8 +993,6 @@ const when = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 const hiddenOf = (fields: [string, string][]) => fields.map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("");
-// who an @ can name, for the page's script (app.mjs): the project's people and its agents (live only)
-const mentionableAttrs = (form: Ext["form"]): string => (form ? ` data-people="${esc(form.people.join(" "))}" data-agents="${esc(form.agents.join(" "))}"` : "");
 // words people wrote, escaped, each @mention marked (who it names: a person or an agent)
 export const mentionedHtml = (text: string): string => esc(text).replaceAll(MENTION, (_m, before: string, said: string) => {
   const name = mentionName(said);
@@ -1635,7 +1633,8 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
   const board = v.roots.length > 0 || ghosts.length > 0;
   const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [] } : undefined;
-  const mentionable = mentionableAttrs(form);
+  // who an @ can name, for the page's script (app.mjs): the project's people and its agents
+  const mentionable = form ? ` data-people="${esc(form.people.join(" "))}" data-agents="${esc(form.agents.join(" "))}"` : "";
   const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
   const name = ext.ws?.title ?? stream; // as people see it (renamed in Project settings)
   const first = !board && lanesFirst ? "lanes" : "board";

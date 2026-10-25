@@ -81,8 +81,7 @@ export async function nextTask(c: AgentContext): Promise<ToolText> {
 function mentionLines(rows: readonly TreeRow[], tickets: ReadonlyMap<string, Ticket>, comments: ReadonlyMap<string, Comment[]>, actor: string): string[] {
   const out: string[] = [];
   for (const row of rows) {
-    let asked: Comment | undefined;
-    for (const x of unanswered(comments.get(row.id) ?? [], actor)) if (mentionsIn(x.text).includes(actor)) asked = x; // the latest that names it
+    const asked = unanswered(comments.get(row.id) ?? [], actor).filter((x) => mentionsIn(x.text).includes(actor)).at(-1);
     if (asked) out.push(`Mentioned on ${row.id} by ${asked.by}: "${clip(asked.text.replaceAll("\n", " "), 160)}" (get_task shows it; add_comment replies)`);
   }
   const words = (t: Ticket | undefined) => [t?.description ?? "", ...(t?.steps ?? [])].join("\n");
