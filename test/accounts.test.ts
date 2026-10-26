@@ -49,14 +49,23 @@ test("accounts go where tira's data goes: a file with no database; Postgres refu
   assert.throws(() => tiraServer({ store: new SqliteEventStore(), registry: defaultRegistry(), stream: "s", token: "k", links: { env: { TIRA_DATABASE_URL: "postgres://tira@127.0.0.1:5432/tira" } } }), /set TIRA_SECRET_KEY/);
 });
 
-test("a session lasts 30 days, like its cookie", async () => {
+test("a session lasts 30 days in a remembered browser, else 12 hours at most", async () => {
   const env = { TIRA_HOME: home() };
   await saveSession("fresh", "isha", env);
+  await saveSession("passing", "isha", env, false); // Remember this browser left unticked
   assert.equal(sessionLogin("fresh", env), "isha");
+  assert.equal(sessionLogin("passing", env), "isha");
   const file = join(env.TIRA_HOME, "credentials.json");
-  const s = JSON.parse(readFileSync(file, "utf8")) as { sessions: Record<string, { login: string; at: string }> };
-  for (const v of Object.values(s.sessions)) v.at = new Date(Date.now() - 31 * 86_400_000).toISOString();
-  writeFileSync(file, JSON.stringify(s));
+  const age = (hours: number) => {
+    const s = JSON.parse(readFileSync(file, "utf8")) as { sessions: Record<string, { login: string; at: string }> };
+    for (const v of Object.values(s.sessions)) v.at = new Date(Date.now() - hours * 3_600_000).toISOString();
+    writeFileSync(file, JSON.stringify(s));
+  };
+  age(11);
+  assert.deepEqual([sessionLogin("fresh", env), sessionLogin("passing", env)], ["isha", "isha"]);
+  age(13);
+  assert.deepEqual([sessionLogin("fresh", env), sessionLogin("passing", env)], ["isha", undefined]);
+  age(31 * 24);
   assert.equal(sessionLogin("fresh", env), undefined);
 });
 
@@ -151,6 +160,10 @@ if (!url) {
       assert.equal(sessionLogin("octo-session", env), undefined);
       assert.equal(atlassianAuth("octo", env)?.access, "a"); // Jira is unlinked on its own
       await saveSession("old", "octo", env);
+      await saveSession("passing", "octo", env, false); // its browser not remembered
+      await (postgresAccounts(env) as PostgresAccounts).query(`UPDATE ${schema}.account_sessions SET at = now() - interval '13 hours'`);
+      await refreshAccounts(env);
+      assert.deepEqual([sessionLogin("old", env), sessionLogin("passing", env)], ["octo", undefined]);
       await (postgresAccounts(env) as PostgresAccounts).query(`UPDATE ${schema}.account_sessions SET at = now() - interval '31 days'`);
       await refreshAccounts(env);
       assert.equal(sessionLogin("old", env), undefined);
@@ -275,7 +288,7 @@ if (!url) {
     const b = await serve(pgEnv(schema)); // another computer: its own folder, the same database
     try {
       await a.http("POST", "/integrations/setup", "token=k&github_client_id=Iv1.gh&back=%2Fwelcome");
-      const id = /[?&]id=([0-9a-f]+)/.exec(String((await a.http("POST", "/signin/start", "token=k")).headers.location))?.[1] ?? "";
+      const id = /[?&]id=([0-9a-f]+)/.exec(String((await a.http("POST", "/signin/start", "token=k&signup=1")).headers.location))?.[1] ?? "";
       const done = await a.http("POST", "/signin/poll", `token=k&id=${id}&fragment=1`);
       const cookie = String(done.headers["set-cookie"]).split(";")[0] ?? "";
       assert.match(cookie, /^tira_session=[0-9a-f]{64}$/);

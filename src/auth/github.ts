@@ -16,7 +16,9 @@ export interface DeviceStart { deviceCode: string; userCode: string; verifyAt: s
 export type DevicePoll = { token: string } | { wait: number } | { failed: string };
 
 export interface GitHubAuthApi {
-  authorizeUrl(clientId: string, redirectUri: string, state: string): string; // the direct way: GitHub's page
+  // the direct way: GitHub's page. pickAccount: GitHub shows its account picker, so someone already
+  // signed in there (who approved tira before) can pick another account, as signing up needs
+  authorizeUrl(clientId: string, redirectUri: string, state: string, pickAccount?: boolean): string;
   exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string>; // its code, for a token
   start(clientId: string): Promise<DeviceStart>;
   poll(clientId: string, deviceCode: string): Promise<DevicePoll>;
@@ -52,8 +54,8 @@ export class GitHubDevice implements GitHubAuthApi {
     return (await res.json()) as Record<string, unknown>;
   }
 
-  authorizeUrl(clientId: string, redirectUri: string, state: string): string {
-    return `${this.web}/login/oauth/authorize?${form({ client_id: clientId, redirect_uri: redirectUri, scope: GITHUB_SCOPES, state })}`;
+  authorizeUrl(clientId: string, redirectUri: string, state: string, pickAccount = false): string {
+    return `${this.web}/login/oauth/authorize?${form({ client_id: clientId, redirect_uri: redirectUri, scope: GITHUB_SCOPES, state, ...(pickAccount ? { prompt: "select_account" } : {}) })}`;
   }
 
   async exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string> {

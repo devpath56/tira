@@ -85,7 +85,8 @@ Every choice shows the `tira link` command it amounts to under **Show the comman
 and the secret live only in the private store: on Postgres, beside the log, each sealed with
 `$TIRA_SECRET_KEY` and shared by everyone on that database (a change on one computer shows on
 everyone's next page); with no database, `$TIRA_HOME/credentials.json`, readable by its owner
-only. The store keeps a hash of each session (it lasts 30 days), so it can't sign anyone in.
+only. The store keeps a hash of each session (30 days in a remembered browser, else 12 hours at
+most), so it can't sign anyone in.
 
 ## Devtool hook
 

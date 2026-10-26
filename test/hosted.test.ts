@@ -14,7 +14,7 @@ import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { tiraServer } from "../src/serve/server.ts";
 import { listenAt, publicPageToken, publicProblem, publicSite } from "../src/serve/public.ts";
-import { access, appKeys } from "../src/sync/credentials.ts";
+import { access, appKeys, emailOf, knownLogin } from "../src/sync/credentials.ts";
 import { MemoryAgentTokens } from "../src/mcp/tokens.ts";
 import { clientId, clientOf, CLAUDE_CALLBACK, Codes, registered, registrationOf, s256 } from "../src/mcp/oauth.ts";
 import { run } from "../src/cli/cli.ts";
@@ -161,7 +161,7 @@ async function hosted() {
   // sign in the one-click way, as GitHub's `login`
   const signIn = async (login = "isha-gh") => {
     github.login = login;
-    const started = await form("/signin/start", {});
+    const started = await form("/signin/start", knownLogin(login, env) || emailOf(login, env) ? {} : { signup: "1" }); // Sign up the first time, Log in after
     const state = /[?&]state=([0-9a-f]+)/.exec(String(started.headers.location))?.[1] ?? "";
     return { started, done: await http("GET", `/signin/github/callback?code=gh-code&state=${state}`) };
   };
@@ -187,7 +187,7 @@ test("at its public address: tira answers only that address (its host's check to
     const { started, done } = await t.signIn();
     assert.match(String(started.headers.location), /redirect_uri=https%3A%2F%2Ftira\.example\.com%2Fsignin%2Fgithub%2Fcallback/);
     assert.match(String(started.headers["set-cookie"]), /^tira_signin=[0-9a-f]+; HttpOnly; SameSite=Lax; Path=\/signin; Max-Age=600; Secure$/);
-    assert.match(String(done.headers["set-cookie"]), /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000; Secure$/);
+    assert.match(String(done.headers["set-cookie"]), /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Secure$/); // not remembered: gone with the browser
     assert.equal((await t.http("GET", "/api/tasks")).status, 200);
     // a way on after sign-in is only ever Claude's approval page
     t.jar.clear();

@@ -9,18 +9,27 @@ Only under `tira serve`, and only when someone has to sign in: started without `
 once GitHub sign-in is set up (`/welcome`, `/connect`; the routes are in
 `src/serve/integrations.ts`, the pages in `src/serve/welcome.ts`).
 
-**How to read it.** Apple's Human Interface Guidelines, as in debugAssist's sign-in page: a
-material card, the sign-in button in the label colour, blue for the one primary action, grouped
-lists for choices, and few words. Light and dark:
-- **Landing** (`/welcome`): a split card. Left, what tira does, its four steps lighting in turn
-  (still under Reduce Motion). Right, **Sign up with GitHub** and **Sign in with GitHub**, with
-  "New here? Sign up with GitHub: you're the admin of every project you make, and you add your
-  team." A browser someone has signed in on offers **Continue with GitHub** alone. The first time
-  on a machine, the right side asks for tira's GitHub app instead (its Client ID, with the three
-  steps to make it), then shows the buttons.
+**How to read it.** Apple's Human Interface Guidelines (Isha, 2026-10-26): a frosted material
+card with depth, blue for the one primary action, large touch targets (44pt), grouped lists for
+choices, and few words. Light and dark; solid for Reduce Transparency. Behind every page on the
+way in, a **growing task tree** (`land.mjs`, after Sylva's living world and GSAP's motion): trunks
+rise from the foot of the page and branch out, each branch ending in a small glowing task (green
+done, blue under way, now and then amber blocked), with pollen-like light drifting up; it grows,
+rests, fades and grows again, takes tira's colours, rests while its tab is hidden, and stands still,
+fully grown, under Reduce Motion. The card's parts rise in one after another when it opens.
+- **Landing** (`/welcome`): one card. "Welcome to tira", then **Welcome back!** with **Log in with
+  GitHub** (blue, the one primary action) and **Remember this browser** under it (unticked: the
+  login ends when the browser closes, 12 hours at most; ticked: 30 days), "or", then a smaller
+  **New user?** row with **Sign up with GitHub**. Always both, on every browser, in one form. Sign up
+  asks GitHub to show its account picker (`prompt=select_account`): someone already signed in to
+  GitHub, who approved tira before, can pick or add another account instead of being sent straight
+  back as the one they're in. An account tira already has is told "already has a tira account: log
+  in instead"; Log in with an account tira doesn't have is told "doesn't have a tira account yet:
+  sign up first". Either way nothing changes. Log in goes straight through GitHub. The first time on a machine, the card asks
+  for tira's GitHub app instead (its Client ID, with the three steps to make it), then shows the buttons.
 - **Email** (`/signup/email`, once): when GitHub's profile shows no email, "One more thing" asks
   for one before anything else. Only its owner sees it; they change it in Account settings.
-- **Code** (after Continue with GitHub): the same card; GitHub's code, large, with **Copy**,
+- **Code** (after Sign up or Log in, without the app's secret): a split card, what tira does beside it; GitHub's code, large, with **Copy**,
   **Open GitHub** (a new tab), and a status line. The page goes on by itself once GitHub says yes
   (`signin.mjs`); without the script, "I've approved it: continue" does the same.
 - **Connect** (`/connect`, signed in): steps across the top (signed in, connect, board). A repo,
@@ -42,8 +51,8 @@ and linked, the landing goes to the board. A form can send you back only to tira
 
 ## Devtool hook
 
-- `[data-landing]` on the landing's card; `[data-signup-start]` on Sign up with GitHub (someone new: in at once), `[data-signin-start]` on Sign in (Continue with GitHub on a browser someone signed in on, which offers Sign in only); `[data-setup-github]` on the first-run form.
-- `[data-newcomer]` on the word to someone new; `[data-signup-email]` on the email step's form.
+- `[data-land-scene]` on the growing tree's canvas; `[data-landing]` on the landing's card; `[data-signin-form]` on its one form: `[data-signup-start]` on Sign up with GitHub (someone new: in at once), `[data-signin-start]` on Log in with GitHub, `[data-remember]` on Remember this browser; `[data-setup-github]` on the first-run form.
+- `[data-newcomer]` on "New user?"; `[data-returning]` on "Welcome back!"; `[data-email-step]` on the email step's card, `[data-signup-email]` on its form.
 - `[data-signin]` on the code step's card; `[data-user-code]` on the code; `[data-copy]` on Copy; `[data-open-github]` on Open GitHub; `[data-signin-status]` on the status line; `[data-signin-wait]` on the form that waits.
 - `[data-consent-page]` on the page that approves Claude's connection (at a public address): `[data-consent-who]` on who asked, `[data-consent]` on its form, `[data-consent-allow]` and `[data-consent-cancel]` on its buttons.
 - `[data-connect]` on the connect card; `[data-repo-pick]` on the repo picker; `[data-connect-jira]` on Connect Jira; `[data-open-board]` on Open the board.

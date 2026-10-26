@@ -7,7 +7,7 @@
 //   github     each signed-in person's GitHub token, by GitHub login (from GitHub's device sign-in)
 //   atlassian  each person's Atlassian sign-in, by GitHub login (access and refresh tokens, site)
 //   sessions   who each page session is: only a hash of the session id, so the store can't sign
-//              anyone in; a session lasts 30 days, like its cookie
+//              anyone in; a session lasts 30 days in a remembered browser, else 12 hours at most
 //   names      the name each person chose to be shown as (Account settings), by login
 //   emails     the email each person gave when they signed up, by login
 //   access     this tira's owner (the first person to sign in, or TIRA_ADMIN), and, from before
@@ -27,7 +27,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type ProjectPeople } from "./accounts-pg.ts";
+import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type ProjectPeople } from "./accounts-pg.ts";
 
 export type { Access, AppKeys, AtlassianAuth, GitHubAuth, ProjectPeople } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
@@ -275,15 +275,17 @@ export async function forget(login: string, env: Env = process.env): Promise<voi
 }
 
 const hashed = (id: string) => createHash("sha256").update(id).digest("hex");
-// who a session is, while it lasts (30 days, like its cookie)
+// who a session is, while it lasts: 30 days in a browser its person chose to remember (Remember
+// this browser), else 12 hours at most (its cookie ends with the browser, in any case)
 export function sessionLogin(id: string, env: Env = process.env): string | undefined {
   const s = read(env).sessions?.[hashed(id)];
-  return s && Date.parse(s.at) > Date.now() - SESSION_DAYS * 86_400_000 ? s.login : undefined;
+  const lasts = s?.remember === false ? BROWSER_SESSION_HOURS * 3_600_000 : SESSION_DAYS * 86_400_000;
+  return s && Date.parse(s.at) > Date.now() - lasts ? s.login : undefined;
 }
-export async function saveSession(id: string, login: string, env: Env = process.env): Promise<void> {
+export async function saveSession(id: string, login: string, env: Env = process.env, remember = true): Promise<void> {
   const pg = postgresAccounts(env);
-  if (pg) return pg.addSession(hashed(id), login);
-  update(env, (s) => { s.sessions = { ...(s.sessions ?? {}), [hashed(id)]: { login, at: new Date().toISOString() } }; });
+  if (pg) return pg.addSession(hashed(id), login, remember);
+  update(env, (s) => { s.sessions = { ...s.sessions, [hashed(id)]: { login, at: new Date().toISOString(), ...(remember ? {} : { remember: false as const }) } }; });
 }
 export async function dropSession(id: string, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);

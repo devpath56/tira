@@ -15,7 +15,8 @@
 //   people: by project and login) and account_sessions (by a hash of the session id: the table
 //   can't sign anyone in).
 // - Links stay until their owner unlinks them; an admin removing someone only ends their sessions.
-// - A session lasts 30 days, like its cookie.
+// - A session lasts 30 days when its browser is remembered (the person ticks Remember this browser),
+//   else until the browser closes, and 12 hours at most (Isha, 2026-10-26).
 // - What each page reads comes from a snapshot taken at the start of each request (refresh), so one
 //   person's change shows on everyone's next page; every write goes to the database first.
 import pg from "pg";
@@ -55,7 +56,7 @@ export interface Accounts {
   access?: Access;
   github?: Record<string, GitHubAuth>;
   atlassian?: Record<string, AtlassianAuth>;
-  sessions?: Record<string, { login: string; at: string }>;
+  sessions?: Record<string, { login: string; at: string; remember?: false }>; // remember false: its browser isn't remembered
   names?: Record<string, string>;
   emails?: Record<string, string>; // the email each person gave, by login
   blocked?: string[]; // accounts the owner removed: they can't sign in
@@ -66,6 +67,7 @@ export interface Accounts {
 export class AccountsRefused extends Error {}
 
 export const SESSION_DAYS = 30;
+export const BROWSER_SESSION_HOURS = 12; // the most a sign-in lasts in a browser not remembered
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 
 // ---------- sealing ----------
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS ${s}.account_github (login TEXT PRIMARY KEY, token TE
 CREATE TABLE IF NOT EXISTS ${s}.account_atlassian (login TEXT PRIMARY KEY, auth TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_names (login TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_sessions (id_hash TEXT PRIMARY KEY, login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE ${s}.account_sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE TABLE IF NOT EXISTS ${s}.account_emails (login TEXT PRIMARY KEY, email TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_blocked (login TEXT PRIMARY KEY, by_login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_projects (
@@ -149,10 +152,11 @@ export class PostgresAccounts {
     this.setup ??= this.transaction(async (c) => {
       await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-accounts:${this.schema}`]);
       const made = await c.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = $1 AND tablename = ANY($2)", [this.schema, TABLES]);
-      // tables made before the GitHub app kept a secret (2026-10-23) get its column the same way
-      // and tables made before sign-up requests (2026-10-25) get theirs: the columns each must have
-      const cols = await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND ((table_name = 'account_apps' AND column_name = 'github_secret') OR (table_name = 'account_access' AND column_name = 'requests'))", [this.schema]);
-      if ((made.rows[0]?.n ?? 0) < TABLES.length || cols.rowCount !== 2) await c.query(ddl(this.schema));
+      // tables made before the GitHub app kept a secret (2026-10-23) get its column the same way,
+      // tables made before sign-up requests (2026-10-25) get theirs, and sessions made before a
+      // browser could be remembered (2026-10-26) theirs: the columns each must have
+      const cols = await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND ((table_name = 'account_apps' AND column_name = 'github_secret') OR (table_name = 'account_access' AND column_name = 'requests') OR (table_name = 'account_sessions' AND column_name = 'remember'))", [this.schema]);
+      if ((made.rows[0]?.n ?? 0) < TABLES.length || cols.rowCount !== 3) await c.query(ddl(this.schema));
     }).catch((err: unknown) => {
       this.setup = undefined; // try again next time
       throw err;
@@ -190,7 +194,7 @@ export class PostgresAccounts {
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
       this.pool.query(`SELECT login, auth FROM ${s}.account_atlassian`),
       this.pool.query(`SELECT login, name FROM ${s}.account_names`),
-      this.pool.query(`SELECT id_hash, login, at FROM ${s}.account_sessions WHERE at > now() - make_interval(days => ${SESSION_DAYS})`),
+      this.pool.query(`SELECT id_hash, login, at, remember FROM ${s}.account_sessions WHERE at > now() - make_interval(days => ${SESSION_DAYS})`),
       this.pool.query(`SELECT login, email FROM ${s}.account_emails`),
       this.pool.query(`SELECT login FROM ${s}.account_blocked ORDER BY at, login`),
       this.pool.query(`SELECT stream, login, role FROM ${s}.account_projects ORDER BY at, login`),
@@ -203,7 +207,7 @@ export class PostgresAccounts {
     out.github = Object.fromEntries((gh.rows as { login: string; token: string; name: string | null }[]).map((r) => [r.login, { token: this.key.open(r.token, `github:${r.login}`), ...(r.name ? { name: r.name } : {}) }]));
     out.atlassian = Object.fromEntries((at.rows as { login: string; auth: string }[]).map((r) => [r.login, JSON.parse(this.key.open(r.auth, `atlassian:${r.login}`)) as AtlassianAuth]));
     out.names = Object.fromEntries((names.rows as { login: string; name: string }[]).map((r) => [r.login, r.name]));
-    out.sessions = Object.fromEntries((sessions.rows as { id_hash: string; login: string; at: Date }[]).map((r) => [r.id_hash, { login: r.login, at: r.at.toISOString() }]));
+    out.sessions = Object.fromEntries((sessions.rows as { id_hash: string; login: string; at: Date; remember: boolean }[]).map((r) => [r.id_hash, { login: r.login, at: r.at.toISOString(), ...(r.remember ? {} : { remember: false as const }) }]));
     out.emails = Object.fromEntries((emails.rows as { login: string; email: string }[]).map((r) => [r.login, this.key.open(r.email, `email:${r.login}`)]));
     out.blocked = (blocked.rows as { login: string }[]).map((r) => r.login);
     out.projects = {};
@@ -313,8 +317,9 @@ export class PostgresAccounts {
     return wrote;
   }
 
-  async addSession(idHash: string, login: string): Promise<void> {
-    await this.write(`INSERT INTO ${this.schema}.account_sessions (id_hash, login) VALUES ($1, $2) ON CONFLICT (id_hash) DO UPDATE SET login = $2, at = now()`, [idHash, login]);
+  // remember: whether its browser is remembered (30 days), or not (12 hours at most)
+  async addSession(idHash: string, login: string, remember = true): Promise<void> {
+    await this.write(`INSERT INTO ${this.schema}.account_sessions (id_hash, login, remember) VALUES ($1, $2, $3) ON CONFLICT (id_hash) DO UPDATE SET login = $2, at = now(), remember = $3`, [idHash, login, remember]);
   }
 
   async dropSession(idHash: string): Promise<void> {

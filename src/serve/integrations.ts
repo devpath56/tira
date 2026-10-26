@@ -58,8 +58,6 @@ const SIGNIN_COOKIE = "tira_signin";
 // where a sign-in goes on to when it started from somewhere that needs one: Claude's connection,
 // waiting to be approved (src/mcp/oauth.ts). Only that page's own address is taken.
 export const NEXT_COOKIE = "tira_next";
-// a browser someone has signed in on: its landing offers Sign in only, not Sign up (Isha, 2026-10-25)
-export const KNOWN_COOKIE = "tira_known";
 const NEXT = /^\/oauth\/authorize\?[^\s"'<>\\]{1,2000}$/;
 const nextOf = (req: IncomingMessage): string | undefined => {
   let v = cookieOf(req, NEXT_COOKIE) ?? "";
@@ -191,9 +189,11 @@ export function accounts(outside: Outside | undefined, site?: PublicSite) {
 export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMessage) => { login?: string; actor?: string; signInOn: boolean }) {
   const acc = accounts(c.outside, c.site);
   const { env, gh, at, jiraOf, githubOf } = acc;
-  const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number; signup: boolean }>();
+  // a sign-in under way carries what it is: a sign-up (welcomed as such), and whether its browser is to be remembered
+  type Way = { signup: boolean; remember: boolean };
+  const pendingSignIns = new Map<string, { deviceCode: string; userCode: string; verifyAt: string; interval: number; until: number } & Way>();
   const pendingJira = new Map<string, { login: string; until: number; back: string; tab: boolean }>();
-  const pendingGithub = new Map<string, { until: number; w: string | null; signup: boolean }>(); // the direct way's sign-ins under way, by state: until when, the project it left from, whether it's a sign-up
+  const pendingGithub = new Map<string, { until: number; w: string | null } & Way>(); // the direct way's sign-ins under way, by state: until when, the project it left from, and what it is
   const back = (res: ServerResponse, to: string, f?: Flash) => c.send(res, 303, "text/plain; charset=utf-8", "", { Location: f ? `${to}?r=${c.flash(f)}` : to });
   // where GitHub and Atlassian send people back to: the public address, else the one the page was opened at
   const own = (host: string) => (c.site ? c.site.origin : `http://${host}`);
@@ -221,7 +221,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const me = who(req);
     if (me.actor) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: await nextStep(me.login) });
     const flash = c.takeFlash(url.searchParams.get("r") ?? "");
-    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), known: cookieOf(req, KNOWN_COOKIE) === "1", ...(flash ? { flash } : {}) }), { "Content-Security-Policy": SIGNIN_CSP });
+    c.send(res, 200, html, landingPage({ token: c.token, githubReady: !!appKeys(env).github, port: portOf(host), ...(flash ? { flash } : {}) }), { "Content-Security-Policy": SIGNIN_CSP });
   };
 
   // ---------- sign in with GitHub ----------
@@ -233,7 +233,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (form === undefined) return;
     const clientId = appKeys(env).github?.clientId;
     if (!clientId) return back(res, "/welcome", { ok: false, text: "GitHub sign-in isn't set up yet: add tira's GitHub app first." });
-    const signup = form.get("signup") === "1"; // Sign up: someone new, welcomed as such
+    // Sign up (someone new, welcomed as such) or Log in; and Remember this browser, ticked or not
+    const way: Way = { signup: form.get("signup") === "1", remember: form.get("remember") === "1" };
     // the direct way, once tira's app has its secret: off to GitHub's page and straight back, at
     // localhost (where tira's GitHub app sends people back to). The state rides in a cookie too, so
     // only the browser that started a sign-in can finish it.
@@ -242,13 +243,13 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       const now = Date.now();
       for (const [s, p] of pendingGithub) if (p.until < now) pendingGithub.delete(s);
       const state = randomBytes(24).toString("hex");
-      pendingGithub.set(state, { until: now + 10 * 60_000, w: url.searchParams.get("w"), signup });
-      return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: gh.authorizeUrl(clientId, githubBack(host), state), "Set-Cookie": `${SIGNIN_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600` });
+      pendingGithub.set(state, { until: now + 10 * 60_000, w: url.searchParams.get("w"), ...way });
+      return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: gh.authorizeUrl(clientId, githubBack(host), state, way.signup), "Set-Cookie": `${SIGNIN_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/signin; Max-Age=600` });
     }
     try {
       const s = await gh.start(clientId);
       const id = randomBytes(16).toString("hex");
-      pendingSignIns.set(id, { deviceCode: s.deviceCode, userCode: s.userCode, verifyAt: s.verifyAt, interval: s.interval, until: Date.now() + s.expiresIn * 1000, signup });
+      pendingSignIns.set(id, { deviceCode: s.deviceCode, userCode: s.userCode, verifyAt: s.verifyAt, interval: s.interval, until: Date.now() + s.expiresIn * 1000, ...way });
       // the code at its own address, so Back from GitHub (when it opened in this tab) or a reload comes back to it
       c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `/signin/code?id=${id}` });
     } catch (err) {
@@ -279,7 +280,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const error = url.searchParams.get("error");
     if (error) return back(res, "/welcome", { ok: false, text: error === "access_denied" ? "You turned it down on GitHub: sign in again when you're ready." : `GitHub sign-in stopped: ${error}.` });
     try {
-      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false, nextOf(req), p.signup);
+      await enter(res, await gh.exchange(keys.clientId, keys.secret, url.searchParams.get("code") ?? "", githubBack(host)), false, nextOf(req), p);
     } catch (err) {
       back(res, "/welcome", { ok: false, text: `GitHub sign-in stopped (${(err as Error).message}).` });
     }
@@ -289,20 +290,28 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   // 2026-10-25). The first person in becomes the owner. tira keeps the email their GitHub profile
   // shows, if it shows one; else they're asked for one before anything else (GET /signup/email).
   // fragment: signin.mjs asked, and goes where the answer says. next: where it started from, if anywhere.
-  const enter = async (res: ServerResponse, token: string, fragment: boolean, next?: string, signup = false) => {
+  // way: a sign-up or not, and whether this browser is remembered: then the sign-in lasts 30 days,
+  // else its cookie ends with the browser, and tira takes it for 12 hours at most (Isha, 2026-10-26).
+  const enter = async (res: ServerResponse, token: string, fragment: boolean, next: string | undefined, way: Way) => {
     const me = await gh.user(token);
-    if (isBlocked(me.login, env)) {
-      const key = c.flash({ ok: false, text: `${me.login} can't sign in to this tira: its owner removed this account.` });
+    const turnBack = (text: string) => {
+      const key = c.flash({ ok: false, text });
       return fragment ? c.send(res, 200, html, `<div data-go="/welcome?r=${key}"></div>`) : back(res, "/welcome", c.takeFlash(key));
-    }
+    };
+    if (isBlocked(me.login, env)) return turnBack(`${me.login} can't sign in to this tira: its owner removed this account.`);
+    // Sign up is for someone new, Log in for an account tira already has (it signed in here before,
+    // or gave its email): the other way round is told which to use, and nothing changes (Isha, 2026-10-26)
+    const known = knownLogin(me.login, env) !== undefined || emailOf(me.login, env) !== undefined;
+    if (way.signup && known) return turnBack(`${me.login} already has a tira account: log in instead.`);
+    if (!way.signup && !known) return turnBack(`${me.login} doesn't have a tira account yet: sign up first.`);
     const first = access(env).admin === undefined;
     if (first) await saveAccess((x) => (x.admin === undefined ? { ...x, admin: me.login } : x), env); // the first one in, even if two arrive at once
     await saveGithubAuth(me.login, { token, ...(me.name ? { name: me.name } : {}) }, env);
     if (!emailOf(me.login, env) && me.email && EMAIL.test(me.email)) await saveEmail(me.login, me.email, env);
     const session = randomBytes(32).toString("hex");
-    await saveSession(session, me.login, env);
-    const cookie = `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`;
-    const welcomed = signup ? `Welcome to tira, ${me.login}: make your first project, or open one someone added you to.` : `Signed in as ${me.login}. tira records your changes as ${me.login}.`;
+    await saveSession(session, me.login, env, way.remember);
+    const cookie = `${SESSION_COOKIE}=${session}; HttpOnly; SameSite=Lax; Path=/${way.remember ? "; Max-Age=2592000" : ""}`;
+    const welcomed = way.signup ? `Welcome to tira, ${me.login}: make your first project, or open one someone added you to.` : `Signed in as ${me.login}. tira records your changes as ${me.login}.`;
     const key = c.flash({ ok: true, text: first ? `Signed in as ${me.login}: you're this tira's owner (its setup, and removing an account if you ever need to).` : welcomed });
     const go = next ?? `${await nextStep(me.login)}?r=${key}`;
     if (fragment) return c.send(res, 200, html, `<div data-go="${esc(go)}"></div>`, { "Set-Cookie": cookie });
@@ -355,7 +364,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
         return fragment ? c.send(res, 202, html, `<div data-waiting data-interval="${p.interval}"></div>`) : signinPage(res, id, p, "Not approved on GitHub yet.");
       }
       pendingSignIns.delete(id);
-      await enter(res, got.token, fragment, nextOf(req), p.signup);
+      await enter(res, got.token, fragment, nextOf(req), p);
     } catch (err) {
       fail(`GitHub sign-in stopped (${(err as Error).message}).`);
     }

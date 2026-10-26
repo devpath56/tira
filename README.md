@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 949 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 957 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -686,7 +686,7 @@ It won't start until it's safe. It needs:
 - `TIRA_ADMIN` (the owner's GitHub login: tira's setup, and removing an account);
 - `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
 
-There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Sign up** and **Sign in**, both with GitHub: anyone is in at once, and a browser someone has signed in on offers Sign in only. Each person may be admin of 5 projects here.
+There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Welcome back! Log in** and, smaller, **New user? Sign up**, both with GitHub and always both: anyone is in at once. Sign up shows GitHub's account picker, so another GitHub account can be picked; an account tira already has is told to log in instead, and Log in with one it doesn't have, to sign up first. **Remember this browser** keeps someone logged in for 30 days; unticked, the login ends when the browser closes (12 hours at most). Each person may be admin of 5 projects here.
 
 Claude's Connectors (`src/mcp/oauth.ts`): tira is its own small OAuth server.
 - **Discovery:** `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. A call to `/mcp` without a token gets a 401 pointing at them.
@@ -704,8 +704,8 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
 **On the page: the way in.** Start `tira serve` without `--actor` and open
 `http://localhost:4747`. No commands to type:
 
-1. **Landing.** What tira does, and **Sign up** or **Sign in** with GitHub (the look of debugAssist's sign-in
-   page, in tira's colours). The first time on a machine it asks for tira's GitHub app first: a
+1. **Landing.** One frosted card on a growing task tree (Apple's HIG; still for Reduce Motion):
+   **Welcome back! Log in** (with **Remember this browser**) or, smaller, **New user? Sign up**, with GitHub. The first time on a machine it asks for tira's GitHub app first: a
    GitHub OAuth app (Enable Device Flow ticked; no secret needed), whose Client ID you paste in.
 2. **Sign in with GitHub.** tira shows a short code (with Copy and Open GitHub); approve it on
    github.com and the page goes on by itself. From then on your changes are recorded as your
@@ -742,7 +742,8 @@ Tokens, app keys and the secret live in the private store, never in the history 
 on Postgres, the accounts tables, each token sealed with `$TIRA_SECRET_KEY` ("Running on
 Postgres"); with no database, a private file on this machine (`$TIRA_HOME/credentials.json`,
 default `~/.config/tira`, readable only by its owner). Sessions are kept as hashes, so neither can
-sign anyone in, and last 30 days.
+sign anyone in. A login lasts 30 days when its browser is remembered, else until the browser closes,
+and 12 hours at most.
 
 **In a terminal** (and for agents), the same links without a browser:
 
