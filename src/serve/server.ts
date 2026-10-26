@@ -1366,12 +1366,24 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const me = who(req);
     // someone signed in on this browser: from now on its landing offers Sign in only
     if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
-    if (me.login && req.method === "GET" && !BEFORE_EMAIL.has(key) && !key.startsWith("GET /api/") && !emailOf(me.login, linkEnv)) return send(res, 303, text, "", { Location: "/signup/email" });
-    if (me.login && !YOURS.has(key) && !inProject(await peopleNow(ws.stream), me.login)) {
-      if (key === "GET /" && ws.q === "") return send(res, 303, text, "", { Location: withQ("/projects", url.searchParams.has("r") ? `r=${encodeURIComponent(url.searchParams.get("r") ?? "")}` : "") }); // the project tira opened on isn't yours: yours instead
-      return req.method === "GET" && !key.startsWith("GET /api/") ? send(res, 404, html, noWorkspace(ws.stream)) : send(res, 404, text, "not found\n");
-    }
+    if (me.login && (await turnedAway(req, res, url, key, ws, me.login))) return;
     return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
+  };
+  // Where someone signed in goes instead, if anywhere (true: sent there): with no email yet, the
+  // email step; on a project they aren't one of the people of, no such project (the one tira opened
+  // on: their own projects instead).
+  const turnedAway = async (req: IncomingMessage, res: ServerResponse, url: URL, key: string, ws: Workspace, login: string): Promise<boolean> => {
+    const page = req.method === "GET" && !key.startsWith("GET /api/");
+    if (page && !BEFORE_EMAIL.has(key) && !emailOf(login, linkEnv)) {
+      send(res, 303, text, "", { Location: "/signup/email" });
+      return true;
+    }
+    if (YOURS.has(key) || inProject(await peopleNow(ws.stream), login)) return false;
+    const flash = url.searchParams.get("r");
+    if (key === "GET /" && ws.q === "") send(res, 303, text, "", { Location: withQ("/projects", flash === null ? "" : `r=${encodeURIComponent(flash)}`) });
+    else if (page) send(res, 404, html, noWorkspace(ws.stream));
+    else send(res, 404, text, "not found\n");
+    return true;
   };
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => (res.headersSent ? res.destroy() : send(res, 500, "text/plain; charset=utf-8", `tira serve: ${(err as Error).message}\n`)));

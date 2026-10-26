@@ -306,7 +306,7 @@ export class PostgresAccounts {
       const roles = new Map<string, string>([...next.members.map((l): [string, string] => [l, "member"]), ...next.admins.map((l): [string, string] => [l, "admin"])]);
       await c.query(`DELETE FROM ${s}.account_projects WHERE stream = $1 AND NOT (login = ANY($2))`, [stream, [...roles.keys()]]);
       // those still in keep when they joined; a new role is only a new role
-      for (const [login, role] of roles) await c.query(`INSERT INTO ${s}.account_projects (stream, login, role) VALUES ($1, $2, $3) ON CONFLICT (stream, login) DO UPDATE SET role = $3`, [stream, login, role]);
+      await c.query(`INSERT INTO ${s}.account_projects (stream, login, role) SELECT $1, l, r FROM unnest($2::text[], $3::text[]) AS t(l, r) ON CONFLICT (stream, login) DO UPDATE SET role = EXCLUDED.role`, [stream, [...roles.keys()], [...roles.values()]]);
       return true;
     });
     await this.refresh();

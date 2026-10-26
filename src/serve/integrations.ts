@@ -328,7 +328,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (!EMAIL.test(email)) return back(res, back2, { ok: false, text: "That isn't an email address." });
     await saveEmail(login, email, env);
     if (back2 === "/settings") return back(res, "/settings", { ok: true, text: `Your email is ${email} now.` });
-    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: nextOf(req) ?? `${await nextStep(login)}?r=${c.flash({ ok: true, text: `Thanks, ${login}: you're all set.` })}` });
+    const done = c.flash({ ok: true, text: `Thanks, ${login}: you're all set.` });
+    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: nextOf(req) ?? `${await nextStep(login)}?r=${done}` });
   };
 
   const signinPoll = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
@@ -453,9 +454,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const mayChange = !!login && isProjectAdmin(p, login);
     const joined = (who2: string) => (knownLogin(who2, env) ? "" : `<span class="grp-v">Not signed up yet</span>`);
     const person = (who2: string, admin: boolean) => {
-      const you = login !== undefined && who2.toLowerCase() === login.toLowerCase() ? " (you)" : "";
+      const you = login?.toLowerCase() === who2.toLowerCase() ? " (you)" : "";
       const role = admin ? `<span class="pill">Admin</span>` : "";
-      const acts = !mayChange ? "" : (admin ? teamButton(t, "member", who2, "Make member") : teamButton(t, "admin", who2, "Make admin")) + teamButton(t, "remove", who2, "Remove");
+      const roleButton = admin ? teamButton(t, "member", who2, "Make member") : teamButton(t, "admin", who2, "Make admin");
+      const acts = mayChange ? roleButton + teamButton(t, "remove", who2, "Remove") : "";
       return `<div class="grp-row" data-team-${admin ? "admin" : "member"}><span class="grp-k">${esc(who2)}${you}</span>${joined(who2)}${role}${acts}</div>`;
     };
     const people = p.admins.map((x) => person(x, true)).join("") + p.members.map((x) => person(x, false)).join("");
@@ -536,15 +538,20 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
 
   // A person's profile (GET /u/<username>), for anyone signed in: who they are, and the username a
   // project's admin adds them by, to copy. Never their email.
-  const personPage = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
+  const personPage = (req: IncomingMessage, res: ServerResponse, url: URL, host: string): Promise<void> => {
+    showPerson(req, res, url, host);
+    return Promise.resolve();
+  };
+  const showPerson = (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const me = who(req);
     if (!me.actor) return signedOut(res, url);
-    let asked = "";
+    let said = "";
     try {
-      asked = decodeURIComponent(url.pathname.slice("/u/".length));
+      said = decodeURIComponent(url.pathname.slice("/u/".length));
     } catch {
-      asked = "";
+      said = "";
     }
+    const asked = (GITHUB_LOGIN.test(said) ? knownLogin(said, env) : undefined) ?? said; // as GitHub spells it
     const gh2 = GITHUB_LOGIN.test(asked) ? githubAuth(asked, env) : undefined;
     if (!gh2) return c.send(res, 404, html, settingsPage({ title: "Profile", label: "Profile", sections: [] }, `<header class="int-head"><h1>No one here by that name</h1><p>No one called ${esc(asked)} has signed up to this tira yet.</p></header>`, helpPanel(portOf(host), me.actor), scripts));
     const shown = displayName(asked, env) ?? gh2.name ?? asked;
@@ -564,7 +571,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const item = (p: MyProject) => {
       const shown = p.title ?? p.stream;
       const counts = p.tasks === 0 ? "No tasks yet" : `${p.open} open of ${p.tasks}`;
-      return `<a class="grp-row" href="${esc(p.href)}" data-my-project="${esc(p.stream)}"><span class="grp-k">${projectMark(p.stream, shown)}${esc(shown)}</span><span class="grp-v">${counts}</span>${p.admin ? `<span class="pill">Admin</span>` : ""}</a>`;
+      const pill = p.admin ? `<span class="pill">Admin</span>` : "";
+      return `<a class="grp-row" href="${esc(p.href)}" data-my-project="${esc(p.stream)}"><span class="grp-k">${projectMark(p.stream, shown)}${esc(shown)}</span><span class="grp-v">${counts}</span>${pill}</a>`;
     };
     const none = `<div class="grp-row" data-no-projects><span class="grp-k">You're not in any project yet</span><a class="act primary" href="/projects/new">Make your first project</a></div>`;
     const list = mine.length === 0 ? none : mine.map(item).join("") + `<div class="grp-row"><span class="grp-k"></span><a class="act primary" href="/projects/new">New project</a></div>`;
@@ -853,9 +861,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const startedHere = row("Delete", `<span class="grp-v">This is the project tira serve was started with: start it on another to delete this one</span>`);
     const adminsOnly = row("Delete", `<span class="grp-v">Only this project's admins can delete it</span>`);
     const mayDelete = await adminHere(me.login);
+    const whyNot = c.stream === c.home ? startedHere : adminsOnly;
     const remove = `<section class="grp danger" id="delete" data-int="delete"><h2 class="grp-h">Delete project</h2><p class="grp-desc">${esc(DESC.delete)}</p>`
       + (c.stream === c.home || !mayDelete
-        ? `<div class="grp-list">${c.stream === c.home ? startedHere : adminsOnly}</div></section>`
+        ? `<div class="grp-list">${whyNot}</div></section>`
         : `<form method="post" action="/projects/delete" class="grp-list" data-delete-project>${t}<label class="grp-row"><span class="grp-k">Type <b>${name}</b> to confirm</span><input type="text" name="confirm" autocomplete="off" spellcheck="false" required aria-label="Type ${name} to confirm"></label>`
           + `<div class="grp-row"><span class="grp-k"></span><button class="act danger" type="submit">Delete this project</button></div></form></section>`);
 
@@ -985,11 +994,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       if (repo !== "" && !REPO.test(repo)) return back(res, "/integrations", { ok: false, text: `${repo} isn't a repo as owner/name.` });
       link.repo = repo || undefined;
     } else if (form.get("what") === "jira") {
-      const key = (form.get("jira_project") ?? "").trim();
-      const site = me.login ? atlassianAuth(me.login, env)?.site : undefined;
-      if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return back(res, "/integrations", { ok: false, text: "Pick a Jira project from your connected site." });
-      link.jira_project = key || undefined;
-      link.jira_site = key ? site : undefined;
+      const notPicked = pickJira(form, me.login ?? "", link); // no one signed in: no site, so unlinking only
+      if (notPicked) return back(res, "/integrations", { ok: false, text: notPicked });
       link.jira_name = await nameOfPicked(me.login, link);
     } else return back(res, "/integrations", { ok: false, text: "Nothing to link." });
     back(res, "/integrations", await writeLink(me.actor, ws, link));

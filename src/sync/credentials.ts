@@ -201,7 +201,7 @@ export const emailOf = (login: string, env: Env = process.env): string | undefin
 export async function saveEmail(login: string, email: string, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveEmail(login, email);
-  update(env, (s) => { s.emails = { ...(s.emails ?? {}), [login]: email }; });
+  update(env, (s) => { s.emails = { ...s.emails, [login]: email }; });
 }
 
 // Each project's people, as saved (a project made before projects had their own has none saved:
@@ -214,7 +214,7 @@ export async function saveProject(stream: string, change: (p: ProjectPeople | un
   if (pg) return pg.saveProject(stream, change);
   let wrote = false;
   update(env, (s) => {
-    const all = { ...(s.projects ?? {}) };
+    const all = { ...s.projects };
     const next = change(all[stream]);
     if (next === undefined) return;
     wrote = true;
