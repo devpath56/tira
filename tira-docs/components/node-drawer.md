@@ -25,17 +25,31 @@ the board) and the tickets above it, each one click away; for a subtask, "2 of 3
 subtask before and after. Then two columns. **The work**: the title (the id under it); the
 description and steps; its **subtasks**, each a row with its state, name (and id), estimate and
 who it's assigned to (an agent's spark, a person's initials), one click to its own dialog, under
-"closed/all" and its meter, and under them **+ Add subtask** while it can take one; its comments;
-its history, folded. **Beside**, its properties: status (with marks: next, active, all subtasks
-closed, closed by tira, found during X) and what it allows; assignee; estimate (its subtasks'
-added up under it, a day as 8 hours); parent, with its progress; the blocks link both ways
+"closed/all" and its meter, with **+ Add subtask** beside them while it can take one; then its
+activity. **Beside**, its properties: status (with marks: next, active, all subtasks
+closed, closed by tira) and what it allows; assignee; estimate (its subtasks'
+added up under it, a day as 8 hours); parent, with its progress; **Found in** (the task it was
+found while working on, one click away); the blocks link both ways
 ("Blocked by design_tokens" on the blocked task, "Blocks colors" on its ticket); its Jira issue and
 pull requests; its proof of work; Show on graph. On a phone the properties come first. Few words:
 labels and placeholders, no sentences explaining what's empty.
 
+**In sections** (Isha, 2026-10-26: "everything feels melted together"). The ticket's key and id
+sit over its title; the title wraps to show whole. Then each part under its own small label:
+**Description** (in a soft box, at a reading width; the web addresses in it show under it as links,
+one click out, since a field can't open them; read, they are links in the words), **Steps** (with how
+many: each its own numbered row, and a last row to add the next), **Subtasks**, and **Activity**:
+the comments and the history as two tabs over one place, Comments first (as Jira's). The comments
+read as a thread: each writer's round mark (an agent's spark, a person's initials) on a line that
+joins them, then who, when and what; under them, the box to reply, with your mark beside it, its
+**Comment** button inside it, and how to mention and send.
+
 Under `tira serve` the ticket is edited where it shows (no Edit fold): its title, description and
 steps are fields that read as words until you click them, its assignee and estimate fields beside
 (in the same form); **Save** appears once something changes, and Cmd/Ctrl+Enter in its text saves.
+The title is one line: Enter saves it. In the steps, Enter starts a new row under this one,
+Backspace in an empty row removes it, the arrows move between rows, and several lines pasted into
+one row become that many steps; with no script, one more row each save.
 tira's entries say why and which move they cite. An entry written before the rules version
 marker carries a "legacy" tag: it was judged, and is replayed, under the legacy era's rules
 (versioned rules, 2026-10-20). Close it with ×, a click on the dimmed page around it, or Esc
@@ -49,7 +63,8 @@ under `tira serve` (which also moves focus into the dialog, and back to the task
 - `[data-subtasks]` on the subtasks, `.kids-list` on their rows, `[data-subtask]` on each row (its key); `[data-proof]` on a done task's proof of work; `[data-links]` on the blocks link.
 - `[data-ticket-key]` under the ticket's title: its `TIRA_<PROJECT>_<n>` (and its id, when a title shows instead).
 - `[data-ticket]` on the ticket, with `[data-ticket-description]`, `[data-ticket-steps]`, `[data-ticket-estimate]` and `[data-ticket-assignee]`; `[data-ticket-form]` on the ticket's form (live only).
-- `[data-comments]` on the comments, `[data-comment]` on each, `[data-comment-form]` on the one to add (live only).
+- `[data-comments]` on the comments, `[data-comment]` on each, `[data-comment-form]` on the one to add (live only); `[data-history-pane]` on the history, the other tab; `[data-tab]` on each tab's radio (`c`, `h`).
+- `[data-ticket-links]` under a description being edited: its web addresses, as links (live only). `[data-found-in]` on Found in, beside.
 - `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only).
 - `.legacy` on the tag of each entry with no rules era (Activity counts them too).
 

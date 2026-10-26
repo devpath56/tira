@@ -3,7 +3,7 @@
 **JTBD:** 1 — Track a branching build depth-first (and 2 — Prove a task is done).
 
 **What / why.** A project (a workspace, in the code) is one task tree, linked to one GitHub repo
-and one Jira project. On the right of the project's name, its links say what it's linked to, so
+and one Jira project. Under the project's name, on the right, its links say what it's linked to, so
 where its pull requests and its Jira issues live is one click away. tira leads and Jira mirrors; nothing moves
 in Jira until someone syncs.
 
@@ -14,7 +14,14 @@ the pages, as the person signed in; the result shows in the banner), and **Add J
 GitHub** while one is missing (straight to that section of Project settings). Project settings
 themselves are in the sidebar.
 
-**A long name** (Isha, 2026-10-26): the title above the board takes two lines if it must, breaking
+**Refresh** (Isha, 2026-10-26), last on that row, live only. The page follows the log by itself
+(every few seconds while it's in view), but not while a dialog is open or you're typing, so changes
+an agent or a teammate makes can wait. Refresh brings them in now, back where you were, and the
+cards that moved glow once. While changes are waiting it says **New changes**, with a dot. With no
+script it's a plain reload.
+
+**A long name** (Isha, 2026-10-26): the name has its own row, the whole width of the page (History
+and Create, then the links, on the row under it), and takes two lines if it must, breaking
 after a dot, an underscore or a slash, never inside a word ("PM.Engg.Spec.Handoff." then
 "Review_Notes"). Where space is one line (the sidebar's projects, Project settings' list, Create's
 header), it's cut with "…" and the whole name shows on hover. The task search beside it stays on
@@ -28,6 +35,7 @@ request offers it as the proof.
 
 - `[data-workspace]` on the links (`.proj-links`); `[data-link-repo]` and `[data-link-jira]` on each.
 - `[data-integrations]` on its way to Project settings, `[data-add-jira]` on Add Jira, and `[data-sync]` on its Sync button, live only.
+- `[data-refresh]` on Refresh, with `[data-refresh-label]` on its words, live only (while changes wait, the page script adds the class has-new).
 - `[data-jira-key]` on a card's Jira chip; `[data-task-links]` on a task dialog's Jira and pull request lines.
 
 Assertion: the rendered file shows the links and none of the actions; the token never appears on

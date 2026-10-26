@@ -10,8 +10,13 @@ choice is remembered per browser, so it survives the reload after every action.
 
 **How to read it.** Kanban: columns To do, In progress, Blocked (only when something is),
 Done and Dropped, always in one row (wider than the page, the row scrolls sideways; on a phone
-you swipe one column at a time); every ticket is a card, naming its parent, and ◆ marks the
-next task. A card's title wraps after an underscore, never inside a word. Done and Dropped only
+you swipe one column at a time); every ticket is a card, named by its ticket's title (its id
+when it has none), and ◆ marks the next task. A long title shows three lines, then "…", the whole
+of it in the tooltip; an id wraps after an underscore, never inside a word. A card names its parent
+(one line, above its title) only when the board's cards sit under more than one: under a single
+parent the line would say the same thing on every card (Isha, 2026-10-26). Work found while working
+on another task carries a small branch mark beside its subtasks, "Found while working on …" in its
+tooltip; planned work has none. Done and Dropped only
 grow, so they show their newest 8 cards (the last to close first) and keep the rest behind
 "Show N more" (it opens with no script); opened, "Show fewer" sits after the older cards, at the
 foot of the column. To do, In progress and Blocked show every card. Each card shows who moved it
@@ -65,7 +70,8 @@ every task and scrolls.
 - `#bv-kanban` and `#bv-graph`, the two radio inputs, each with `[data-board-style]`; `.board-bar` holds the switch (`.seg`) and the graph's `.legend`.
 - `.bv-kanban` and `.bv-graph` hold the two styles; `.graph` holds the nodes (`.gn`) over the lines (`.edges`).
 - `[data-key]` on each task's graph node, exactly once, with `[data-state]`, `[data-cursor]`, `[data-active]` and `[data-drained]`.
-- `[data-from]` and `[data-to]` on each line (parent and child), `[data-found]` on each found-while line, `[data-blocks]` on each blocks arc and on a Kanban card's "blocks" chip; `[data-parent]` on each node with a parent.
+- `[data-card-parent]` on a card's parent line (only when the cards sit under more than one parent).
+- `[data-from]` and `[data-to]` on each line (parent and child), `[data-found]` on each found-while line and on a Kanban card's found mark, `[data-blocks]` on each blocks arc and on a Kanban card's "blocks" chip; `[data-parent]` on each node with a parent.
 - `[data-graph]` on the box the live page turns into a canvas; `.canvas-tools` (`[data-canvas-tools]`) holds its tools; `.fold` with `[data-fold]` (the parent's key) under each parent; `.canvas-flash` repeats an action's result in full screen.
 - `.more` (`[data-more]`: how many it holds) on the older Done or Dropped cards; `.more-btn` on its Show more / Show fewer, after them.
 - `[data-ticket-key]` on each card's first line: the ticket's key, `TIRA_<PROJECT>_<n>`, numbered in the order the project's tasks were made (before the ◆ now/next cursor, where there is one).

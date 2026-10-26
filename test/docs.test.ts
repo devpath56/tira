@@ -42,6 +42,10 @@ async function pages(): Promise<string> {
   await send("t1", "CANCEL"); // its ticket closed: "ready to unblock"
   // found while working on a, its sibling: the graph's found-while line
   await d.submit({ stream: "t", kind: "create", entity: { type: "node", id: "c" }, actor: "isha", payload: { parent_id: "app", kind: "discovered", discovered_during: "a" } });
+  // c's ticket (a web address in its words, assigned to isha) and a question for her on a: the
+  // dialog's links, Found in, and For you
+  await d.submit({ stream: "t", kind: "create", entity: { type: "ticket", id: "c", version: 1 }, actor: "isha", payload: { task: "c", title: "Check the copy", description: "See https://example.com/copy", assignee: "isha" } });
+  await d.submit({ stream: "t", kind: "create", entity: { type: "comment", id: "q1" }, actor: "claude-code", payload: { task: "a", text: "@isha which way?" } });
   // ideas: one placed under app (its file approved), one waiting for its file, one whose parent a person must pick
   const idea = (id: string, summary: string, under?: string) => d.submit({ stream: "t", kind: "create", entity: { type: "idea", id }, actor: "claude", payload: { summary, why: "w", ...(under ? { under } : {}) } });
   await idea("paging", "paging for the app");

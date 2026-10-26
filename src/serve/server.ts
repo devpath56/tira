@@ -1034,12 +1034,15 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { r } = await now(ws.stream);
     return r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id) ? r : undefined;
   };
-  // a ticket's Edit form, read: each field trimmed, the steps one per line
+  // a ticket's Edit form, read: each field trimmed, the steps one to a row (each `step` field, in
+  // order; an older page or a script sends them one per line, as `steps`)
   type TicketAsked = TicketWords & { assignee: string };
+  const stepsAsked = (form: URLSearchParams): string[] => (form.has("step") ? form.getAll("step") : (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n"))
+    .map((x) => x.trim().replaceAll(/\s+/g, " ")).filter((x) => x !== "");
   const ticketAsked = (form: URLSearchParams): TicketAsked => ({
     title: (form.get("title") ?? "").trim().replaceAll(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
-    steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
+    steps: stepsAsked(form),
     estimate: effortAsked(form),
     assignee: (form.get("assignee") ?? "").trim(),
   });

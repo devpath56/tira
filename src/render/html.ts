@@ -21,7 +21,7 @@ import { esc } from "./escape.ts";
 import { foundPath, fx, layout, tint, treePath } from "../serve/layout.mjs";
 import { IDEA, OPEN_STAGES, TASK, ideaRows, stageWord, type IdeaRow } from "../fold/ideas.ts";
 import { linksOf as taskLinksOf, workspaceOf, type TaskLinks, type WorkspaceLink } from "../fold/workspace.ts";
-import { commentsOf, commitsOf, firstLine, MENTION, mentionName, shortSha, ticketKeys, ticketsOf, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, firstLine, MENTION, mentionName, mentionsIn, shortSha, ticketKeys, ticketsOf, unanswered, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import { LINK_TYPES } from "../tables/links.ts";
 
 const bare = (key: string) => key.replace(/^[^:]+:/, "");
@@ -113,10 +113,11 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .hero .who{display:contents}
 .hero h1{font-size:28px;font-weight:650;letter-spacing:-.02em;line-height:1.15}.hero h1>.h1-name{min-width:0;overflow-wrap:break-word}
 .hero h1{display:flex;align-items:center;gap:12px;margin:0}.hero h1 .pav{width:30px;height:30px;border-radius:9px;font-size:15px}
-.hero .title{order:-2;flex:1 1 100%;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;justify-items:start}.hero .title>h1,.hero .title>.title-acts{grid-column:1}
-.proj-links{grid-column:2;grid-row:1;justify-self:end;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}
+.hero .title{order:-2;flex:1 1 100%;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;justify-items:start}.hero .title>.title-acts{grid-column:1}.hero .title>h1{grid-column:1/-1;max-width:100%}
+.proj-links{grid-column:2;grid-row:2;justify-self:end;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}
 .pl{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:13px;font-weight:600;color:var(--fg);transition:background .15s var(--ease),border-color .15s var(--ease)}.pl:hover{background:var(--hover);border-color:var(--line-2)}
 .pl svg,.proj-links .act svg{width:15px;height:15px;flex:none}.ico-jira{color:#2684ff}.act.primary .ico-jira{color:inherit}
+.act.refresh{position:relative}.act.refresh.has-new{color:var(--accent-text);background:var(--accent-bg);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}.act.refresh.has-new::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}.act.refresh.spin svg{animation:tira-spin .8s linear infinite}@keyframes tira-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.act.refresh.spin svg{animation:none}}
 .title-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:42px}
 @keyframes beat{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
 main[data-stream]{overflow-x:clip}
@@ -183,6 +184,7 @@ details.att-group .names{min-width:0;flex:1;order:3;color:var(--mut);font-size:1
 .att-row .path{flex:1 1 0;min-width:0;color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .att-row .since{flex:none;margin-left:auto;color:var(--dim);font-size:12px;white-space:nowrap}
 .att-row .acts{flex:0 0 168px;display:flex;justify-content:flex-end;gap:6px}.att-row .by{flex:none}
+.att-group.for-you h3{color:var(--accent-text)}.att-row.you .by,.att-row [data-subtasks-open]{flex:1 1 0;min-width:0;color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.att-row.you .by b{color:var(--fg);font-weight:600}.att-row [data-subtasks-open]{font-size:12px}.att-row [data-subtasks-open] a{color:var(--accent);font-weight:600}.att-row:has([data-subtasks-open]) .path{flex:0 1 auto}
 .attention.calm .att-head h2{color:var(--done)}
 .attention.calm p{margin:0;padding:0 16px 12px;color:var(--mut);font-size:13px}.attention.calm p a{color:var(--accent);font-weight:600}
 #v-lanes:checked~main .attention{display:none}
@@ -417,7 +419,8 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .cols[data-moves] .card[data-card-key]{cursor:grab;-webkit-user-drag:none;-webkit-touch-callout:none}html[data-dragging],html[data-dragging] .card,html[data-dragging] .col{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .card.drag-src{opacity:.35}.drag-ghost{position:fixed;z-index:40;left:0;top:0;margin:0;pointer-events:none;box-shadow:var(--shadow-raised);rotate:1.5deg;scale:1.02;transition:none}
 .col[data-drop]{transition:background .15s var(--ease),outline-color .15s var(--ease),opacity .15s var(--ease)}.col[data-drop=ok]{outline:2px dashed var(--line-2);outline-offset:-2px}.col[data-drop=ok].drop-over{outline-color:var(--accent);background:var(--accent-bg)}.col[data-drop=no]{opacity:.45}@media (prefers-reduced-motion:reduce){.drag-ghost{rotate:none;scale:none}}
-.card .t{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.card .t{font-weight:600;font-size:14px;line-height:1.4;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
+.card .par{margin:0 0 3px;font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card .found{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;color:var(--dim)}.card .found svg{width:14px;height:14px}.card .found:hover{color:var(--fg);background:var(--hover)}
 .card .row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--mut);font-size:12px}
 .chip{display:inline-flex;align-items:center;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}
 .hist{margin-left:auto;display:inline-flex;align-items:center;gap:4px}.hist svg,.chip svg{width:12px;height:12px}
@@ -490,6 +493,42 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .modal-box:has(.tk-view) .tk-title-in{font-size:24px;font-weight:650;letter-spacing:-.015em;padding:2px 8px;margin-left:-9px}.modal-box:has(.tk-view) .tk-id{margin:2px 0 12px}.modal-box:has(.tk-view) .tk-title-in::placeholder{color:var(--fg);opacity:1}.modal-box:has(.tk-view) .tk-in{font-size:14.5px;line-height:1.65;padding:4px 8px;margin-left:-9px}.modal-box:has(.tk-view) .tk-save{position:sticky;bottom:-28px;display:flex;justify-content:flex-end;margin:8px 0 0;padding:12px 0;background:linear-gradient(transparent,var(--panel) 35%)}.modal-box:has(.tk-view) .subtasks,.modal-box:has(.tk-view) .comments{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}.modal-box:has(.tk-view) .sub-add{border-radius:999px;height:30px;padding:0 13px;font-size:13px}.modal-box:has(.tk-view) .kids-list{border-radius:12px}.modal-box:has(.tk-view) .cm{border-radius:12px}.modal-box:has(.tk-view) .cm-form{position:relative;display:block}.modal-box:has(.tk-view) .cm-form textarea{display:block;width:100%;box-sizing:border-box;min-height:84px;padding:11px 13px 46px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);resize:none}.modal-box:has(.tk-view) .cm-form textarea:focus{outline:none;border-color:var(--accent)}.modal-box:has(.tk-view) .cm-form .act{position:absolute;right:8px;bottom:8px;height:30px;padding:0 14px;border-radius:999px}.modal-box:has(.tk-view) details.trail{margin-top:24px;padding-top:14px}
 .drawer .modal-box:has(.tk-view){width:min(940px,100%)}.modal-box:has(.tk-view) .tk-form .tk-id{order:-1;margin:0 0 6px}.tk-side .state{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:600 12.5px/1 var(--sans);letter-spacing:0;text-transform:capitalize}.tk-side .state::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--dim)}.tk-side .state.s-in_progress::before{background:var(--accent)}.tk-side .state.s-done::before{background:var(--done)}.tk-side .state.s-blocked::before{background:var(--block)}.tk-side .state.s-cancelled::before{background:var(--line-2)}.tk-side>.drawer-acts{display:flex;gap:6px;margin:2px 6px 10px;padding:0 0 12px;border-bottom:1px solid var(--line)}.tk-side>.drawer-acts .act{flex:1;justify-content:center;min-height:0;height:30px;padding:0 10px;font-size:12.5px;border-radius:9px}.tk-side>.drawer-acts .act:first-child{background:var(--btn);color:var(--btn-fg)}.tk-side>.drawer-acts .act:first-child:hover{filter:brightness(1.06)}.tk-side .task-links,.tk-side .links{margin:0;gap:0}.tk-side .task-links p,.tk-side .links p{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:8px 6px;border-radius:9px}.tk-side .task-links .lk,.tk-side .links .lk{flex:0 0 82px;margin:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mut)}.tk-side .task-links a{font-weight:600}.tk-side .effort{padding:2px 3px 2px 11px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}.tk-side .effort:focus-within{border-color:var(--accent)}.tk-side .locate{margin:12px 6px 0;padding:6px 8px}.modal-box:has(.tk-view) .sub-add{background:none;border:1px dashed var(--line-2);color:var(--mut)}.modal-box:has(.tk-view) .sub-add:hover{color:var(--fg);border-color:var(--accent);background:var(--accent-bg)}.modal-box:has(.tk-view) details.trail summary{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none}
 @media (max-width:760px){.modal-box .tk-cols{grid-template-columns:minmax(0,1fr)}.modal-box .tk-main,.modal-box .tk-side{max-height:none;overflow:visible}.modal-box .tk-side{order:-1;border-left:0;border-bottom:1px solid var(--line)}.drawer .modal-box:has(.tk-view){overflow-y:auto;max-height:90vh}}
+/* the task dialog in sections (Isha, 2026-10-26): key, title, then Description, Steps, Subtasks and Activity, each under its own label */
+.modal-box:has(.tk-view) .tk-main{padding:22px 32px 30px}.modal-box:has(.tk-view) .ticket{display:block;margin:0}
+.ticket .tk-id{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px;font:600 11.5px var(--mono);letter-spacing:.02em;color:var(--dim)}
+.modal-box:has(.tk-view) .tk-title-in,.modal-box:has(.tk-view) .ticket>.tk-h{display:block;width:100%;margin:0 0 0 -9px;padding:2px 8px;font-size:24px;line-height:1.3;font-weight:680;letter-spacing:-.018em;resize:none;overflow:hidden;field-sizing:content;min-height:0;box-sizing:border-box}.ticket>.tk-h{margin-left:0;padding:0}
+.tk-sec{margin-top:24px}.tk-label{display:flex;align-items:center;gap:8px;margin:0 0 9px;font-size:11.5px;font-weight:650;letter-spacing:.07em;text-transform:uppercase;color:var(--dim)}
+.tk-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font:600 11px var(--sans);letter-spacing:0;color:var(--mut)}
+.tk-sec .tk-desc,.tk-sec .tk-desc-in{max-width:70ch}.tk-desc p{margin:0 0 10px;font-size:14.5px;line-height:1.65}.tk-desc p:last-child{margin-bottom:0}
+.modal-box:has(.tk-view) .tk-desc-in{margin:0;padding:11px 14px;min-height:4.2em;border:1px solid var(--line);border-radius:12px;background:var(--panel-2);font-size:14.5px;line-height:1.65;transition:border-color .15s var(--ease),box-shadow .15s var(--ease),background-color .15s var(--ease)}
+.modal-box:has(.tk-view) .tk-desc-in:hover{border-color:var(--line-2)}.modal-box:has(.tk-view) .tk-desc-in:focus{background:var(--panel);border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.tk-desc a,.cm-body a,.tk-step-tx a{color:var(--accent-text);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent) 40%,transparent);text-underline-offset:2px;overflow-wrap:anywhere}.tk-desc a:hover,.cm-body a:hover,.tk-step-tx a:hover{text-decoration-color:currentColor}
+.tk-urls{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.tk-url{display:inline-flex;align-items:center;gap:6px;max-width:100%;height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);font-size:12.5px;color:var(--fg);transition:border-color .15s var(--ease),background .15s var(--ease)}.tk-url:hover{border-color:var(--accent);background:var(--accent-bg)}.tk-url svg{flex:none;width:13px;height:13px;color:var(--accent-text)}.tk-url span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk-steplist{list-style:none;margin:0;padding:0;counter-reset:step;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+.tk-step{counter-increment:step;display:grid;grid-template-columns:24px minmax(0,1fr);align-items:center;gap:12px;min-height:42px;padding:6px 14px 6px 12px;border-top:1px solid var(--line);transition:background-color .15s var(--ease)}.tk-step:first-child{border-top:0}.tk-step:hover{background:var(--hover)}.tk-step:focus-within{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.tk-step::before{content:counter(step);display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-bg);color:var(--accent-text);font:650 11.5px var(--sans);font-variant-numeric:tabular-nums}
+.tk-step-new{counter-increment:none}.tk-step-new::before{content:"+";background:none;border:1px dashed var(--line-2);color:var(--dim);box-sizing:border-box;font-size:14px}
+.tk-step-in{display:block;width:100%;box-sizing:border-box;margin:0;padding:4px 0;border:0;background:none;outline:none;resize:none;overflow:hidden;field-sizing:content;min-height:0;font:inherit;font-size:14px;line-height:1.5;color:var(--fg)}.tk-step-in::placeholder{color:var(--dim)}.tk-step-tx{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.modal-box:has(.tk-view) .subtasks{margin-top:24px;padding-top:0;border-top:0}.sub-head{display:flex;align-items:center;gap:10px;margin-bottom:9px}.sub-head .tk-label{margin:0}.sub-head>span{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}.modal-box:has(.tk-view) .sub-head .sub-add{margin:0 0 0 auto;height:28px;padding:0 12px;font-size:12.5px}
+.modal-box:has(.tk-view) .activity{margin-top:28px;padding-top:22px;border-top:1px solid var(--line)}.act-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}.act-head .tk-label{margin:0}
+.act-tabs{display:inline-flex;gap:2px;margin-left:auto;padding:3px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line)}.act-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.act-tabs label{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 12px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease)}.act-tabs label:hover{color:var(--fg)}.act-tabs label .k{font-size:11px;font-weight:600;color:var(--dim)}
+.act-radio:checked+label{background:var(--raised);color:var(--fg);box-shadow:0 1px 2px rgba(15,23,42,.12),0 0 0 1px var(--line)}.act-radio:focus-visible+label{outline:2px solid var(--accent);outline-offset:1px}
+.activity:has([data-tab=c]:checked) [data-history-pane],.activity:has([data-tab=h]:checked) [data-comments]{display:none}
+.modal-box:has(.tk-view) .comments{margin:0;padding:0;border:0}.modal-box:has(.tk-view) .trail{margin:0;padding:0;border:0}
+.modal-box:has(.tk-view) .cm-list{position:relative;display:grid;gap:16px;margin:0 0 18px;padding:0;list-style:none}.cm-list::before{content:"";position:absolute;left:15px;top:20px;bottom:20px;width:2px;border-radius:2px;background:var(--line)}
+.modal-box:has(.tk-view) .cm{position:relative;display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;align-items:start;padding:0;border:0;border-radius:0;background:none}
+.cm-av{position:relative;z-index:1;display:grid;place-items:center;flex:none;width:32px;height:32px;border-radius:50%;background:var(--accent-bg);color:var(--accent-text);font:700 12px var(--sans);letter-spacing:.02em;box-shadow:0 0 0 3px var(--panel)}.cm-av.agent{background:linear-gradient(135deg,#6366f1,#8b5cf6 55%,#ec4899);color:#fff}.cm-av svg{width:15px;height:15px}
+.cm-card{min-width:0;padding:10px 14px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 1px 2px rgba(15,23,42,.05)}.cm-card .cm-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}.cm-card .cm-h .ev-seq{margin-left:auto;font:12px var(--sans);color:var(--dim)}.cm-card .agent-chip{margin-left:0}
+.cm-body p{margin:6px 0 0;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.modal-box:has(.tk-view) .cm-form{position:static;display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;align-items:start}
+.cm-box{min-width:0;border:1px solid var(--line-2);border-radius:12px;background:var(--panel);transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}.cm-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.modal-box:has(.tk-view) .cm-form textarea{display:block;width:100%;box-sizing:border-box;min-height:66px;margin:0;padding:11px 14px 4px;border:0;border-radius:12px 12px 0 0;background:none;box-shadow:none;outline:none;resize:none;field-sizing:content;font-size:14px;line-height:1.55}
+.cm-foot{display:flex;align-items:center;gap:10px;padding:6px 8px 8px 14px}.cm-hint{font-size:12px;color:var(--dim)}.cm-hint kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;margin:0 1px;border-radius:5px;border:1px solid var(--line);background:var(--panel-2);font:600 11px var(--sans);color:var(--mut)}
+.modal-box:has(.tk-view) .cm-form .act{position:static;margin-left:auto;height:30px;padding:0 14px;border-radius:999px}
+.found-in{display:inline-flex;align-items:flex-start;gap:6px;min-width:0}.found-in svg{flex:none;width:14px;height:14px;margin-top:2px;color:var(--dim)}.found-in a,[data-parent] a{color:var(--fg);font-weight:500;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}.found-in a:hover,[data-parent] a:hover{color:var(--accent-text)}
+.tk-crumbs a,.tk-crumbs [aria-current]{max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:760px){.modal-box:has(.tk-view) .tk-main{padding:18px 18px 24px}.cm-hint{display:none}}
 .feed{list-style:none;margin:8px 0 0;padding:0;position:relative}
 .feed::before{content:"";position:absolute;left:11px;top:6px;bottom:6px;width:1px;background:var(--line)}
 .ev{position:relative;display:flex;gap:10px;padding:6px 0}
@@ -613,6 +652,9 @@ const ICON = {
   spark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
   kanban: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="2" y="2.5" width="3.4" height="11" rx="1"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1"/><rect x="10.6" y="2.5" width="3.4" height="9" rx="1"/></svg>`,
   graph: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="3.4" rx="1"/><rect x="1.5" y="10.8" width="4.4" height="3.4" rx="1"/><rect x="10.1" y="10.8" width="4.4" height="3.4" rx="1"/><path d="M8 5.2v2.6M3.7 10.8V7.8h8.6v3"/></svg>`,
+  // work found while working on another task: a branch off it
+  found: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="3.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v2.4a5 5 0 0 0 5 5h1.4"/></svg>`,
+  refresh: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.3 6.5A5.5 5.5 0 0 0 3.4 4.6L2.5 5.6"/><path d="M2.5 2.5v3.1h3.1"/><path d="M2.7 9.5a5.5 5.5 0 0 0 9.9 1.9l.9-1"/><path d="M13.5 13.5v-3.1h-3.1"/></svg>`,
 };
 
 // ---------- graph ----------
@@ -947,7 +989,6 @@ function marksHtml(r: TreeRow): string {
     r.drained ? `<span class="mark drained">all subtasks closed</span>` : "",
     r.closedByTira ? `<span class="mark tira">closed by tira</span>` : "",
     r.awaitingClose ? `<span class="mark wait">tira closes it when you move on</span>` : "",
-    r.discoveredDuring ? `<span class="mark">found during ${esc(bare(r.discoveredDuring))}</span>` : "",
   ].filter(Boolean).join("");
 }
 
@@ -986,7 +1027,7 @@ const locate = (key: string, live: boolean) => (live ? `<button type="button" cl
 interface Ext {
   links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined
   tickets: ReadonlyMap<string, Ticket>; comments: ReadonlyMap<string, Comment[]>; commits: ReadonlyMap<string, Commit[]>; keys: ReadonlyMap<string, string>
-  form?: { token: string; people: string[]; agents: string[] }
+  form?: { token: string; people: string[]; agents: string[]; me?: string | undefined }
 }
 
 const jiraUrl = (ext: Ext, key: string) => (ext.ws?.jira_site ? `${ext.ws.jira_site}/browse/${encodeURIComponent(key)}` : undefined);
@@ -1029,12 +1070,16 @@ function projectLinksHtml(ext: Ext, live: RenderOptions["live"], q: string): str
   const jiraHref = `${ws?.jira_site}/browse/${ws?.jira_project}`;
   const jira = ws?.jira_project && ws.jira_site ? `<a class="pl jira" href="${esc(jiraHref)}" ${OUT} title="Jira: ${esc(jiraTitle ?? "")}" data-link-jira>${ICON.jira}<span>${esc(ws.jira_name ?? ws.jira_project)}</span></a>` : "";
   const box = (inner: string) => `<div class="proj-links" data-workspace aria-label="Linked to">${inner}</div>`;
-  if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>`) : "";
+  // Refresh (Isha, 2026-10-26): the page follows the log by itself, but not while a dialog is open
+  // or you're typing; this brings the latest in now, and says when some are waiting (app.mjs).
+  // Without a script it's a plain reload.
+  const refresh = live ? `<a class="act refresh" href="" data-refresh title="Bring in the latest changes">${ICON.refresh}<span data-refresh-label>Refresh</span></a>` : "";
+  if (repo === "" && jira === "") return live ? box(`<a class="act primary" href="${esc(withQ("/integrations", q))}" data-integrations>${ICON.github}${ICON.jira}Connect GitHub and Jira</a>${refresh}`) : "";
   if (!live) return box(repo + jira);
   const settings = esc(withQ("/integrations", q));
   const add = (ws?.jira_project ? "" : `<a class="act" href="${settings}#jira" data-add-jira>${ICON.jira}Add Jira</a>`) + (ws?.repo ? "" : `<a class="act" href="${settings}#github" data-add-repo>${ICON.github}Add GitHub</a>`);
   const sync = live.token ? `<form method="post" action="${esc(withQ("/sync", q))}" class="inline"><input type="hidden" name="token" value="${esc(live.token)}"><button class="act" type="submit" data-sync>Sync</button></form>` : "";
-  return box(repo + jira + add + sync);
+  return box(repo + jira + add + sync + refresh);
 }
 
 // ---------- the ticket: what the work is, and what people and agents say on it (tickets.ts) ----------
@@ -1052,8 +1097,36 @@ export const mentionedHtml = (text: string): string => esc(text).replaceAll(MENT
   const name = mentionName(said);
   return `${before}<span class="mention" data-mention="${name}">@${name}</span>${said.slice(name.length)}`;
 });
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${mentionedHtml(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
-const listItem = (x: string) => `<li>${mentionedHtml(x)}</li>`;
+// the web addresses in someone's words (http and https only), each once, in order
+const URLS = /\bhttps?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]/g;
+export const urlsIn = (text: string): string[] => [...new Set(text.match(URLS) ?? [])];
+// words, escaped, each @mention marked and each web address a link out
+const wordsHtml = (text: string) => {
+  let out = "";
+  let at = 0;
+  for (const m of text.matchAll(URLS)) {
+    out += mentionedHtml(text.slice(at, m.index)) + `<a href="${esc(m[0])}" ${OUT}>${esc(m[0])}</a>`;
+    at = m.index + m[0].length;
+  }
+  return out + mentionedHtml(text.slice(at));
+};
+const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${wordsHtml(p.trim()).replaceAll("\n", "<br>")}</p>`).join("");
+// a web address, short: its host and the start of its path
+const shortUrl = (u: string) => {
+  try {
+    const x = new URL(u);
+    const path = x.pathname === "/" ? "" : x.pathname;
+    return x.host.replace(/^www\./, "") + (path.length > 28 ? path.slice(0, 27) + "…" : path);
+  } catch {
+    return u;
+  }
+};
+// under a description being edited, its links, so they open in one click (the field can't)
+const linkRowHtml = (text: string) => {
+  const urls = urlsIn(text);
+  return urls.length === 0 ? "" : `<div class="tk-urls" data-ticket-links>${urls.map((u) => `<a class="tk-url" href="${esc(u)}" ${OUT} title="${esc(u)}">${ICON_LINK}<span>${esc(shortUrl(u))}</span></a>`).join("")}</div>`;
+};
+const ICON_LINK = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.7 9.3a3 3 0 0 0 4.2 0l2.2-2.2a3 3 0 0 0-4.2-4.2l-.9.9"/><path d="M9.3 6.7a3 3 0 0 0-4.2 0L2.9 8.9a3 3 0 0 0 4.2 4.2l.9-.9"/></svg>`;
 const formOf = (n: Placed) => `tk-${n.i}`; // the ticket form's id: its fields beside belong to it
 
 function assigneeSelect(form: NonNullable<Ext["form"]>, current: string | undefined, formId: string): string {
@@ -1069,11 +1142,16 @@ function keyLineHtml(r: TreeRow, t: Ticket | undefined, key: string | undefined)
   const parts = [key ? `<span data-ticket-key>${esc(key)}</span>` : "", id].filter(Boolean);
   return parts.length === 0 ? "" : `<p class="tk-id">${parts.join(" · ")}</p>`;
 }
+// A ticket in sections (Isha, 2026-10-26: "everything feels melted together"): its key, its title,
+// then Description and Steps, each under its own label; the steps numbered, one to a row.
+const sectionHtml = (label: string, body: string, kind: string, count = "") => `<div class="tk-sec" data-sec="${kind}"><h3 class="tk-label">${label}${count}</h3>${body}</div>`;
+const countHtml = (n: number) => (n > 0 ? `<span class="tk-count">${n}</span>` : "");
 // the ticket's title and words, read
 function ticketReadHtml(r: TreeRow, t: Ticket | undefined, key: string | undefined): string {
-  const head = `<h2>${esc(t?.title ?? r.id)}</h2>${keyLineHtml(r, t, key)}`;
-  const desc = t?.description ? `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>` : "";
-  const steps = t && t.steps.length > 0 ? `<div class="tk-steps"><h3>Steps</h3><ol aria-label="Steps" data-ticket-steps>${t.steps.map(listItem).join("")}</ol></div>` : "";
+  const head = `${keyLineHtml(r, t, key)}<h2 class="tk-h">${esc(t?.title ?? r.id)}</h2>`;
+  const desc = t?.description ? sectionHtml("Description", `<div class="tk-desc" data-ticket-description>${paragraphs(t.description)}</div>`, "description") : "";
+  const rows = (t?.steps ?? []).map((x) => `<li class="tk-step"><span class="tk-step-tx">${wordsHtml(x)}</span></li>`).join("");
+  const steps = t && t.steps.length > 0 ? sectionHtml("Steps", `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${rows}</ol>`, "steps", countHtml(t.steps.length)) : "";
   return `<div class="ticket" data-ticket>${head}${desc}${steps}</div>`;
 }
 // the same, live: fields that look like the words until you edit them
@@ -1081,17 +1159,21 @@ function ticketHtml(n: Placed, ext: Ext, back: string, q: string): string {
   const r = n.row;
   const t = ext.tickets.get(r.id);
   if (!ext.form) return ticketReadHtml(r, t, ext.keys.get(r.id));
-  const title = `<h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="${esc(t?.title ?? "")}" placeholder="${esc(r.id)}" aria-label="Title" autocomplete="off"></h2>`;
+  // the title wraps (a long one shows whole) but stays one line: Enter saves (app.mjs)
+  const title = `<h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="${esc(r.id)}" aria-label="Title" autocomplete="off" data-one-line>${esc(t?.title ?? "")}</textarea></h2>`;
   const id = keyLineHtml(r, t, ext.keys.get(r.id));
   const lines = (text: string) => Math.max(1, text.split("\n").length); // a box as tall as its words
   const words = t?.description ?? "";
-  const list = (t?.steps ?? []).join("\n");
-  const desc = `<textarea name="description" class="tk-in tk-desc-in" rows="${lines(words) + 1}" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description>${esc(words)}</textarea>`;
-  const label = list === "" ? "" : `<h3 class="tk-steps-h">Steps</h3>`;
-  const steps = `${label}<textarea name="steps" class="tk-in tk-steps-in" rows="${lines(list)}" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>${esc(list)}</textarea>`;
+  const desc = `<textarea name="description" class="tk-in tk-desc-in" rows="${lines(words) + 1}" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description>${esc(words)}</textarea>${linkRowHtml(words)}`;
+  // each step its own numbered row, and one more to add the next: Enter starts a new row,
+  // Backspace in an empty one removes it (app.mjs); with no script, one more each save
+  const list = t?.steps ?? [];
+  const stepRow = (x: string, i: number) => `<li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step ${i + 1}" autocomplete="off">${esc(x)}</textarea></li>`;
+  const add = `<li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="${list.length === 0 ? "Add the first step…" : "Add a step…"}" aria-label="Add a step" autocomplete="off"></textarea></li>`;
+  const steps = `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${list.map(stepRow).join("")}${add}</ol>`;
   return `<form method="post" action="${esc(withQ("/tickets", q))}" class="ticket tk-form" id="${formOf(n)}" data-ticket data-ticket-form>`
     + hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])
-    + `${title}${id}${desc}${steps}<div class="tk-save"><button class="act primary" type="submit">Save</button></div></form>`;
+    + `${id}${title}${sectionHtml("Description", desc, "description")}${sectionHtml("Steps", steps, "steps", countHtml(list.length))}<div class="tk-save"><button class="act primary" type="submit">Save</button></div></form>`;
 }
 
 // A time estimate in hours (a day is 8, a week 5 days), and back: 14 → "1d 6h".
@@ -1126,10 +1208,10 @@ function subtaskRowHtml(c: TreeRow, ctx: DialogContext): string {
 function subtasksHtml(r: TreeRow, ctx: DialogContext): string {
   const add = ctx.live && TAKES_SUBTASKS.has(r.state) ? `<a class="act sub-add" href="${confirmHref(r, "ADD_SUBTASK", ctx.q)}" data-act="ADD_SUBTASK">+ Add subtask</a>` : "";
   const n = r.children.length;
-  if (n === 0) return add === "" ? "" : `<div class="subtasks" data-subtasks>${add}</div>`;
-  const head = `<div class="sub-head"><h3>Subtasks</h3><span title="closed of all">${closedOf(r.children)}/${n}</span></div>`;
+  if (n === 0) return add === "" ? "" : `<div class="subtasks tk-sec" data-subtasks><div class="sub-head"><h3 class="tk-label">Subtasks</h3>${add}</div></div>`;
+  const head = `<div class="sub-head"><h3 class="tk-label">Subtasks</h3><span title="closed of all">${closedOf(r.children)}/${n}</span>${add}</div>`;
   const rows = r.children.map((c) => subtaskRowHtml(c, ctx)).join("");
-  return `<div class="subtasks" data-subtasks>${head}${meter(r.children.map((c) => c.state))}<ul class="kids-list" aria-label="Subtasks">${rows}</ul>${add}</div>`;
+  return `<div class="subtasks tk-sec" data-subtasks>${head}${meter(r.children.map((c) => c.state))}<ul class="kids-list" aria-label="Subtasks">${rows}</ul></div>`;
 }
 
 // Where it sits: its project (back to the board), the tickets above it, each one click away; for a
@@ -1146,8 +1228,8 @@ function crumbsHtml(n: Placed, ctx: DialogContext): string {
   for (let p = n.parent; p; p = p.parent) up.unshift(p);
   const sep = `<span class="sep" aria-hidden="true">›</span>`;
   const project = ctx.ext.ws?.title ? `<a href="#_" class="tk-project">${esc(ctx.ext.ws.title)}</a>${sep}` : ""; // back to the board
-  const links = up.map((p) => `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${sep}`).join("");
-  return `<nav class="tk-crumbs" aria-label="Where it sits">${project}${links}<span aria-current="page">${esc(n.row.id)}</span>${siblingsHtml(n, ctx)}</nav>`;
+  const links = up.map((p) => `<a href="#t${p.i}" title="${esc(nameOf(ctx.ext, p.row))}">${esc(nameOf(ctx.ext, p.row))}</a>${sep}`).join("");
+  return `<nav class="tk-crumbs" aria-label="Where it sits">${project}${links}<span aria-current="page" title="${esc(nameOf(ctx.ext, n.row))}">${esc(nameOf(ctx.ext, n.row))}</span>${siblingsHtml(n, ctx)}</nav>`;
 }
 
 // The ticket's properties, beside: its status (and what it allows), assignee, estimate (its
@@ -1190,6 +1272,15 @@ function parentHtml(n: Placed, ctx: DialogContext): string {
   if (!p) return `<span class="dim">—</span>`;
   return `<a href="#t${p.i}">${esc(nameOf(ctx.ext, p.row))}</a>${meter(p.row.children.map((c) => c.state))}`;
 }
+// found while working on another task: which, one click away
+function foundHtml(r: TreeRow, ctx: DialogContext): string {
+  if (!r.discoveredDuring) return "";
+  const at = ctx.indexOf.get(r.discoveredDuring);
+  const row = ctx.rowOf.get(r.discoveredDuring);
+  const name = row ? nameOf(ctx.ext, row) : bare(r.discoveredDuring);
+  const body = at === undefined ? esc(name) : `<a href="#t${at}" title="${esc(name)}">${esc(name)}</a>`;
+  return propHtml("Found in", `<span class="found-in">${ICON.found}${body}</span>`, " data-found-in");
+}
 function propertiesHtml(n: Placed, ctx: DialogContext): string {
   const r = n.row;
   const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
@@ -1199,21 +1290,39 @@ function propertiesHtml(n: Placed, ctx: DialogContext): string {
     + propHtml("Assignee", assigneeHtml(n, ctx), " data-ticket-assignee")
     + propHtml("Estimate", estimateHtml(n, ctx), " data-ticket-estimate")
     + propHtml("Parent", parentHtml(n, ctx), " data-parent")
+    + foundHtml(r, ctx)
     + linksHtml(r, ctx) + taskLinksHtml(ctx.ext, r.id) + proofHtml(r, ctx) + locate(r.key, ctx.live)
     + `</aside>`;
 }
 
+// Someone's round mark beside what they wrote: an agent's spark, a person's initials.
+const avatarHtml = (name: string | undefined) => {
+  if (!name) return `<span class="cm-av" aria-hidden="true"></span>`;
+  const agent = AGENT.test(name);
+  return `<span class="cm-av${agent ? " agent" : ""}" aria-hidden="true">${agent ? ICON.spark : esc(name.replaceAll(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase())}</span>`;
+};
+// The comments, as a thread (Isha, 2026-10-26): each with its writer's mark on a line that joins
+// them, a header (who, an agent marked, when) and the words; then, live, the box to add one, with
+// your mark beside it and its Comment button inside it.
 function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
   const list = ext.comments.get(r.id) ?? [];
-  const item = (c: Comment) => `<li class="cm" data-comment><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))}</span></div>${paragraphs(c.text)}</li>`;
-  const shown = list.length === 0 ? "" : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
+  const item = (c: Comment) => `<li class="cm" data-comment>${avatarHtml(c.by)}<div class="cm-card"><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))}</span></div><div class="cm-body">${paragraphs(c.text)}</div></div></li>`;
+  const shown = list.length === 0 ? (ext.form ? "" : `<p class="tk-none">No comments yet.</p>`) : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
   const form = ext.form
-    ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}`
-      + `<textarea name="text" rows="2" maxlength="2000" required placeholder="Add a comment…" aria-label="Add a comment"></textarea><button class="act" type="submit">Comment</button></form>`
+    ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}${avatarHtml(ext.form.me)}`
+      + `<div class="cm-box"><textarea name="text" rows="2" maxlength="2000" required placeholder="${list.length === 0 ? "Start the conversation…" : "Reply…"}" aria-label="Add a comment"></textarea>`
+      + `<div class="cm-foot"><span class="cm-hint"><kbd>@</kbd> to mention · <kbd>⌘</kbd><kbd>↵</kbd> to send</span><button class="act primary" type="submit">Comment</button></div></div></form>`
     : "";
-  if (shown + form === "") return "";
-  const count = list.length > 0 ? ` <span class="ev-seq">${list.length}</span>` : "";
-  return `<div class="comments" data-comments><h3>Comments${count}</h3>${shown}${form}</div>`;
+  return `<div class="comments" data-comments>${shown}${form}</div>`;
+}
+// Activity: the comments and the history, as two tabs over one place (as Jira's), Comments first.
+// Each dialog's tabs are its own (their radios are named for it); no script needed.
+function activityHtml(n: Placed, lines: TrailEntry[], ext: Ext, back: string, q: string): string {
+  const count = (ext.comments.get(n.row.id) ?? []).length;
+  const tab = (kind: string, label: string, k: number, on: boolean) => `<input class="act-radio" type="radio" name="act-${n.i}" id="act-${n.i}-${kind}" data-tab="${kind}"${on ? " checked" : ""}><label for="act-${n.i}-${kind}">${label}${k > 0 ? ` <span class="k">${k}</span>` : ""}</label>`;
+  const history = `<div class="trail" data-history-pane><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></div>`;
+  return `<div class="tk-sec activity" data-sec="activity" role="region" aria-label="Activity"><div class="act-head"><h3 class="tk-label">Activity</h3><div class="act-tabs" role="group" aria-label="Show">${tab("c", "Comments", count, true)}${tab("h", "History", lines.length, false)}</div></div>`
+    + `${commentsHtml(n.row, ext, back, q)}${history}</div>`;
 }
 
 // A ticket's dialog: where it sits, then two columns. The work: its title and id, its description
@@ -1222,8 +1331,7 @@ function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
 function drawerHtml(n: Placed, lines: TrailEntry[], ctx: DialogContext): string {
   const r = n.row;
   const back = `#t${n.i}`;
-  const history = `<details class="trail"><summary>History <span class="ev-seq">${lines.length}</span></summary><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></details>`;
-  const main = `<div class="tk-main">${ticketHtml(n, ctx.ext, back, ctx.q)}${subtasksHtml(r, ctx)}${commentsHtml(r, ctx.ext, back, ctx.q)}${history}</div>`;
+  const main = `<div class="tk-main">${ticketHtml(n, ctx.ext, back, ctx.q)}${subtasksHtml(r, ctx)}${activityHtml(n, lines, ctx.ext, back, ctx.q)}</div>`;
   return `<section class="drawer" id="t${n.i}" aria-label="${esc(r.id)}" role="dialog" aria-modal="true">${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a>`
     + `<div class="tk-view">${crumbsHtml(n, ctx)}<div class="tk-cols">${main}${propertiesHtml(n, ctx)}</div></div></div></section>`;
 }
@@ -1294,15 +1402,64 @@ const actLink = (r: { type: string; id: string }, ev: string, label: string, q: 
 
 const sinceText = (since: Since | undefined, verb: string): string => (since === undefined ? "" : verb + " at seq " + since.seq);
 
-function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: Pick<DialogContext, "indexOf" | "rowOf" | "q">, changed: ReadonlySet<string>): string {
-  const links = (ROW_ACTIONS[n.row.state] ?? []).map(([ev, label]) => actLink(n.row, ev, label, ctx.q)).join("");
+// A parent with subtasks still open can't be completed yet (close them first), so its row doesn't
+// offer Complete: it says how many are open and offers the next one (Isha, 2026-10-26).
+interface Under { open: number; total: number; next: Placed | undefined }
+const isUnder = (m: Placed, n: Placed) => {
+  for (let p = m.parent; p; p = p.parent) if (p === n) return true;
+  return false;
+};
+function underOf(n: Placed, nodes: readonly Placed[]): Under | undefined {
+  const open = n.row.children.filter((c) => !CLOSED.has(c.state)).length;
+  if (open === 0) return undefined;
+  const inside = nodes.filter((m) => isUnder(m, n));
+  const next = inside.find((m) => m.row.cursor) ?? inside.find((m) => m.row.children.length === 0 && m.row.state === "unstarted");
+  return { open, total: n.row.children.length, next };
+}
+
+type AttentionCtx = Pick<DialogContext, "indexOf" | "rowOf" | "q" | "ext">;
+function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: AttentionCtx, changed: ReadonlySet<string>, under?: Under): string {
+  const verbs = (ROW_ACTIONS[n.row.state] ?? []).filter(([ev]) => under === undefined || ev !== "COMPLETE");
+  const next = under?.next;
+  const startNext = next && next.row.state === "unstarted" ? actLink(next.row, "START", "Start next", ctx.q, true) : "";
+  const links = startNext + verbs.map(([ev, label]) => actLink(n.row, ev, label, ctx.q)).join("");
   const acts = live ? `<span class="acts">${links}</span>` : "";
   // a block on a ticket: which one, and once it's closed, that the wait looks over
   const blocker = n.row.state === "blocked" && since?.blocker !== undefined ? ctx.rowOf.get(since.blocker) : undefined;
   const ready = blocker !== undefined && CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : "";
   const waits = blocker === undefined ? "" : `<span class="by" data-blocked-by>waiting on ${linkTo(blocker.key, ctx)}</span>` + ready;
-  return `<li class="att-row${changed.has(n.row.key) ? " changed" : ""}" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}">${esc(n.row.id)}</a>`
-    + `<span class="path">${path}</span>${waits}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
+  const nextName = next ? ` · next: <a href="#t${next.i}">${esc(nameOf(ctx.ext, next.row))}</a>` : "";
+  const open = under === undefined ? "" : `<span class="by" data-subtasks-open>${under.open} of ${under.total} subtasks open${nextName}</span>`;
+  const name = nameOf(ctx.ext, n.row);
+  return `<li class="att-row${changed.has(n.row.key) ? " changed" : ""}" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}" title="${esc(name)}">${esc(name)}</a>`
+    + `<span class="path">${path}</span>${waits}${open}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
+}
+
+// When a person is needed (Isha, 2026-10-26): an @mention of you on a task you haven't answered
+// since, a task assigned to you that no one has started, an idea waiting for a person's approval.
+// Each says why it's yours and offers the one move that answers it.
+interface ForYou { key: string; why: "mentioned" | "assigned" | "idea"; html: string }
+const clipped = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
+function forYouOf(nodes: readonly Placed[], ghosts: readonly Ghost[], viewer: string, ctx: AttentionCtx): ForYou[] {
+  const out: ForYou[] = [];
+  const row = (key: string, why: ForYou["why"], href: string, name: string, said: string, act: string) =>
+    out.push({ key, why, html: `<li class="att-row you" data-attention-key="${esc(key)}" data-for-you="${why}"><a class="name" href="${href}" title="${esc(name)}">${esc(name)}</a><span class="by">${said}</span><span class="acts">${act}</span></li>` });
+  for (const n of nodes) {
+    if (CLOSED.has(n.row.state)) continue;
+    const asked = unanswered(ctx.ext.comments.get(n.row.id) ?? [], viewer).filter((c) => mentionsIn(c.text).includes(viewer)).at(-1);
+    const name = nameOf(ctx.ext, n.row);
+    const said = asked?.text.replaceAll(/\s+/g, " ").trim() ?? "";
+    const words = said.toLowerCase().startsWith(`@${viewer}`.toLowerCase()) ? said.slice(viewer.length + 1).replace(/^[,:]?\s*/, "") : said; // "@isha yes: …" reads "yes: …"
+    if (asked) row(n.row.key, "mentioned", `#t${n.i}`, name, `<b>${esc(asked.by)}</b> asked you: “${esc(clipped(words, 110))}”`, `<a class="act primary" href="#t${n.i}">Reply</a>`);
+    else if (n.row.state === "unstarted" && ctx.ext.tickets.get(n.row.id)?.assignee === viewer) row(n.row.key, "assigned", `#t${n.i}`, name, "assigned to you", actLink(n.row, "START", "Start", ctx.q, true));
+  }
+  for (const g of ghosts) {
+    const i = g.idea;
+    if (i.stage !== "file_pending" && i.stage !== "node_pending") continue;
+    const by = i.declaredBy ? `<b>${esc(i.declaredBy)}</b>'s idea` : "An idea";
+    row(i.key, "idea", `#i${g.i}`, i.summary ?? i.id, `${by} waits for a person to approve its ${i.stage === "file_pending" ? "file" : "place"}`, `<a class="act primary" href="#i${g.i}">Review</a>`);
+  }
+  return out;
 }
 
 // More than FOLD_AT tasks needing you: each blocked group folds to one line (its reason, the
@@ -1310,17 +1467,19 @@ function attentionRow(n: Placed, since: Since | undefined, path: string, verb: s
 // worked on never folds.
 const FOLD_AT = 3;
 
-function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>, changed: ReadonlySet<string>, q: string): string {
+// `you`: who is looking (live), for what's theirs to answer; the ideas waiting on the board.
+function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>, changed: ReadonlySet<string>, q: string, you: { viewer: string | undefined; ext: Ext; ghosts: readonly Ghost[] }): string {
   const { blocked, working } = attentionSince(events, stream, skip);
-  const ctx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])), q };
+  const ctx: AttentionCtx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])), q, ext: you.ext };
+  const mine = live && you.viewer !== undefined ? forYouOf(nodes, you.ghosts, you.viewer, ctx) : [];
   const stuck = nodes.filter((n) => n.row.state === "blocked");
   // A finished active parent (every child closed) is no decision for a person: tira closes it
   // when work moves on, so it stays in the tree, not in the count (ruling 2026-10-20).
   const busy = nodes.filter((n) => n.row.active && !n.row.awaitingClose);
-  const count = stuck.length + busy.length;
+  const count = mine.length + stuck.length + busy.length;
   if (count === 0) {
     const next = nodes.find((n) => n.row.cursor);
-    const nextLine = next ? `<p>Next up: <a href="#t${next.i}">${esc(next.row.id)}</a></p>` : `<p>No open work left.</p>`;
+    const nextLine = next ? `<p>Next up: <a href="#t${next.i}">${esc(nameOf(you.ext, next.row))}</a></p>` : `<p>No open work left.</p>`;
     return `<section class="attention calm" data-attention-count="0" aria-label="Needs attention"><div class="att-head"><h2>Nothing needs you</h2></div>${nextLine}</section>`;
   }
   // blocked work, grouped by its reason, groups in the order they first blocked
@@ -1336,18 +1495,23 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
     if (!folds) return `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>${rows}</div>`;
     const open = ns.some((n) => changed.has(n.row.key)) ? " open" : "";
     return `<details class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"${open}><summary><span class="kind">Blocked</span><span class="why">${esc(why)}</span>`
-      + `<span class="names">${ns.map((n) => esc(n.row.id)).join(", ")}</span><span class="k">${ns.length}</span></summary>${rows}</details>`;
+      + `<span class="names">${ns.map((n) => esc(nameOf(you.ext, n.row))).join(", ")}</span><span class="k">${ns.length}</span></summary>${rows}</details>`;
   }).join("");
   const workingHtml = busy.length === 0 ? "" : `<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">${busy.length}</span></h3>`
-    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx, changed)).join("")}</ul></div>`;
-  const sum = [stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
+    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx, changed, underOf(n, nodes))).join("")}</ul></div>`;
+  // what's yours comes first, and never folds
+  const mineHtml = mine.length === 0 ? "" : `<div class="att-group for-you" data-group="for-you"><h3>For you<span class="k">${mine.length}</span></h3><ul class="att-list">${mine.map((m) => m.html).join("")}</ul></div>`;
+  const sum = [mine.length > 0 ? `${mine.length} for you` : "", stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
   // the whole panel folds to its header line (open or shut as you left it, per browser: theme.mjs)
-  return `<section class="attention" data-attention-count="${count}" aria-label="Needs attention"><details class="att-fold" open data-remember="tira-needs-you"><summary class="att-head" title="Needs you: open or fold"><h2><b>${count}</b>${count === 1 ? "needs" : "need"} you</h2><span class="sum">${sum}</span><span class="att-chev" aria-hidden="true"></span></summary>${blockedHtml}${workingHtml}</details></section>`;
+  return `<section class="attention" data-attention-count="${count}" aria-label="Needs attention"><details class="att-fold" open data-remember="tira-needs-you"><summary class="att-head" title="Needs you: open or fold"><h2><b>${count}</b>${count === 1 ? "needs" : "need"} you</h2><span class="sum">${sum}</span><span class="att-chev" aria-hidden="true"></span></summary>${mineHtml}${blockedHtml}${workingHtml}</details></section>`;
 }
 
 // ---------- board ----------
 
-// Kanban: every ticket in its status column; each card names its parent. A parent no one has
+// Kanban: every ticket in its status column, named by its ticket's title (else its id). A card
+// names its parent only when the board's cards sit under more than one: under a single parent the
+// line would say the same thing on every card (Isha, 2026-10-26). Work found while working on
+// another task carries a small branch mark, its words in the tooltip. A parent no one has
 // acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
 // started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
@@ -1358,6 +1522,8 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
   // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
   const movedAt = (n: Placed) => (trail.get(n.row.key) ?? []).filter((x) => !x.refused).at(-1)?.seq ?? 0;
   const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== "unstarted");
+  const nameAt = new Map(nodes.map((n) => [n.row.key, nameOf(ext, n.row)]));
+  const parentsShown = new Set(leaves.flatMap((n) => (n.parent ? [n.parent.row.key] : []))).size > 1;
   const columns: [string, string, string][] = [
     ["unstarted", "To do", "var(--dim)"], ["in_progress", "In progress", "var(--prog)"], ["blocked", "Blocked", "var(--block)"],
     ["done", "Done", "var(--done)"], ["cancelled", "Dropped", "var(--gone)"],
@@ -1369,9 +1535,11 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       const r = n.row;
       const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : "", changed.has(r.key) ? "changed" : ""].filter(Boolean).join(" ");
       const lines = (trail.get(r.key) ?? []).length;
-      const parent = n.parent ? `<span class="chip">${esc(n.parent.row.id)}</span>` : "";
+      const above = n.parent ? nameAt.get(n.parent.row.key) ?? n.parent.row.id : "";
+      const parent = n.parent && parentsShown ? `<div class="par" data-card-parent title="${esc(above)}">${esc(above)}</div>` : "";
       const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((c) => CLOSED.has(c.state)).length}/${r.children.length} subtasks</span>`;
-      const found = r.discoveredDuring ? `<span class="chip" title="found during ${esc(bare(r.discoveredDuring))}">${ICON.spark}found</span>` : "";
+      const during = r.discoveredDuring ? nameAt.get(r.discoveredDuring) ?? bare(r.discoveredDuring) : "";
+      const found = r.discoveredDuring ? `<span class="found" data-found title="Found while working on ${esc(during)}" aria-label="Found while working on ${esc(during)}">${ICON.found}</span>` : "";
       const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
       const by = links.blockedBy.get(r.key);
       const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
@@ -1381,8 +1549,10 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
       const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
       const cursorWord = r.active ? "now" : "next";
       const pin = r.cursor ? `<span class="pin">◆ ${cursorWord}</span>` : "";
-      return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}<div class="t">${wraps(r.id)}</div>`
-        + `<div class="row">${parent}${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
+      const title = ext.tickets.get(r.id)?.title;
+      const named = title ? `<div class="t" title="${esc(title)}">${esc(title)}</div>` : `<div class="t">${wraps(r.id)}</div>`;
+      return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}${parent}${named}`
+        + `<div class="row">${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
     });
     const colAttr = moves ? ` data-col="${s}"` : "";
     const shown = capped(s, cards) || `<p class="empty">Nothing here</p>`;
@@ -1775,7 +1945,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const links = linksOf(attentionSince(events, stream, skip).blocked, new Set(rowOf.keys()));
   const ghosts = ghostsOf(ideaRows(r, events, stream).filter((i) => OPEN_STAGES.has(i.stage)), new Set(rowOf.keys()));
   const board = v.roots.length > 0 || ghosts.length > 0;
-  const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [] } : undefined;
+  const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [], me: opts.live.actor } : undefined;
   // who an @ can name, for the page's script (app.mjs): the project's people and its agents
   const mentionable = form ? ` data-people="${esc(form.people.join(" "))}" data-agents="${esc(form.agents.join(" "))}"` : "";
   const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
@@ -1791,7 +1961,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}<span class="h1-name">${nameHtml(name)}</span></h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}${form ? `<a class="act primary create-btn" href="#create" data-create-open>${ICON.plus}Create <kbd>C</kbd></a>` : ""}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>
-${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
+${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q, { viewer: opts.live?.actor, ext, ghosts }) : ""}
 <section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : emptyBoard}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}

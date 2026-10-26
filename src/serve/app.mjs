@@ -217,10 +217,103 @@ if (mentionable.length > 0) {
   });
 }
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(e.target instanceof HTMLTextAreaElement) || !e.target.closest(".drawer")) return;
+  const field = e.target;
+  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) || !field.closest(".drawer")) return;
   e.preventDefault();
-  e.target.form?.requestSubmit();
+  field.form?.requestSubmit();
 });
+// A ticket's title is one line that wraps: Enter saves it, and a pasted line break becomes a space.
+// Its steps are one to a row: Enter starts a new row under this one, Backspace in an empty row
+// removes it (back to the row above), arrows move between rows. The rows renumber themselves (CSS).
+const stepRow = (after) => {
+  const li = document.createElement("li");
+  li.className = "tk-step";
+  const input = document.createElement("textarea");
+  Object.assign(input, { name: "step", className: "tk-step-in", rows: 1, maxLength: 300, autocomplete: "off" });
+  input.setAttribute("aria-label", "Step");
+  li.append(input);
+  after.after(li);
+  return input;
+};
+document.addEventListener("keydown", (e) => {
+  const field = e.target;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+  if (field instanceof HTMLTextAreaElement && field.matches("[data-one-line]") && e.key === "Enter") {
+    e.preventDefault();
+    field.form?.requestSubmit();
+    return;
+  }
+  if (!(field instanceof HTMLTextAreaElement) || !field.matches(".tk-step-in")) return;
+  const row = field.closest(".tk-step");
+  if (!row) return;
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (field.value.trim() === "") return;
+    // the last row is the one that adds: Enter keeps what it says as a step, and a new last row
+    // waits under it
+    if (row.classList.contains("tk-step-new")) {
+      row.classList.remove("tk-step-new");
+      field.setAttribute("aria-label", "Step");
+      const next = stepRow(row);
+      next.closest(".tk-step")?.classList.add("tk-step-new");
+      next.placeholder = "Add a step…";
+      next.setAttribute("aria-label", "Add a step");
+      next.focus();
+    } else stepRow(row).focus();
+    field.form?.setAttribute("data-dirty", "1");
+  } else if (e.key === "Backspace" && field.value === "" && !row.classList.contains("tk-step-new")) {
+    e.preventDefault();
+    const back = row.previousElementSibling?.querySelector("textarea") ?? row.nextElementSibling?.querySelector("textarea");
+    row.remove();
+    back?.focus();
+    field.form?.setAttribute("data-dirty", "1");
+  } else if ((e.key === "ArrowUp" && field.selectionStart === 0) || (e.key === "ArrowDown" && field.selectionEnd === field.value.length)) {
+    const to = (e.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling)?.querySelector("textarea");
+    if (to) {
+      e.preventDefault();
+      to.focus();
+    }
+  }
+});
+document.addEventListener("input", (e) => {
+  const field = e.target;
+  if (!(field instanceof HTMLTextAreaElement) || !/\n/.test(field.value)) return;
+  if (field.matches("[data-one-line]")) field.value = field.value.replaceAll(/\s*\n\s*/g, " ");
+  // several lines pasted into a step are several steps, each its own row
+  else if (field.matches(".tk-step-in")) {
+    const [first = "", ...rest] = field.value.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "");
+    field.value = first;
+    let row = field.closest(".tk-step");
+    if (row?.classList.contains("tk-step-new") && first !== "") {
+      row.classList.remove("tk-step-new");
+      field.setAttribute("aria-label", "Step");
+      const fresh = stepRow(row);
+      fresh.closest(".tk-step")?.classList.add("tk-step-new");
+      fresh.placeholder = "Add a step…";
+      fresh.setAttribute("aria-label", "Add a step");
+    }
+    for (const line of rest) {
+      if (!row) break;
+      const next = stepRow(row);
+      next.value = line;
+      row = next.closest(".tk-step");
+    }
+  }
+});
+// where a browser can't grow a text box to its words by itself, it grows as you type
+if (!CSS.supports("field-sizing", "content")) {
+  const grow = (t) => {
+    t.style.height = "auto";
+    t.style.height = `${t.scrollHeight + 2}px`;
+  };
+  document.addEventListener("input", (e) => {
+    if (e.target instanceof HTMLTextAreaElement && e.target.matches(".tk-title-in, .tk-in, .tk-step-in")) grow(e.target);
+  });
+  addEventListener("hashchange", () => {
+    for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+  });
+  for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+}
 
 const confirmBox = document.createElement("dialog");
 confirmBox.className = "confirm-dialog";
@@ -579,14 +672,31 @@ if (liveMain) {
       if (!Number.isSafeInteger(at) || at < 0) return;
       latest = at;
       if (at > seen && at > triedFor) {
-        if (busy()) waiting = true;
-        else reload();
+        if (busy()) {
+          waiting = true;
+          flagNew();
+        } else reload();
       }
     } catch {
       // the server is away for a moment: ask again next time
     }
   };
   setInterval(tick, 5000);
+  // Refresh brings the latest in now, back where you were; while changes wait (a dialog open, a
+  // field in use), it says so
+  const refresh = document.querySelector("[data-refresh]");
+  refresh?.addEventListener("click", (e) => {
+    e.preventDefault();
+    refresh.classList.add("spin");
+    reload();
+  });
+  const flagNew = () => {
+    if (!refresh || !waiting) return;
+    refresh.classList.add("has-new");
+    const label = refresh.querySelector("[data-refresh-label]");
+    if (label) label.textContent = "New changes";
+    refresh.title = "Changes came in: bring them in now";
+  };
   // waiting changes show as soon as you're done
   const later = () => setTimeout(() => {
     if (waiting && !busy()) reload();

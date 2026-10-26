@@ -29,6 +29,11 @@ export function taskOfKey(keys: ReadonlyMap<string, string>, said: string): stri
 export const MENTION = /(^|[\s([{,;])@([A-Za-z0-9][\w.:-]{0,63})/g;
 export const mentionName = (said: string): string => said.replace(/[.:-]+$/, "");
 export const mentionsIn = (text: string): string[] => [...new Set([...text.matchAll(MENTION)].map((m) => mentionName(m[2] ?? "")))];
+// the comments someone hasn't answered: everyone else's since their own last one
+export const unanswered = (list: readonly Comment[], actor: string): Comment[] => {
+  const mine = Math.max(0, ...list.filter((x) => x.by === actor).map((x) => x.seq));
+  return list.filter((x) => x.by !== actor && x.seq > mine);
+};
 
 const str = (b: Record<string, unknown>, k: string) => (typeof b[k] === "string" && (b[k] as string) !== "" ? { [k]: b[k] as string } : {});
 

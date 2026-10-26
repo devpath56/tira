@@ -5,7 +5,7 @@ import { fold } from "../fold/fold.ts";
 import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
 import { attentionSince, proofsOf, trails } from "../render/html.ts";
 import { taskIndex, type TaskEntry } from "../serve/server.ts";
-import { commentsOf, commitsOf, firstLine, mentionsIn, shortSha, taskOfKey, ticketKeys, ticketsOf, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, firstLine, mentionsIn, shortSha, taskOfKey, ticketKeys, ticketsOf, unanswered, whereFound, type Comment, type Commit, type Ticket } from "../fold/tickets.ts";
 import type { AgentContext } from "./server.ts";
 
 // A tool's answer: its text, and whether it did what was asked (false: the tool reports an error).
@@ -38,10 +38,6 @@ export async function taskIdOf(c: AgentContext, said: string): Promise<string> {
 }
 
 // comments since the agent's own last one, from someone else: the feedback it hasn't answered
-const unanswered = (list: readonly Comment[], actor: string) => {
-  const mine = Math.max(0, ...list.filter((x) => x.by === actor).map((x) => x.seq));
-  return list.filter((x) => x.by !== actor && x.seq > mine);
-};
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 const line = (t: TaskEntry) => `${t.id} (${where(t.path)})`;
