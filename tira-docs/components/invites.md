@@ -14,8 +14,18 @@ on their list and opens its board ("You joined …"); Decline lets it go. In Col
 invite not answered yet is a row: Invited, by whom, not signed up yet where so, and for its
 admins the bin to take it back. An empty Inbox says so, and that invites arrive there.
 
+**The answer, to whoever invited them** (Isha, 2026-10-26). Accept or Decline leaves a note in the
+inviter's Inbox, counted with its invites: "devansh accepted your invite to X. They can see its
+board now." (with **Open the board**) or "… declined your invite to X." **Dismiss** puts it away.
+A later answer to the same invite replaces the note.
+
+**Only an invite lets someone in** (Isha, 2026-10-26). A project made before each had its own people
+lets in only whoever made it (else the owner) until its admins invite others: the people from
+before are no longer in every such project by default.
+
 Invites are kept in the accounts' store (Postgres `account_invites`: project, login, who
-invited, when), never in the project's log; an answer, or taking one back, removes it. The letter
+invited, when), never in the project's log; an answer, or taking one back, removes it. The notes
+are kept beside them (`account_notes`: to whom, project, who answered, accepted or declined, when). The letter
 over the board shows once per invite (`invite:<project>` among what the person has seen).
 
 ## Devtool hook
@@ -23,6 +33,7 @@ over the board shows once per invite (`invite:<project>` among what the person h
 - `[data-letter-pop]` on the letter over the board (`#letter-later` folds it), `.letter` with `[data-invite]` (the project) on each letter; `[data-invites]` on Your projects' letters, `[data-inbox]` on the Inbox's, `[data-inbox-empty]` on an empty one.
 - `[data-inbox]` on the sidebar's Inbox link, `.side-n` on its count.
 - `[data-team-invited]` on an invite in Collaborators, `[data-team-uninvite]` on taking it back.
+- `[data-note]` (the project) and `[data-did]` (accepted or declined) on each note in the Inbox.
 
 Assertion: an invited person doesn't see the project until they accept; the letter shows over the
 board once; Accept lets them in and Decline doesn't (`test/sync.test.ts`); invites are shared on

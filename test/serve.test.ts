@@ -849,7 +849,7 @@ test("after an action, what it changed glows once: the task it moved, or a block
     const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     const page = (await s.http("GET", String(ok.headers.location))).body;
     assert.deepEqual(glowing(page), ["node:loading_state"]);
-    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">loading_<wbr>state<\/div>/);
+    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">loading_<wbr>state<\/div>/);
     assert.deepEqual(glowing((await s.http("GET", "/")).body), []); // once: the next load is quiet
     // a refusal changed nothing
     await s.send("filters", "START");
@@ -1055,7 +1055,7 @@ test("live: the page asks /api/live where its log is (the last event only), with
   }
 });
 
-test("every ticket has a key, TIRA_<PROJECT>_<n>, numbered in the order its project's tasks were made: first on its card, on the ticket, and the search finds it", async () => {
+test("every ticket has a key, TIRA_<PROJECT>_<n>, numbered in the order its project's tasks were made: on the ticket, not on its card, and the search finds it", async () => {
   assert.equal(projectCode("tasktree-dash"), "TASKTREE_DASH");
   assert.equal(projectCode("factory.ui v2"), "FACTORY_UI_V2");
   assert.equal(projectCode("--"), "PROJECT");
@@ -1068,8 +1068,10 @@ test("every ticket has a key, TIRA_<PROJECT>_<n>, numbered in the order its proj
     assert.equal(taskOfKey(keys, "tira_tasktree_dash_6"), "loading_state"); // any case
     assert.equal(taskOfKey(keys, "loading_state"), "loading_state"); // an id stays an id
     const page = (await s.http("GET", "/")).body;
-    assert.match(page, /data-card-key="node:fetch_metrics" data-state="unstarted"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_3<\/span><span class="pin">◆ next<\/span>/); // its key, then the cursor
-    assert.match(page, /data-card-key="node:loading_state" data-state="in_progress"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_6<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">/);
+    // not on its card (Isha, 2026-10-26): the card starts with the cursor, and its name
+    assert.match(page, /data-card-key="node:fetch_metrics" data-state="unstarted"><span class="pin">◆ next<\/span>/);
+    assert.match(page, /data-card-key="node:loading_state" data-state="in_progress">(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">/);
+    assert.doesNotMatch(page, /<a class="card[^"]*"[^>]*>[^]{0,80}data-ticket-key/);
     assert.match(page, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_9<\/span><\/p>/);
     const tasks = JSON.parse((await s.http("GET", "/api/tasks")).body) as { id: string; ticket: string; state: string; path: string }[];
     assert.deepEqual((rank("6", tasks).results as { id: string }[]).map((t) => t.id), ["loading_state"]); // its number alone

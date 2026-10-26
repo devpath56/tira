@@ -31,9 +31,9 @@ import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts"
 import { reportLines, sync } from "../sync/sync.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { JiraCloud, projectName, type JiraClient } from "../sync/jira.ts";
-import { access, appKeys, hasSeen, dropInvite, invite, invitesNow, same, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, markSeen, saveDisplayName, unmarkSeen, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
+import { access, appKeys, hasSeen, dropInvite, invite, invitesNow, addNote, dropNote, notesFor, same, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, markSeen, saveDisplayName, unmarkSeen, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
 import { changeTeam, inProject, isProjectAdmin, type TeamMove } from "./team.ts";
-import { INBOX_ICON, letterHtml } from "./invites.ts";
+import { INBOX_ICON, letterHtml, noteHtml } from "./invites.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
 import type { Dispatcher } from "../write/dispatcher.ts";
@@ -661,15 +661,20 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const mine = invitesNow(env).filter((x) => same(x.login, login));
     const titles = await Promise.all(mine.map((x) => titleOf(x.stream)));
     await Promise.all(mine.filter((x) => !hasSeen(login, `invite:${x.stream}`, env)).map((x) => markSeen(login, `invite:${x.stream}`, env)));
-    return mine.map((x, i) => letterHtml(x, titles[i] ?? x.stream, c.token)).join("");
+    const letters = mine.map((x, i) => letterHtml(x, titles[i] ?? x.stream, c.token)).join("");
+    // then the answers to the invites you sent, newest first
+    const notes = notesFor(login, env).reverse(); // a copy: notesFor filters
+    const named = await Promise.all(notes.map((n) => titleOf(n.stream)));
+    const boardOf = (stream: string) => (stream === c.home ? "/" : `/?w=${encodeURIComponent(stream)}`);
+    return letters + notes.map((n, i) => noteHtml(n, named[i] ?? n.stream, c.token, boardOf(n.stream))).join("");
   };
   const inboxPage = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const me = who(req);
     if (!me.actor) return signedOut(res, url);
     if (!me.login) return c.send(res, 303, "text/plain; charset=utf-8", "", { Location: "/" });
     const letters = await lettersFor(me.login);
-    const empty = `<div class="inbox-empty" data-inbox-empty><span class="inbox-empty-i">${INBOX_ICON}</span><b>Nothing new</b><p>When someone invites you to a project, the invite arrives here.</p></div>`;
-    const body = `<header class="int-head"><h1>Inbox</h1><p>Invites to projects, until you answer them.</p></header>` + flashOf(url)
+    const empty = `<div class="inbox-empty" data-inbox-empty><span class="inbox-empty-i">${INBOX_ICON}</span><b>Nothing new</b><p>When someone invites you to a project, or answers your invite, it arrives here.</p></div>`;
+    const body = `<header class="int-head"><h1>Inbox</h1><p>Invites to projects, until you answer them, and the answers to yours.</p></header>` + flashOf(url)
       + `<section class="grp" id="inbox" data-int="inbox"><div class="letters" data-inbox>${letters || empty}</div></section>`;
     c.send(res, 200, html, settingsPage({ title: "Inbox", label: "Inbox", sections: [["inbox", "Inbox"]] }, body, helpPanel(helpAt(host), displayName(me.login, env) ?? me.login), scripts));
   };
@@ -683,6 +688,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const title = await titleOf(stream);
     if (form.get("do") === "decline") {
       await dropInvite(stream, login, env);
+      await addNote({ to: mine.by, stream, who: login, did: "declined" }, env); // whoever invited them hears it
       return back(res, "/inbox", { ok: true, text: `Declined the invite to ${title}.` });
     }
     if (form.get("do") !== "accept") return back(res, "/inbox", { ok: false, text: "Nothing changed." });
@@ -692,9 +698,22 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       return inProject(p, login) ? undefined : { admins: p.admins, members: [...p.members, login] };
     }, env);
     await dropInvite(stream, login, env);
+    await addNote({ to: mine.by, stream, who: login, did: "accepted" }, env);
     const joined = c.flash({ ok: true, text: `You joined ${title}: it's on your project list.` });
     const board = stream === c.home ? `/?r=${joined}` : `/?w=${encodeURIComponent(stream)}&r=${joined}`;
     c.send(res, 303, "text/plain; charset=utf-8", "", { Location: board });
+  };
+
+  // a note put away: only its own reader's
+  const notesPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await c.formOf(req, res, host);
+    if (form === undefined) return;
+    const login = who(req).login;
+    const stream = form.get("stream") ?? "";
+    const about = form.get("who") ?? "";
+    if (!login || !notesFor(login, env).some((n) => n.stream === stream && same(n.who, about))) return back(res, "/inbox", { ok: false, text: "That note isn't yours, or it's been put away." });
+    await dropNote(login, stream, about, env);
+    return back(res, "/inbox", { ok: true, text: "Put away." });
   };
 
   // Project settings (GET /integrations): this project's name, its GitHub repo, its Jira project,
@@ -1389,6 +1408,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "GET /projects": projectsPage,
     "GET /inbox": inboxPage,
     "POST /invites": invitesPost,
+    "POST /inbox/notes": notesPost,
     "POST /integrations/github/disconnect": githubDisconnect,
     "GET /integrations/jira/connect": jiraConnect,
     "GET /integrations/jira/callback": jiraCallback,

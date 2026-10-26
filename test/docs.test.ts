@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { invite, saveAccess, saveAppKeys, saveEmail, saveSession } from "../src/sync/credentials.ts";
+import { addNote, invite, saveAccess, saveAppKeys, saveEmail, saveProject, saveSession } from "../src/sync/credentials.ts";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
@@ -87,7 +87,9 @@ async function pages(): Promise<string> {
   await saveAppKeys({ github: { clientId: "Iv1.docs" }, atlassian: { clientId: "docs", secret: "docs-secret" } }, env);
   await saveSession("docs-session", "isha", env);
   await saveEmail("isha", "isha@example.com", env);
-  await saveAccess(() => ({ admin: "isha", members: ["devansh"] }), env); // devansh: in every project from before each had its own people
+  await saveAccess(() => ({ admin: "isha", members: ["devansh"] }), env); // devansh: from before projects had their own people, so in none until invited
+  await saveProject("w", () => ({ admins: ["isha"], members: ["devansh"] }), env); // w's team: devansh accepted
+  await addNote({ to: "isha", stream: "w", who: "devansh", did: "accepted" }, env); // and isha's Inbox says so
   await invite("t", "isha", "devansh", env); // an invite for isha: its letter, her Inbox (src/serve/invites.ts)
   await invite("w", "raj", "isha", env); // and one she sent, in Collaborators
   const githubAuth = { authorizeUrl: () => "https://github.example/authorize", exchange: async () => "gho-token", start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
@@ -143,7 +145,7 @@ async function pages(): Promise<string> {
       + (await getNewcomer("GET", "/signup/email")).body // the email step
       + (await getSignedIn("GET", "/integrations?app=cursor&from=agents")).body // Connect agents' step 2, then step 3 with its agent made
       + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body
-      + (await getSignedIn("GET", "/inbox")).body + (await getSignedIn("POST", "/invites", "token=k&stream=t&do=decline")).body + (await getSignedIn("GET", "/inbox")).body; // the Inbox, then empty
+      + (await getSignedIn("GET", "/inbox")).body + (await getSignedIn("POST", "/invites", "token=k&stream=t&do=decline")).body + (await getSignedIn("POST", "/inbox/notes", "token=k&stream=w&who=devansh")).body + (await getSignedIn("GET", "/inbox")).body; // the Inbox, then empty
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const sha = "b".repeat(40); // a commit the sync kept for b: its proof of work

@@ -29,9 +29,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type ProjectPeople } from "./accounts-pg.ts";
+import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type Note, type ProjectPeople } from "./accounts-pg.ts";
 
-export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, ProjectPeople } from "./accounts-pg.ts";
+export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, Note, ProjectPeople } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
 export interface JiraLogin { email: string; token: string }
 
@@ -217,6 +217,21 @@ export async function dropInvite(stream: string, login: string, env: Env = proce
   const pg = postgresAccounts(env);
   if (pg) return pg.dropInvite(stream, login);
   update(env, (s) => { s.invites = (s.invites ?? []).filter((x) => !(x.stream === stream && same(x.login, login))); });
+}
+
+// Notes to whoever invited someone (Isha, 2026-10-26): "devansh accepted your invite to X", or
+// declined it. One per invite (a later answer replaces it), in their Inbox until they put it away.
+export const notesFor = (login: string, env: Env = process.env): Note[] => (read(env).notes ?? []).filter((n) => same(n.to, login));
+export async function addNote(n: Omit<Note, "at">, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.addNote(n);
+  const mine = (x: Note) => same(x.to, n.to) && x.stream === n.stream && same(x.who, n.who);
+  update(env, (s) => { s.notes = [...(s.notes ?? []).filter((x) => !mine(x)), { ...n, at: new Date().toISOString() }]; });
+}
+export async function dropNote(to: string, stream: string, who: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.dropNote(to, stream, who);
+  update(env, (s) => { s.notes = (s.notes ?? []).filter((x) => !(same(x.to, to) && x.stream === stream && same(x.who, who))); });
 }
 
 // What someone has seen or put away ("tour": the first-time tour; "checklist-hidden": the Get

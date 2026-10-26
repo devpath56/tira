@@ -956,7 +956,10 @@ test("+ Create on the board (Isha, 2026-10-26): a task by name, at the top or un
     const keys = readFileSync(new URL("../src/serve/keys.mjs", import.meta.url), "utf8");
     assert.match(keys, /if \(e\.defaultPrevented \|\| e\.metaKey \|\| e\.ctrlKey \|\| e\.altKey \|\| typing\(e\.target\)\) return;/);
     assert.match(keys, /const TASK_KEYS = \{ s: "START", e: "COMPLETE", b: "BLOCK" \};/);
-    assert.match(keys, /if \(key === "c" && document\.getElementById\("create"\)\) \{\n    location\.hash = "create";/);
+    // on a Graph task, C adds under it, as its + does (Isha, 2026-10-26)
+    assert.match(keys, /if \(key === "c" && document\.getElementById\("create"\)\) \{\n    \/\/ on a Graph task: a task under it, as its \+ does\n    const under = document\.activeElement\?\.closest\("\.gn"\)\?\.nextElementSibling;\n    if \(under instanceof HTMLElement && under\.matches\("\[data-create-under\]"\)\) under\.click\(\);\n    else location\.hash = "create";/);
+    const composer = readFileSync(new URL("../src/serve/create.mjs", import.meta.url), "utf8");
+    assert.match(composer, /const add = t\?\.closest\("\[data-create-under\]"\);\n    if \(add instanceof HTMLElement\) \{\n      fromGraph = true;\n      parentIs\(add\.dataset\.createUnder \?\? ""\);/);
     const coach = readFileSync(new URL("../src/serve/coach.mjs", import.meta.url), "utf8");
     assert.deepEqual([...coach.matchAll(/^  \["([^"]+)", "([^"]+)"/gm)].map((m) => m[2]), ["Create a task", "Kanban or Graph", "Find anything", "Needs you", "Project settings"]);
     assert.match(readFileSync(new URL("../src/serve/tour.mjs", import.meta.url), "utf8"), /if \(document\.querySelector\("\[data-get-started\]"\)\) \{\n      dispatchEvent\(new Event\("tira:coach"\)\);\n      return;/);
@@ -1084,8 +1087,16 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     assert.equal((await s.http("GET", "/?w=octo-app")).status, 200);
     assert.match((await s.http("GET", "/inbox")).body, /data-inbox-empty/);
     assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "accept" })), "That invite isn't yours to answer, or it's been answered.");
-    // its admin again: she's in; an invite can be taken back
+    // its admin again: she's in, and her answer is in their Inbox, with one click to the board
+    // (Isha, 2026-10-26); Dismiss puts it away
     s.signIn(octo);
+    const told = (await s.http("GET", "/inbox")).body;
+    assert.match(told, /<article class="letter note accepted" data-note="octo-app" data-did="accepted">[^]*?<p class="letter-k">Invite accepted<\/p>[^]*?<p><b>isha-gh<\/b> accepted your invite to octo-app\. They can see its board now\.<\/p>[^]*?<a class="act primary" href="\/\?w=octo-app">Open the board<\/a><button class="act" type="submit">Dismiss<\/button>/);
+    assert.match((await s.http("GET", "/?w=octo-app")).body, /data-inbox><svg[^]*?<\/svg>Inbox<span class="side-n">1<\/span>/); // counted
+    assert.equal(await s.flash(await s.post("/inbox/notes", { stream: "octo-app", who: "isha-gh" })), "Put away.");
+    assert.match((await s.http("GET", "/inbox")).body, /data-inbox-empty/);
+    assert.equal(await s.flash(await s.post("/inbox/notes", { stream: "octo-app", who: "isha-gh" })), "That note isn't yours, or it's been put away.");
+    // an invite can be taken back
     assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "isha-gh" })), "isha-gh is already in this project.");
     assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "raj" })), "Invited raj: the invite waits for them to sign up with GitHub and accept.");
     assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "accept" })), "That invite isn't yours to answer, or it's been answered."); // raj's, not octo's
@@ -1128,6 +1139,13 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "decline" })), "Declined the invite to octo-app.");
     assert.doesNotMatch((await s.http("GET", "/projects")).body, /data-invites/);
     assert.equal((await s.http("GET", "/?w=octo-app")).status, 404);
+    // whoever invited quiet hears it; no one else does, and no one else can put it away
+    assert.doesNotMatch((await s.http("GET", "/inbox")).body, /data-note=/);
+    assert.equal(await s.flash(await s.post("/inbox/notes", { stream: "octo-app", who: "quiet" })), "That note isn't yours, or it's been put away.");
+    await as("isha-gh");
+    assert.match((await s.http("GET", "/inbox")).body, /<article class="letter note declined" data-note="octo-app" data-did="declined">[^]*?<p><b>quiet<\/b> declined your invite to octo-app\.<\/p>[^]*?<button class="act" type="submit">Dismiss<\/button>/);
+    assert.doesNotMatch((await s.http("GET", "/inbox")).body, /Open the board/); // declined: nothing to open
+    s.signIn(quietNow);
     // a profile, for anyone signed in: the username to copy, never the email
     const profile = (await s.http("GET", "/u/isha-gh")).body;
     assert.match(profile, /<code class="grp-v" id="their-username">isha-gh<\/code>/);
