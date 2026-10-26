@@ -28,7 +28,10 @@ a support chat after Intercom's and Zendesk's; it starts folded to a tab and sta
 you left it, per browser. Under a header that says it answers
 right away, tira greets you by name and offers the questions people ask here as suggested replies
 (how to make tira's GitHub app or the Atlassian app, where keys are kept, what Sync does, who can
-sign in, why Jira needs localhost). Pick one, or type your own in the box at the foot: your
+sign in, why Jira needs localhost). The steps for the two apps name the address this tira answers
+at: a hosted tira's own (its GitHub and Atlassian callbacks there), else localhost; a hosted tira
+asks "Why does Jira need its own app here?" in place of localhost's question, since Atlassian
+takes one callback per app (Isha, 2026-10-26). Pick one, or type your own in the box at the foot: your
 question shows on the right, tira types for a moment, and its answer shows on the left, with the
 questions not asked yet under it. What you type is matched to those answers on the page (a rarer
 word counts for more) and never leaves it; when nothing fits, tira says so and offers every
