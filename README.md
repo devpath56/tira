@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 957 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 964 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -716,6 +716,9 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
    `http://localhost:4747/integrations/jira/callback` and Jira scopes
    `read:jira-work write:jira-work read:jira-user`), then pick the project, or "No Jira project".
 4. **Open the board**: Kanban, with Sync in the workspace bar.
+5. **The first time**, a short animated tour of tira's hero features (the board and its tree,
+   proof and auto-close, agents and ideas, the team and sync), once per person, then a **Get
+   started** checklist in the sidebar that ticks itself off. **Take the tour** in Help shows it again.
 
 **Who gets in** (Isha, 2026-10-25). Anyone with GitHub signs up and is in at once. tira keeps
 the email their GitHub profile shows, or asks for one once (only they see it). Each project is

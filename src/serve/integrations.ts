@@ -32,7 +32,7 @@ import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts"
 import { reportLines, sync } from "../sync/sync.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { JiraCloud, projectName, type JiraClient } from "../sync/jira.ts";
-import { access, appKeys, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, saveDisplayName, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
+import { access, appKeys, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, markSeen, saveDisplayName, unmarkSeen, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
 import { changeTeam, inProject, isProjectAdmin, type TeamMove } from "./team.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
@@ -932,6 +932,20 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     back(res, "/settings", { ok: true, text: `Removed ${who2}: they're signed out, can't sign in, and their agents stop. Their projects stay with their other admins.` });
   };
 
+  // ---------- the first-time welcome: the tour seen, the checklist put away, or back ----------
+  // fragment: tour.mjs asked, and needs no page back
+  const onboardingPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await c.formOf(req, res, host);
+    if (form === undefined) return;
+    const login = who(req).login;
+    const what = form.get("do");
+    if (login && (what === "tour-seen" || what === "tour-finished")) await markSeen(login, "tour", env);
+    if (login && what === "tour-finished") await unmarkSeen(login, "checklist-hidden", env);
+    if (login && what === "hide-checklist") await markSeen(login, "checklist-hidden", env);
+    if (form.get("fragment") === "1") return c.send(res, 204, "text/plain; charset=utf-8", "");
+    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: "/" });
+  };
+
   // ---------- you: the name you're shown by, and unlinking your GitHub ----------
   const profilePost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
@@ -1177,6 +1191,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/link": linkPost,
     "POST /integrations/people": peoplePost,
     "POST /integrations/accounts": accountsPost,
+    "POST /onboarding": onboardingPost,
     "POST /integrations/profile": profilePost,
     "GET /signup/email": emailGet,
     "POST /signup/email": emailPost,

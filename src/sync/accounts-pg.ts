@@ -11,8 +11,9 @@
 //   onto someone else's.
 // - Small tables in tira's schema, apart from the log (whose tables nothing here touches):
 //   account_apps, account_access (one row each), account_github, account_atlassian, account_names,
-//   account_emails (sealed), account_blocked (by GitHub login), account_projects (each project's
-//   people: by project and login) and account_sessions (by a hash of the session id: the table
+//   account_emails (sealed), account_blocked (by GitHub login), account_seen (what each person has
+//   seen or put away: the first-time tour, the Get started checklist), account_projects (each
+//   project's people: by project and login) and account_sessions (by a hash of the session id: the table
 //   can't sign anyone in).
 // - Links stay until their owner unlinks them; an admin removing someone only ends their sessions.
 // - A session lasts 30 days when its browser is remembered (the person ticks Remember this browser),
@@ -61,6 +62,7 @@ export interface Accounts {
   emails?: Record<string, string>; // the email each person gave, by login
   blocked?: string[]; // accounts the owner removed: they can't sign in
   projects?: Record<string, ProjectPeople>; // each project's people, by project (none: not set yet)
+  seen?: Record<string, string[]>; // what each person has seen or put away, by login ("tour", "checklist-hidden")
 }
 
 // why the accounts can't be used, in plain words (never the key or the connection string)
@@ -102,7 +104,7 @@ export function sealer(secret: string | undefined): Sealer {
 }
 
 // ---------- the tables ----------
-const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects"];
+const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen"];
 const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
@@ -124,6 +126,7 @@ CREATE TABLE IF NOT EXISTS ${s}.account_sessions (id_hash TEXT PRIMARY KEY, logi
 ALTER TABLE ${s}.account_sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE TABLE IF NOT EXISTS ${s}.account_emails (login TEXT PRIMARY KEY, email TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_blocked (login TEXT PRIMARY KEY, by_login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS ${s}.account_seen (login TEXT NOT NULL, what TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (login, what));
 CREATE TABLE IF NOT EXISTS ${s}.account_projects (
   stream TEXT NOT NULL, login TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
   at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, login)
@@ -188,7 +191,7 @@ export class PostgresAccounts {
   async refresh(): Promise<void> {
     await this.ready();
     const s = this.schema;
-    const [apps, acc, gh, at, names, sessions, emails, blocked, projects] = await Promise.all([
+    const [apps, acc, gh, at, names, sessions, emails, blocked, projects, seen] = await Promise.all([
       this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
       this.pool.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
@@ -198,6 +201,7 @@ export class PostgresAccounts {
       this.pool.query(`SELECT login, email FROM ${s}.account_emails`),
       this.pool.query(`SELECT login FROM ${s}.account_blocked ORDER BY at, login`),
       this.pool.query(`SELECT stream, login, role FROM ${s}.account_projects ORDER BY at, login`),
+      this.pool.query(`SELECT login, what FROM ${s}.account_seen ORDER BY login, what`),
     ]);
     const out: Accounts = {};
     const a = apps.rows[0] as AppsRow | undefined;
@@ -215,6 +219,8 @@ export class PostgresAccounts {
       const p = (out.projects[r.stream] ??= { admins: [], members: [] });
       (r.role === "admin" ? p.admins : p.members).push(r.login);
     }
+    out.seen = {};
+    for (const r of seen.rows as { login: string; what: string }[]) (out.seen[r.login] ??= []).push(r.what);
     this.now = out;
   }
 
@@ -285,6 +291,14 @@ export class PostgresAccounts {
   async saveEmail(login: string, email: string): Promise<void> {
     const s = this.schema;
     await this.write(`INSERT INTO ${s}.account_emails (login, email) VALUES ($1, $2) ON CONFLICT (login) DO UPDATE SET email = $2, updated_at = now()`, [login, this.key.seal(email, `email:${login}`)]);
+  }
+
+  // something a person has seen or put away (the first-time tour, the Get started checklist), or not any more
+  async markSeen(login: string, what: string): Promise<void> {
+    await this.write(`INSERT INTO ${this.schema}.account_seen (login, what) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [login, what]);
+  }
+  async unmarkSeen(login: string, what: string): Promise<void> {
+    await this.write(`DELETE FROM ${this.schema}.account_seen WHERE login = $1 AND what = $2`, [login, what]);
   }
 
   // an account the owner removed (by: the owner), or let back in

@@ -521,13 +521,8 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Onboarding, one time: the guide opens by itself on the first visit, then only on demand.
-try {
-  if (!localStorage.getItem("tira-guide-seen") && location.hash === "") location.hash = "#guide";
-  localStorage.setItem("tira-guide-seen", "1");
-} catch {
-  // storage blocked: the guide stays on demand only
-}
+// The guide opens on demand only (Help): a first-time person gets the tour instead (tour.mjs;
+// Isha, 2026-10-26).
 
 // Live: the page follows the log by itself. Every few seconds while it's in view it asks where the
 // log is (/api/live); when anyone (a person or an agent) wrote since, it reloads in place, back

@@ -342,17 +342,24 @@ test("needs attention escapes reasons, labels a blank one, and is left out of a 
   assert.ok(!factory.includes('class="attention'));
 });
 
-test("trust and reading aids: Help opens the guide; the fingerprint says what it is, in the History dialog (an audit, not the board's); lanes carry section labels", async () => {
+test("trust and reading aids: Help opens the guide; the fingerprint says what it is, in the History dialog only (an audit, not the board's or Help's); lanes carry section labels", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "a".repeat(64), events);
-  assert.match(html, /<div class="side-foot"><a class="help" href="#guide" title="How to read this page"><svg[^]*?<\/svg><span>Help<\/span><\/a>/);
+  assert.match(html, /<div class="side-foot"><a class="help" href="#guide" title="Help"><svg[^]*?<\/svg><span>Help<\/span><\/a>/);
   const history = /<section class="drawer log-dialog" id="history" aria-label="History" role="dialog" aria-modal="true" data-log>[^]*?<\/section>/.exec(html)?.[0] ?? "";
-  assert.match(history, /<div class="log-top"><h3>Newest first · [^<]*<\/h3><a class="verify" href="#guide" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/a><\/div>/);
+  assert.match(history, /<div class="log-top"><h3>Newest first · [^<]*<\/h3><span class="verify" title="sha256:a{64}: a fingerprint of this page \(compare with tira dump --hash\)"><span class="vl">fingerprint<\/span> seq \d+ · a{8}…a{6}<\/span><\/div>/);
   assert.equal((html.match(/class="verify"/g) ?? []).length, 1); // nowhere else: not in the sidebar, not on the board
   const guide = /<section class="drawer guide" id="guide"[^]*?<\/section>/.exec(html)?.[0] ?? "";
-  assert.equal((guide.match(/<p>/g) ?? []).length, 3); // the brief: three short paragraphs
-  for (const topic of ["The board.", "By tira.", "The fingerprint."]) assert.ok(guide.includes(`<b>${topic}</b>`), topic);
-  assert.ok(guide.includes(`<code>${"a".repeat(64)}</code>`));
+  // as Jira writes its help (Isha, 2026-10-26): to you, plainly; how to find your way, then what
+  // the marks mean, a line each; nothing about the fingerprint (an audit: History's chip); no tour
+  // in a rendered file
+  assert.match(guide, /<h2>Help<\/h2><p class="guide-intro">Your board shows your project(?:'|&#39;)s work as tasks\./);
+  assert.match(guide, /<h3 class="guide-h">Find your way<\/h3>[^]*<h3 class="guide-h">What the marks mean<\/h3>/);
+  assert.equal((guide.match(/<li><span class="gi" aria-hidden="true">/g) ?? []).length, 8);
+  for (const term of ["Kanban", "Graph", "Search", "Task details", "Next", "Need you", "Closed by tira", "Idea"]) assert.ok(guide.includes(`<b>${term}</b>`), term);
+  assert.match(guide, /To move a task, drag it to another column\./);
+  assert.doesNotMatch(guide, /fingerprint|sha256|a{64}/);
+  assert.doesNotMatch(guide, /data-tour-open/);
   // a factory stream: the lanes say what each block is
   const store = new SqliteEventStore();
   const registry = defaultRegistry();

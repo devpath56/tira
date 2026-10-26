@@ -317,6 +317,14 @@ if (!url) {
       await other.unblock("MALLORY");
       await sealed.refresh();
       assert.deepEqual(sealed.snapshot().blocked, []);
+      // what someone has seen, from one computer to the other
+      await sealed.markSeen("isha-gh", "tour");
+      await other.markSeen("isha-gh", "tour"); // once
+      await other.refresh();
+      assert.deepEqual(other.snapshot().seen, { "isha-gh": ["tour"] });
+      await sealed.unmarkSeen("isha-gh", "tour");
+      await other.refresh();
+      assert.deepEqual(other.snapshot().seen, {});
       await other.close();
       await sealed.close();
       assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row" data-team-member><span class="grp-k">zed<\/span>/);

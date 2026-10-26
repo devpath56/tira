@@ -14,6 +14,8 @@
 //              each project had its own people, the people every project then had
 //   blocked    the accounts the owner removed: they can't sign in
 //   projects   each project's people: its admins and members (Isha, 2026-10-25)
+//   seen       what each person has seen or put away: the first-time tour, the Get started
+//              checklist (Isha, 2026-10-26), so a new browser doesn't show them again
 // and, always in this computer's file (they belong to this computer, not to the team):
 //   jira       Jira API-token logins by site (tira connect-jira, for a terminal with no browser)
 //   pageToken  the random token tira serve's forms carry, made once, so a restart doesn't
@@ -194,6 +196,23 @@ export async function unblock(login: string, env: Env = process.env): Promise<vo
   const pg = postgresAccounts(env);
   if (pg) return pg.unblock(login);
   update(env, (s) => { s.blocked = (s.blocked ?? []).filter((b) => !same(b, login)); });
+}
+
+// What someone has seen or put away ("tour": the first-time tour; "checklist-hidden": the Get
+// started checklist), on their account rather than in one browser.
+export const hasSeen = (login: string, what: string, env: Env = process.env): boolean => (read(env).seen?.[login] ?? []).includes(what);
+export async function markSeen(login: string, what: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.markSeen(login, what);
+  update(env, (s) => {
+    const mine = s.seen?.[login] ?? [];
+    if (!mine.includes(what)) s.seen = { ...s.seen, [login]: [...mine, what] };
+  });
+}
+export async function unmarkSeen(login: string, what: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.unmarkSeen(login, what);
+  update(env, (s) => { s.seen = { ...s.seen, [login]: (s.seen?.[login] ?? []).filter((x) => x !== what) }; });
 }
 
 // the email someone gave
