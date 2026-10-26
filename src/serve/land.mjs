@@ -93,36 +93,49 @@ function random(seed) {
 // long, how deep it is, and the task at its end.
 function grow(w, h, seed) {
   const rnd = random(seed);
-  const between = (a, b) => a + (b - a) * rnd();
-  const out = [];
-  const up = -Math.PI / 2;
+  const at = { rnd, between: (a, b) => a + (b - a) * rnd(), out: [], deepest: w < 600 ? 4 : 5 };
   const trunk = Math.min(Math.max(h * 0.2, 110), 260);
-  const deepest = w < 600 ? 4 : 5;
-  const branch = (x, y, angle, length, depth, birth) => {
-    const ex = x + Math.cos(angle) * length;
-    const ey = y + Math.sin(angle) * length;
-    const bend = between(-0.25, 0.25) * length;
-    const cx = (x + ex) / 2 + Math.cos(angle + Math.PI / 2) * bend;
-    const cy = (y + ey) / 2 + Math.sin(angle + Math.PI / 2) * bend;
-    const dur = 700 + length * 7;
-    const roll = rnd();
-    const state = roll < 0.55 ? "done" : roll < 0.85 ? "doing" : roll < 0.93 ? "blocked" : "todo";
-    out.push({ x, y, cx, cy, ex, ey, depth, birth, dur, state });
-    if (depth >= deepest || birth + dur > GROW_MS) return;
-    // near the trunk it forks; further out it often just carries on
-    const kids = depth < 2 ? (rnd() < 0.3 ? 3 : 2) : rnd() < 0.45 ? 1 : 2;
-    for (let i = 0; i < kids; i++) {
-      const side = kids === 1 ? (rnd() < 0.5 ? -1 : 1) * 0.4 : i % 2 === 0 ? -1 : 1;
-      let next = angle + side * between(0.32, 0.72) + between(-0.1, 0.1);
-      next += (up - next) * 0.1; // reaching for the light
-      branch(ex, ey, next, length * between(0.72, 0.86), depth + 1, birth + dur + between(0, 400));
-    }
-  };
   // trunks from the foot of the page: one each side, leaning in, and a quieter one in the middle
-  branch(w * between(0.06, 0.16), h + 8, up + between(0.1, 0.28), trunk, 0, 0);
-  branch(w * between(0.84, 0.94), h + 8, up - between(0.1, 0.28), trunk, 0, 400);
-  if (w >= 700) branch(w * between(0.42, 0.58), h + 8, up + between(-0.1, 0.1), trunk * 0.8, 1, 1200);
-  return out;
+  branch(at, w * at.between(0.06, 0.16), h + 8, UP + at.between(0.1, 0.28), trunk, 0, 0);
+  branch(at, w * at.between(0.84, 0.94), h + 8, UP - at.between(0.1, 0.28), trunk, 0, 400);
+  if (w >= 700) branch(at, w * at.between(0.42, 0.58), h + 8, UP + at.between(-0.1, 0.1), trunk * 0.8, 1, 1200);
+  return at.out;
+}
+
+const UP = -Math.PI / 2;
+// one branch, and the branches that grow from its end (at: the tree's random and what it holds)
+function branch(at, x, y, angle, length, depth, birth) {
+  const ex = x + Math.cos(angle) * length;
+  const ey = y + Math.sin(angle) * length;
+  const bend = at.between(-0.25, 0.25) * length;
+  const cx = (x + ex) / 2 + Math.cos(angle + Math.PI / 2) * bend;
+  const cy = (y + ey) / 2 + Math.sin(angle + Math.PI / 2) * bend;
+  const dur = 700 + length * 7;
+  at.out.push({ x, y, cx, cy, ex, ey, depth, birth, dur, state: stateOf(at.rnd()) });
+  if (depth >= at.deepest || birth + dur > GROW_MS) return;
+  const kids = kidsAt(depth, at.rnd());
+  for (let i = 0; i < kids; i++) {
+    let next = angle + sideOf(i, kids, at.rnd) * at.between(0.32, 0.72) + at.between(-0.1, 0.1);
+    next += (UP - next) * 0.1; // reaching for the light
+    branch(at, ex, ey, next, length * at.between(0.72, 0.86), depth + 1, birth + dur + at.between(0, 400));
+  }
+}
+
+// a task's state, from a roll: mostly done, some under way, now and then blocked or not started
+function stateOf(roll) {
+  if (roll < 0.55) return "done";
+  if (roll < 0.85) return "doing";
+  return roll < 0.93 ? "blocked" : "todo";
+}
+// how many branches grow from a fork: near the trunk it forks; further out it often just carries on
+function kidsAt(depth, roll) {
+  if (depth < 2) return roll < 0.3 ? 3 : 2;
+  return roll < 0.45 ? 1 : 2;
+}
+// which way a fork's i-th branch leans; a lone one, a little either way
+function sideOf(i, kids, rnd) {
+  if (kids !== 1) return i % 2 === 0 ? -1 : 1;
+  return rnd() < 0.5 ? -0.4 : 0.4;
 }
 
 const ease = (p) => 1 - (1 - p) ** 3;
@@ -213,7 +226,7 @@ function parse(v) {
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(v);
   if (hex) {
     const s = hex[1].length === 3 ? [...hex[1]].map((x) => x + x).join("") : hex[1];
-    return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16));
+    return [0, 2, 4].map((i) => Number.parseInt(s.slice(i, i + 2), 16));
   }
   const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(v);
   return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : undefined;
