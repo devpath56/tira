@@ -5,7 +5,7 @@
 //
 // - Append-only is structural: triggers abort UPDATE, DELETE and TRUNCATE on the events table.
 //   (Dropping the table needs its owner: in production tira connects as a login that owns
-//   nothing and may only insert and read; see the README.)
+//   nothing and may only insert and read; see docs/ENGINEERING.md.)
 // - seq is global, gapless and monotonic. Postgres's own numbering (a sequence or identity) leaves
 //   gaps when a transaction rolls back, and two writers can commit their numbers out of order, so
 //   a reader could pass seq 11 before seq 10 lands. Instead every append locks the one counter row
@@ -132,7 +132,7 @@ export class PostgresEventStore implements EventStore {
     return this.setup;
   }
 
-  // Run SQL as this store's connection (tests, and the manual tamper checks in the README).
+  // Run SQL as this store's connection (tests, and the manual tamper checks in docs/ENGINEERING.md).
   async exec(sql: string): Promise<void> {
     await this.ready();
     await this.pool.query(sql);

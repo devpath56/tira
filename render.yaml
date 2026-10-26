@@ -1,4 +1,4 @@
-# tira on Render: one shared server at an https address (README: "Hosting tira on Render").
+# tira on Render: one shared server at an https address (docs/ENGINEERING.md: "Hosting tira on Render").
 # Values marked `sync: false` are typed into Render's dashboard when the service is made, never
 # written here; TIRA_SECRET_KEY is made by Render itself (it seals everyone's GitHub and Jira tokens:
 # keep it, or the sign-ins stored with it can't be opened).
