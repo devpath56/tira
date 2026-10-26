@@ -9,8 +9,8 @@ in Jira until someone syncs.
 
 **How to read it.** GitHub's mark and owner/name, Jira's mark and its KEY, each a link out.
 Under `tira serve`, only while nothing is linked, one way in instead: **Connect GitHub and Jira**,
-to Project settings (`integrations-page.md`). Once linked, **Sync** (the same sync as Project
-settings', as the person signed in; the result shows in the banner), and **Add Jira** or **Add
+to Project settings (`integrations-page.md`). Once linked, **Sync** (the only place to sync from
+the pages, as the person signed in; the result shows in the banner), and **Add Jira** or **Add
 GitHub** while one is missing (straight to that section of Project settings). Project settings
 themselves are in the sidebar.
 

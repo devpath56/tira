@@ -29,9 +29,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type ProjectPeople } from "./accounts-pg.ts";
+import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type ProjectPeople } from "./accounts-pg.ts";
 
-export type { Access, AppKeys, AtlassianAuth, GitHubAuth, ProjectPeople } from "./accounts-pg.ts";
+export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, ProjectPeople } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
 export interface JiraLogin { email: string; token: string }
 
@@ -196,6 +196,27 @@ export async function unblock(login: string, env: Env = process.env): Promise<vo
   const pg = postgresAccounts(env);
   if (pg) return pg.unblock(login);
   update(env, (s) => { s.blocked = (s.blocked ?? []).filter((b) => !same(b, login)); });
+}
+
+// Invites to projects (Isha, 2026-10-26): an admin invites someone by GitHub username; they see the
+// project once they accept. The ones not answered yet, oldest first; a new one (true when it's new);
+// and its end, when it's accepted, declined or taken back.
+export const invitesNow = (env: Env = process.env): Invite[] => read(env).invites ?? [];
+export async function invite(stream: string, login: string, by: string, env: Env = process.env): Promise<boolean> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.invite(stream, login, by);
+  let added = false;
+  update(env, (s) => {
+    if ((s.invites ?? []).some((x) => x.stream === stream && same(x.login, login))) return;
+    added = true;
+    s.invites = [...(s.invites ?? []), { stream, login, by, at: new Date().toISOString() }];
+  });
+  return added;
+}
+export async function dropInvite(stream: string, login: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.dropInvite(stream, login);
+  update(env, (s) => { s.invites = (s.invites ?? []).filter((x) => !(x.stream === stream && same(x.login, login))); });
 }
 
 // What someone has seen or put away ("tour": the first-time tour; "checklist-hidden": the Get

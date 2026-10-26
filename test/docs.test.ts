@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveAccess, saveAppKeys, saveEmail, saveSession } from "../src/sync/credentials.ts";
+import { invite, saveAccess, saveAppKeys, saveEmail, saveSession } from "../src/sync/credentials.ts";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
@@ -84,6 +84,8 @@ async function pages(): Promise<string> {
   await saveSession("docs-session", "isha", env);
   await saveEmail("isha", "isha@example.com", env);
   await saveAccess(() => ({ admin: "isha", members: ["devansh"] }), env); // devansh: in every project from before each had its own people
+  await invite("t", "isha", "devansh", env); // an invite for isha: its letter, her Inbox (src/serve/invites.ts)
+  await invite("w", "raj", "isha", env); // and one she sent, in Collaborators
   const githubAuth = { authorizeUrl: () => "https://github.example/authorize", exchange: async () => "gho-token", start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
   const signInServer = tiraServer({ store, registry, stream: "t", actor: "isha", token: "k", links: { githubAuth, env } });
   const ask = async (s: typeof server, cookie?: string) => {
@@ -136,7 +138,8 @@ async function pages(): Promise<string> {
       + (await getSignedIn("GET", "/projects")).body // your projects
       + (await getNewcomer("GET", "/signup/email")).body // the email step
       + (await getSignedIn("GET", "/integrations?app=cursor&from=agents")).body // Connect agents' step 2, then step 3 with its agent made
-      + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body;
+      + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body
+      + (await getSignedIn("GET", "/inbox")).body + (await getSignedIn("POST", "/invites", "token=k&stream=t&do=decline")).body + (await getSignedIn("GET", "/inbox")).body; // the Inbox, then empty
     const before = String((await store.readStream("t")).at(-1)?.seq);
     const stopped = (await get("POST", "/act", `token=k&type=node&id=b&event=COMPLETE&fragment=1&seen=${before}&command=${encodeURIComponent('tira send node b COMPLETE evidenceRef=""')}`)).body;
     const sha = "b".repeat(40); // a commit the sync kept for b: its proof of work
@@ -149,7 +152,7 @@ async function pages(): Promise<string> {
     const unlinked = (await get("GET", "/?w=busy")).body; // a board with nothing linked: Connect GitHub and Jira
     const asking = new URLSearchParams({ response_type: "code", client_id: clientId(hostedEnv.TIRA_SECRET_KEY, { redirect_uris: [CLAUDE_CALLBACK] }), redirect_uri: CLAUDE_CALLBACK, code_challenge: s256("v".repeat(43)), code_challenge_method: "S256" });
     const hosted = (await getHosted("GET", "/integrations")).body + (await getHosted("GET", `/oauth/authorize?${asking}`)).body;
-    const script = ["app.mjs", "graph.mjs", "signin.mjs", "drag.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
+    const script = ["app.mjs", "graph.mjs", "signin.mjs", "drag.mjs", "keys.mjs", "coach.mjs"].map((f) => readFileSync(new URL(`../src/serve/${f}`, import.meta.url), "utf8")).join("\n");
     return [staticPage, legacyPage, lanes, busyPage, live, confirm, fragment, blockLive, pick, landing, signin, signedIn, stopped, withCommit, flash, noWorkspace, script, unlinked, hosted].join("\n");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
@@ -177,7 +180,7 @@ const present = (hook: string, text: string): boolean => {
 
 test("every component doc says its job and names hooks; every hook exists in the build", async () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
-  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "hash-chip.md", "ideas.md", "integrations-page.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "project-switch.md", "theme-switch.md", "welcome.md", "workspace-bar.md"]);
+  assert.deepEqual(files, ["attention-section.md", "board-view.md", "command-palette.md", "confirm-page.md", "create-and-keys.md", "hash-chip.md", "ideas.md", "integrations-page.md", "invites.md", "lanes-view.md", "node-drawer.md", "onboarding.md", "project-switch.md", "theme-switch.md", "welcome.md", "workspace-bar.md"]);
   const built = await pages();
   for (const f of files) {
     const doc = readFileSync(new URL(f, DIR), "utf8");

@@ -369,11 +369,15 @@ test("connecting an agent: Claude Code, Cursor and VS Code reach tira serve's ad
   const at = { url: "http://127.0.0.1:4772/mcp", launch: { node: "/n/node", script: "/t/scripts/tira.ts" } };
   const headers = { Authorization: "Bearer tira_ab12cd34_x" };
   const code = appSetup("claude-code", "factory-ui", at, "tira_ab12cd34_x");
-  assert.equal(code.code, "claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer tira_ab12cd34_x'"); // an earlier entry for the project replaced
-  assert.deepEqual(code.steps, ["Run this in a terminal. It replaces any earlier tira entry for this project in Claude Code.", "Open a new Claude Code session (one open before won't have tira) and ask it: what's next in tira?"]);
+  assert.equal(code.code, "claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer tira_ab12cd34_x' && claude mcp list"); // an earlier entry for the project replaced; then the check that it's connected
+  assert.deepEqual(code.steps, [
+    "Run this in a terminal. It replaces any earlier tira entry for this project in Claude Code. Claude Code shows the token as [REDACTED]: that's it keeping the token private, as it should.",
+    "Its last lines check the connection: tira-factory-ui … ✓ Connected. This page turns green at the same moment.",
+    "Open a new Claude Code session (one open before won't have tira) and ask it: what's next in tira?",
+  ]);
   assert.equal(code.remove, "claude mcp remove tira-factory-ui -s user");
   assert.equal(code.install, undefined);
-  assert.match(appSetup("claude-code", "factory-ui", at, TOKEN_HERE).code, / --header 'Authorization: Bearer <your token>'$/);
+  assert.match(appSetup("claude-code", "factory-ui", at, TOKEN_HERE).code, / --header 'Authorization: Bearer <your token>' && claude mcp list$/);
   const cursor = appSetup("cursor", "factory-ui", at, "tira_ab12cd34_x");
   assert.deepEqual(JSON.parse(cursor.code), { mcpServers: { "tira-factory-ui": { url: at.url, headers } } });
   const link = new URL(cursor.install ?? "");
@@ -492,7 +496,7 @@ test("connecting an agent: whether it would reach this tira's database, from tir
   }
 });
 
-test("Project settings → Connect agents, in three steps: choose your app, name your agent (its token made then), finish in that app with one action and Test connection; connected agents below; the rest under More", async () => {
+test("Project settings → Connect agents: Claude Code first (by its command on this computer; by a connector with hosted tira), then Cursor and VS Code, Claude Desktop folded; an app picked, name its agent (its token made then), finish in that app with one action, green once it calls; connected agents below; the rest under More", async () => {
   const w = await world();
   const dir = mkdtempSync(join(tmpdir(), "tira-agents-"));
   const envFile = join(dir, ".env");
@@ -516,14 +520,23 @@ test("Project settings → Connect agents, in three steps: choose your app, name
   const at = { url: `http://127.0.0.1:${port}/mcp`, launch: { node: process.execPath, script: TIRA_SCRIPT } };
   try {
     const page = (await http("GET", "/integrations")).body;
-    assert.match(page, /<a class="set-link" href="#sync">Sync<\/a><a class="set-link" href="#agents">Connect agents<\/a><a class="set-link" href="#delete">Delete<\/a>/);
+    assert.match(page, /<a class="set-link" href="#agents"><svg[^]*?<\/svg>Agents<\/a><p class="set-group">Advanced<\/p><a class="set-link" href="#delete"><svg[^]*?<\/svg>Danger zone<\/a>/);
     assert.doesNotMatch((await http("GET", "/settings")).body, /id="agents"|data-agent/); // not in Account settings
     let agents = section(page);
-    assert.match(agents, /<h2 class="grp-h">Connect agents<\/h2><p class="grp-desc">Connect your AI agents \(Claude Code, Cursor, VS Code, Claude Desktop\) to this project/);
-    // step 1: the four apps, each its own address; steps 2 and 3 wait their turn
-    assert.deepEqual([...agents.matchAll(/<a class="agent-tile" href="([^"]+)" data-agent-tile="([a-z-]+)">/g)].map((m) => [m[2], unesc(m[1] ?? "")]), APPS.map((app) => [app, `/integrations?app=${app}&from=agents#agents`]));
-    assert.match(agents, /<div class="agent-step now" data-agent-step="1"><h3><span class="agent-n">1<\/span>Choose your app<\/h3>/);
-    assert.match(agents, /<div class="agent-step later" data-agent-step="2">[^]*<div class="agent-step later" data-agent-step="3"><h3><span class="agent-n">3<\/span>Finish in your app<\/h3>/);
+    assert.match(agents, /<h2 class="grp-h">Connect agents<\/h2><p class="grp-desc">Let AI agents work on this project(?:'|&#39;)s tasks\. Each one shows on the board under its own name, and you can revoke it here\.<\/p>/);
+    // no app picked (Isha, 2026-10-26): Claude Code first, by its command here; then Cursor and VS
+    // Code; Claude Desktop (the chat app) folded. Each its own address, changed in place (data-agent-go)
+    assert.match(agents, /<\/p><\/div><\/div><div class="agent-claude" data-agent-code><h3><span class="agent-icon" aria-hidden="true"><svg[^]*?<\/svg><\/span>Claude Code <span class="pill">Recommended<\/span><\/h3><div class="code-way"><h4>1\. From Claude(?:'|&#39;)s Connectors <span class="pill">Simplest<\/span><\/h4>[^]*?Customize → Connectors[^]*?<div class="code-way"><h4>2\. From a terminal<\/h4><p>One command[^<]*<\/p><p><a class="act primary" href="\/integrations\?app=claude-code(?:&|&amp;|&#38;)from=agents#agents" data-agent-tile="claude-code" data-agent-go>Set up Claude Code<\/a><\/p><\/div><\/div>/);
+    assert.deepEqual([...agents.matchAll(/<a class="agent-tile" href="([^"]+)" data-agent-tile="([a-z-]+)" data-agent-go>/g)].map((m) => [m[2], unesc(m[1] ?? "")]), ["cursor", "vscode", "claude-desktop"].map((app) => [app, `/integrations?app=${app}&from=agents#agents`]));
+    assert.match(agents, /data-agent-tile="claude-code"[^]*?<h3 class="agent-list-h">Or Cursor, VS Code<\/h3><div class="agent-tiles"><a class="agent-tile"[^]*?data-agent-tile="cursor"[^]*?data-agent-tile="vscode"[^]*?<\/div><details class="agent-term" data-agent-desktop><summary>Claude Desktop, the chat app\?<\/summary>/);
+    assert.doesNotMatch(agents, /data-agent-step=|data-agent-watch|data-agent-connector[ >]/); // no steps until an app is picked; no connector here
+    // a connector needs tira at a public address: on this computer, a word on why
+    assert.match(agents, /<p class="agent-later" data-agent-connectors>Needs tira at a public address, like your hosted tira: Claude can(?:'|&#39;)t reach this computer\.<\/p>/);
+    // the connector's steps, played: the first step lit, its picture shown; the rest wait their turn
+    assert.match(agents, /<div class="cplay" data-cplay><ol class="cplay-steps"><li><button type="button" class="cplay-step on" data-cplay-go="0" aria-current="step"><span class="cplay-n">1<\/span><span class="cplay-t"><b>Copy tira(?:'|&#39;)s address<\/b><small>Your hosted tira, with \/mcp<\/small>/);
+    const cplay = readFileSync(new URL("../src/serve/cplay.mjs", import.meta.url), "utf8");
+    assert.match(cplay, /timer = setTimeout\(\(\) => \{\n      show\(at \+ 1\);\n      tick\(\);\n    \}, EVERY\);/);
+    assert.match(cplay, /if \(!root\.isConnected \|\| held \|\| still\.matches\) return;/);
     assert.match(agents, /<h3 class="agent-list-h">Connected agents<\/h3><div class="agent-list" data-agents><p class="agent-none">No agents connected yet\.<\/p>/);
     assert.doesNotMatch(agents, /data-agent-install|id="agent-setup"|data-agent-test/); // no token yet
     // More: the address, each app by hand with the token's place, what agents can do, Claude Desktop's database
@@ -535,10 +548,9 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.match(more, /<li><code>add_comment<\/code> a reply on a task(?:'|&#39;)s comments<\/li><li><code>fill_ticket<\/code> a ticket(?:'|&#39;)s title, description, steps and estimate<\/li><\/ul>/);
     assert.match(more, /Cancelling, reopening and unblocking stay with people\./);
     assert.match(more, /<p class="agent-db no" data-agent-database="missing">/);
-    assert.match(more, /<h4>Claude(?:'|&#39;)s Connectors<\/h4><p data-agent-connectors>Claude(?:'|&#39;)s own Connectors settings \(Add custom connector\) can(?:'|&#39;)t add tira yet: [^<]*public https address[^<]*That comes once tira is hosted\./);
     // step 2: Cursor chosen; its agent's name suggested
     agents = await settings("/integrations?app=cursor&from=agents");
-    assert.match(agents, /<div class="agent-step done" data-agent-step="1"><h3><span class="agent-n">✓<\/span>Choose your app<\/h3><p class="agent-done"><b>Cursor<\/b> <a href="\/integrations\?from=agents#agents">Change<\/a>/);
+    assert.match(agents, /<div class="agent-step done" data-agent-step="1"><h3><span class="agent-n">✓<\/span>Choose your app<\/h3><p class="agent-done"><b>Cursor<\/b> <a href="\/integrations\?from=agents#agents" data-agent-go>Change<\/a>/);
     assert.match(agents, /<div class="agent-step now" data-agent-step="2">[^]*?<input type="hidden" name="app" value="cursor"><input type="text" name="name" value="cursor-agent"[^>]*><button class="act primary" type="submit">Connect<\/button>/);
     assert.match(agents, /<div class="agent-step later" data-agent-step="3"><h3><span class="agent-n">3<\/span>Finish in Cursor<\/h3>/);
     // a person's name is caught, said in step 2; an app must be chosen
@@ -547,7 +559,7 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     const caught = await settings(person.location ?? "");
     assert.match(caught, /data-agent-step="2">[^]*?&#34;isha&#34; reads as a person(?:'|&#39;)s name[^]*?data-agent-step="3"/);
     assert.equal(caught.match(/data-flash/g)?.length, 1, "said in step 2 only");
-    assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&name=x-agent")).location ?? ""), /<div class="flash no" role="status" data-flash>Choose your app first\.<\/div><div class="agent-step now" data-agent-step="1">/);
+    assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&name=x-agent")).location ?? ""), /<div class="flash no" role="status" data-flash>Choose your app first\.<\/div><div class="agent-claude" data-agent-code>/);
     // Connect: the agent's token, for Cursor; step 3: Add to Cursor (the token in its link), the setup by hand folded under it
     const made = await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent");
     const key = /^\/integrations\?made=([0-9a-f]{24})&from=agents#agents$/.exec(made.location ?? "")?.[1] ?? "";
@@ -560,20 +572,26 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.equal(agents.split(token).length, 2, "the token, once, in the setup"); // (and in the install link, base64)
     assert.match(agents, /<p class="agent-done"><b>Cursor<\/b><\/p>[^]*?<p class="agent-done"><b>cursor-agent<\/b> is connected to this project, with a token of its own\.<\/p>/);
     assert.ok(agents.includes(`<p class="agent-go"><a class="act primary" href="${esc(appSetup("cursor", S, at, token).install ?? "")}" data-agent-install>Add to Cursor</a></p><details class="agent-hand"><summary>Doesn't open? Add it by hand</summary>`), "Add to Cursor, the setup by hand under it");
-    assert.match(agents, /<a href="\/integrations\?from=agents#agents">Connect another agent<\/a>/);
+    assert.match(agents, /<a href="\/integrations\?from=agents#agents" data-agent-go>Connect another agent<\/a>/);
+    // the last step's status, from the start: waiting, and green by itself once Cursor calls (agents.mjs asks)
+    assert.match(agents, /<div class="agent-step now" data-agent-step="3">[^]*?<form method="post" action="\/integrations\/agents\/test" class="agent-test" data-agent-test data-agent-watch>[^]*?<button class="act" type="submit">Check now<\/button><span class="agent-test-said">tira checks by itself too\.<\/span><\/form><div class="agent-tested" data-agent-tested><div class="flash wait" role="status" data-flash>Waiting for Cursor(?:'|&#39;)s first call\. [^<]*This turns green by itself when it calls\.<\/div><\/div>/);
     assert.ok((await settings(`/integrations?made=${key}&from=agents`)).includes(token), "still shown on a reload, for 10 minutes");
     // Test connection: not yet (the plain post comes back to step 3, the answer in it); after the app's first call, connected
     const notYet = await http("POST", "/integrations/agents/test", `token=k&id=${cursorAgent?.id ?? ""}&made=${key}`);
     assert.match(notYet.location ?? "", new RegExp(`^/integrations\\?made=${key}&r=\\d+&from=agents#agents$`));
-    assert.match(await settings(notYet.location ?? ""), /<div class="agent-tested" data-agent-tested><div class="flash wait" role="status" data-flash>Waiting for Cursor(?:'|&#39;)s first call\. Once tira is added, Cursor calls it when tira is turned on in its settings, under MCP\. Then test again\.<\/div><\/div>/); // a wait, said calmly: not an error
+    assert.match(await settings(notYet.location ?? ""), /<div class="agent-tested" data-agent-tested><div class="flash wait" role="status" data-flash>Waiting for Cursor(?:'|&#39;)s first call\. Once tira is added, Cursor calls it when tira is turned on in its settings, under MCP\. This turns green by itself when it calls\.<\/div><\/div>/); // a wait, said calmly: not an error
     assert.match(page, /\.flash\.wait\{border-color:color-mix\(in srgb,var\(--accent\) 30%,transparent\);background:var\(--accent-bg\)\}/);
     const setup = JSON.parse(setupIn(agents)) as { mcpServers: Record<string, { url: string; headers: Record<string, string> }> };
     const cursor = setup.mcpServers["tira-demo"];
     assert.equal((await fetch(cursor?.url ?? "", { method: "POST", headers: { ...cursor?.headers, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) })).status, 200); // Cursor, with what the page gave it
     const tested = await http("POST", "/integrations/agents/test", `token=k&id=${cursorAgent?.id ?? ""}&made=${key}&fragment=1`);
     assert.match(tested.body, /^<div class="flash ok" role="status" data-flash>Cursor is connected: tira heard from cursor-agent just now\. Ask it &#34;what(?:'|&#39;)s next in tira\?&#34;<\/div>$/);
+    // in the list on the left, how many agents; in Collaborators, each with its last call, active lately
+    const listed = (await http("GET", "/integrations")).body;
+    assert.match(listed, /href="#agents"><svg[^]*?<\/svg>Agents<span class="set-count">1<\/span><\/a>/);
+    assert.match(listed, /<div class="grp-row team-row" data-team-agent><span class="av av-agent" aria-hidden="true"><svg[^]*?<\/svg><\/span><span class="grp-k">cursor-agent<small class="grp-sub">Agent · last call just now<\/small><\/span><span class="live on">Active<\/span><\/div>/);
     // connected agents: its app, last used
-    assert.match(await settings(), /<div class="agent-row" data-agent="cursor-agent"><span class="agent-who"><b>cursor-agent<\/b><small>Cursor · tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · last used \d{4}-\d{2}-\d{2}<\/small><\/span><form method="post" action="\/integrations\/agents\/revoke">/);
+    assert.match(await settings(), /<div class="agent-row" data-agent="cursor-agent"><span class="agent-who"><b>cursor-agent<\/b><small>Cursor · tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · last used \d{4}-\d{2}-\d{2}<\/small><\/span><form method="post" action="\/integrations\/agents\/revoke" data-agent-go>/);
     // the name taken: the next one suggested; the same again is refused
     assert.match(await settings("/integrations?app=cursor&from=agents"), /name="name" value="cursor-agent-2"/);
     assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? ""), /cursor-agent is already connected to this project: revoke it first/);
@@ -584,7 +602,8 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     assert.match(code, /<h3><span class="agent-n">3<\/span>Finish in Claude Code<\/h3><ol class="agent-steps"><li>Run this in a terminal/);
     assert.doesNotMatch(code, /data-agent-install|agent-hand/);
     const codeAgent = (await tokens.list(S)).find((x) => x.agent === "claude-code");
-    assert.match((await http("POST", "/integrations/agents/test", `token=k&id=${codeAgent?.id ?? ""}&fragment=1`)).body, /^<div class="flash wait" role="status" data-flash>Waiting for Claude Code(?:'|&#39;)s first call\. If you(?:'|&#39;)ve run the command, Claude Code is set up and just hasn(?:'|&#39;)t called tira yet\. Quickest check: run claude mcp list in a terminal \(or ask a new Claude Code session &#34;what(?:'|&#39;)s next in tira\?&#34;\), then test again\.<\/div>$/);
+    assert.match((await http("GET", "/integrations")).body, /<span class="grp-k">claude-code<small class="grp-sub">Agent · no call yet<\/small><\/span><span class="live">Idle<\/span>/); // not called: idle
+    assert.match((await http("POST", "/integrations/agents/test", `token=k&id=${codeAgent?.id ?? ""}&fragment=1`)).body, /^<div class="flash wait" role="status" data-flash>Waiting for Claude Code(?:'|&#39;)s first call\. Once you(?:'|&#39;)ve run the command, its last lines \(claude mcp list\) check the connection: that(?:'|&#39;)s its first call\. This turns green by itself when it calls\.<\/div>$/);
     const desktop = await settings((await http("POST", "/integrations/agents/connect", "token=k&app=claude-desktop&name=claude-desktop")).location ?? "");
     assert.equal(JSON.parse(setupIn(desktop)).mcpServers["tira-demo"].args[2], "mcp");
     assert.match(desktop, /data-agent-step="3">(?:(?!data-agent-test)[^])*<p class="agent-db no" data-agent-database="missing">tira(?:'|&#39;)s \.env names no database, so Claude Desktop(?:'|&#39;)s agent couldn(?:'|&#39;)t reach this board/); // in step 3, before Test connection
@@ -599,14 +618,17 @@ test("Project settings → Connect agents, in three steps: choose your app, name
     // the database: ready once tira's .env names this tira's
     writeFileSync(envFile, "TIRA_DATABASE_URL=postgres://u@h/db\n");
     assert.match(await settings(), /<p class="agent-db" data-agent-database="ready">Claude Desktop(?:'|&#39;)s agent will work on this tira(?:'|&#39;)s database/);
-    // the page's script: Test connection asks from the page and shows the answer in place
+    // the page's script: a waiting step asks by itself and turns green in place; steps change in place
     const script = readFileSync(new URL("../src/serve/agents.mjs", import.meta.url), "utf8");
-    assert.match(script, /for \(const form of document\.querySelectorAll\("form\[data-agent-test\]"\)\)/);
     assert.match(script, /body\.set\("fragment", "1"\);/);
-    assert.match(script, /if \(!said \|\| !slot\) return form\.submit\(\);\n      slot\.replaceChildren\(said\);/);
+    assert.match(script, /form\.parentElement\?\.querySelector\("\[data-agent-tested\]"\)\?\.replaceChildren\(said\);\n  if \(!said\.classList\.contains\("ok"\)\) return false;/);
+    assert.match(script, /step\?\.classList\.replace\("now", "done"\);/);
+    assert.match(script, /if \(Date\.now\(\) < until\) timer = setTimeout\(again, EVERY_MS\);/);
+    assert.match(script, /now\.replaceChildren\(\.\.\.fresh\.childNodes\);/); // the section stays, so it stays the one shown
+    assert.match(script, /if \(form\) form\.submit\(\); \/\/ no answer: the plain way/);
     assert.match(page, /<script type="module" src="\/agents\.mjs"><\/script>/);
     // Copy, on the settings pages' own script (Setup's): any button with data-copy-target
-    assert.match(readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8"), /for \(const b of document\.querySelectorAll\("button\[data-copy-target\]"\)\) \{\n  const target = document\.getElementById\(b\.dataset\.copyTarget \?\? ""\);/);
+    assert.match(readFileSync(new URL("../src/serve/secrets.mjs", import.meta.url), "utf8"), /document\.addEventListener\("click", async \(e\) => \{\n  const b = e\.target instanceof Element \? e\.target\.closest\("button\[data-copy-target\]"\) : null;\n  const target = b \? document\.getElementById\(b\.dataset\.copyTarget \?\? ""\) : null;\n  if \(!b \|\| !target\) return;\n  if \(await copyText\(target\.textContent \?\? ""\)\) \{/);
     assert.equal((await http("GET", "/agents.mjs")).status, 200);
   } finally {
     await new Promise<void>((r) => server.close(() => r()));

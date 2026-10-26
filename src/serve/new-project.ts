@@ -37,7 +37,7 @@ function jiraRow(p: NewProject): string {
       + (j.problem ? `<div class="grp-row"><span class="grp-k no">${esc(j.problem)}</span></div>` : "");
   }
   const row = (hint: string, v: string) => `<div class="grp-row np-field">${label(hint)}${v}</div>`;
-  if (j.state === "connected") return row("Optional. Pick your Jira site first.", `<a class="how" href="/settings#account">Pick it in Account settings</a>`);
+  if (j.state === "connected") return row("Optional. Pick your Jira site first.", `<a class="how" href="/settings#linked">Pick it in Account settings</a>`);
   if (j.state === "disconnected") return row("Optional. Connect your Atlassian account to pick one now, or add it later.", `<a class="act" href="${esc("/integrations/jira/connect?back=/projects/new&tab=1")}" target="_blank" rel="noopener" data-connect-jira>Connect with Jira</a>`);
   if (j.state === "elsewhere") return row("Optional. Atlassian sends you back to localhost.", `<a class="how" href="${esc(j.localhost)}">Open tira at localhost to connect</a>`);
   if (j.state === "signin") return row("Optional. Sign in with GitHub to connect Jira; add it later from the board.", `<span class="grp-v">Later</span>`);

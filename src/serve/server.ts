@@ -41,7 +41,8 @@ import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPay
 import { commitsOf, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, isBlocked, postgresAccounts, refreshAccounts, saveProject, sessionLogin } from "../sync/credentials.ts";
+import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
+import { letterPop } from "./invites.ts";
 import { checklistHtml, provenIn, tourHtml } from "./onboarding.ts";
 import { projectName } from "../sync/jira.ts";
 import { accounts, integrationRoutes, NEXT_COOKIE, whoIs, type MyProject, type Outside } from "./integrations.ts";
@@ -79,6 +80,14 @@ const ASSETS: Record<string, string> = {
   "/agents.mjs": readFileSync(new URL("./agents.mjs", import.meta.url), "utf8"),
   "/land.mjs": readFileSync(new URL("./land.mjs", import.meta.url), "utf8"),
   "/tour.mjs": readFileSync(new URL("./tour.mjs", import.meta.url), "utf8"),
+  "/keys.mjs": readFileSync(new URL("./keys.mjs", import.meta.url), "utf8"),
+  "/coach.mjs": readFileSync(new URL("./coach.mjs", import.meta.url), "utf8"),
+  "/create.mjs": readFileSync(new URL("./create.mjs", import.meta.url), "utf8"),
+  "/cplay.mjs": readFileSync(new URL("./cplay.mjs", import.meta.url), "utf8"),
+  "/combo.mjs": readFileSync(new URL("./combo.mjs", import.meta.url), "utf8"),
+  "/sections.mjs": readFileSync(new URL("./sections.mjs", import.meta.url), "utf8"),
+  "/forms.mjs": readFileSync(new URL("./forms.mjs", import.meta.url), "utf8"),
+  "/autosave.mjs": readFileSync(new URL("./autosave.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -126,7 +135,13 @@ export function taskIndex(r: FoldResult, stream: string): TaskEntry[] {
 export interface Workspace { stream: string; q: string } // q: "w=…", or "" for the one it started on
 // what joins a query onto a path: ? for the first, & after
 const joiner = (path: string) => (path.includes("?") ? "&" : "?");
-export const withQ = (path: string, q: string) => (q === "" ? path : `${path}${joiner(path)}${q}`);
+// (before any #section: the query is the address's, the section the page's)
+export const withQ = (path: string, q: string) => {
+  if (q === "") return path;
+  const at = path.indexOf("#");
+  const [p, section] = at < 0 ? [path, ""] : [path.slice(0, at), path.slice(at)];
+  return `${p}${joiner(p)}${q}${section}`;
+};
 const MAX_NAME = 200;
 // a new project's name: the same rule the New project page's field shows
 const NEW_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
@@ -435,6 +450,17 @@ function subtaskFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): stri
   return fieldHtml("name", "Name", v.name ?? "", "Name…", " required maxlength=\"80\"") + `<input type="hidden" name="discovered" value="${found}">` + mark;
 }
 
+// To block, what it waits on (Isha, 2026-10-26: a dropdown, not a wall of chips): one field, with the
+// open tasks as a list under it that narrows as you type (combo.mjs; each one a fill, as the chips
+// were); what matches none is a new ticket's name. The confirm page (no script) lists them as text.
+function blockerHtml(open: string[], value: string, id: string, fragment: boolean): string {
+  const field = `<label class="field" data-field="blocker"><span>Blocked by</span><input type="text" name="blocker" value="${esc(value)}" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="${esc(id)}"`;
+  if (!fragment || open.length === 0) return `${field}></label>` + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`);
+  const items = open.map((x, i) => `<li class="combo-opt" role="option" id="blocker-opt-${i}" data-fill="blocker" data-value="${esc(x)}">${esc(x)}</li>`).join("");
+  return `<div class="combo" data-combo>${field} role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="blocker-list"></label>`
+    + `<ul class="combo-list" id="blocker-list" role="listbox" aria-label="Open tasks" hidden>${items}</ul><p class="combo-hint">Pick an open task, or type a new ticket's name.</p></div>`;
+}
+
 // What the move needs from you: to block, what it waits on (a new ticket by name, or an open task)
 // and why; to complete, the proof of work; to add a subtask, its name; a reason or a parent where
 // the move takes one.
@@ -443,10 +469,8 @@ function moveFieldsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string
   const verb = PAGE_VERBS[opts.event];
   if (!p.ok || !verb) return "";
   if (opts.event === "BLOCK") {
-    const open = (p.waitables ?? []).slice(0, 12);
-    return fieldHtml("blocker", "Blocked by", v.blocker ?? "", "New ticket or open task…", ` data-blocked-by="${esc(opts.id)}"`)
-      + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`)
-      + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
+    const open = (p.waitables ?? []).slice(0, 50);
+    return blockerHtml(open, v.blocker ?? "", opts.id, fragment) + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
   }
   if (opts.event === "COMPLETE") return proofFieldHtml(opts);
   if (verb.creates) return subtaskFieldHtml(p, opts, fragment);
@@ -721,15 +745,33 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (link?.deleted) return send(res, 410, html, deletedProject(link.title ?? ws.stream, link.by));
     if (me.login && !link?.repo) return send(res, 303, text, "", { Location: `/connect${url.search}` });
     if (events.length === 0 && ws.q !== "") return send(res, 404, html, noWorkspace(ws.stream));
-    const rk = url.searchParams.get("r") ?? "";
-    const flash = flashes.get(rk);
-    flashes.delete(rk); // a result shows once
+    const { flash, create } = resultOf(url);
     const divergence = opts.divergence?.(events);
     const name = me.actor ? displayName(me.actor, linkEnv) : undefined; // as they chose to be shown
     const { people, agents } = await assignees(ws.stream, me.actor);
     const onboarding = me.login ? welcomeFor(me.login, name ?? githubAuth(me.login, linkEnv)?.name ?? me.login, ws, r, events, { repo: !!link?.repo, agent: agents.length > 0, team: people.length > 1 }) : undefined;
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}) };
+    const inbox = me.login ? await inboxFor(me.login) : undefined;
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
+  };
+
+  // a page's result, shown once: Create's own shows in Create, opened again (c=1), and Keep open for the
+  // next one stays ticked; any other shows at the top
+  const resultOf = (url: URL) => {
+    const rk = url.searchParams.get("r") ?? "";
+    const said = flashes.get(rk);
+    flashes.delete(rk);
+    const inCreate = url.searchParams.get("c") === "1";
+    return { flash: inCreate ? undefined : said, create: { more: url.searchParams.get("more") === "1", ...(inCreate && said ? { said } : {}) } };
+  };
+  // invites (Isha, 2026-10-26): the Inbox's count, and a letter over the page once for a new one
+  const inboxFor = async (login: string) => {
+    const invites = invitesNow(linkEnv).filter((x) => same(x.login, login));
+    const fresh = invites.find((x) => !hasSeen(login, `invite:${x.stream}`, linkEnv));
+    if (!fresh) return { count: invites.length };
+    await markSeen(login, `invite:${fresh.stream}`, linkEnv);
+    const title = workspaceOf((await now(fresh.stream)).r, fresh.stream)?.title ?? fresh.stream;
+    return { count: invites.length, letter: letterPop(fresh, title, token) };
   };
 
   // A first-time person's welcome (src/serve/onboarding.ts): the tour, opening by itself until they've
@@ -998,9 +1040,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     title: (form.get("title") ?? "").trim().replaceAll(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
     steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
-    estimate: (form.get("estimate") ?? "").trim(),
+    estimate: effortAsked(form),
     assignee: (form.get("assignee") ?? "").trim(),
   });
+  // the effort as typed (Isha, 2026-10-26): a number and h or d, joined ("3h", "2d"; none or 0 clears
+  // it), else an estimate given whole, as an older page or a script sends it
+  const effortAsked = (form: URLSearchParams): string => {
+    const n = form.get("estimate_n");
+    if (n === null) return (form.get("estimate") ?? "").trim();
+    const v = n.trim();
+    return v === "" || Number(v) === 0 ? "" : `${v}${form.get("estimate_u") === "d" ? "d" : "h"}`;
+  };
   // what a ticket can't say, if anything: `allowed`, who it can be assigned to
   const assigneeProblem = (assignee: string, allowed: (string | undefined)[]) =>
     assignee !== "" && (!ASSIGNEE.test(assignee) || !allowed.includes(assignee)) ? `${assignee} isn't on this project's team or one of its agents.` : undefined;
@@ -1081,6 +1131,61 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const back = withQ(`/?r=${key}`, ws.q); // the result, in the workspace it was written to
     if (a.fragment) return send(res, 200, html, `<div data-go="${esc(back)}"></div>`);
     send(res, 303, text, "", { Location: back });
+  };
+
+  // POST /tasks: the board's + Create (Isha, 2026-10-26): a new task by name, at the top or under an
+  // open one, written as the person acting, and its ticket (a description, an assignee, an estimate)
+  // when any is given, checked first so nothing is half made; the board then, with it marked. A name
+  // already taken, a task that isn't here or a word the ticket can't take says so in Create, opened
+  // again. The page's script (create.mjs) asks for the answer alone, as JSON, and keeps what was
+  // typed; kept open, it stays for the next.
+  const createTask = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
+    const form = await formOf(req, res, host);
+    if (form === undefined) return;
+    const fragment = form.get("fragment") === "1";
+    const more = form.get("more") === "1";
+    const said = (f: { ok: boolean; text: string; changed?: string[] }) => createdSaid(res, ws, f, fragment, more);
+    const actor = actorNow();
+    if (actor === undefined) return said({ ok: false, text: "Sign in first." });
+    const name = subtaskName(form.get("name"));
+    if (name === undefined) return said({ ok: false, text: "Name the task: 1 to 80 characters." });
+    const parent = (form.get("parent") ?? "").trim();
+    const asked = ticketAsked(form);
+    const words = { title: "", description: asked.description, steps: [], estimate: asked.estimate };
+    const why = await createProblem(ws, actor, name, parent, { ...words, assignee: asked.assignee });
+    if (why) return said({ ok: false, text: why });
+    const cmd: Command = { stream: ws.stream, kind: "create", entity: { type: "node", id: name }, actor, payload: parent === "" ? {} : { parent_id: parent } };
+    const got = (await dispatcher.submit(cmd)).result;
+    if (got.status !== "appended") return said({ ok: false, text: `${name} wasn't created: ${got.status === "rejected" || got.status === "refused" ? got.detail : got.status}.` });
+    const made = parent === "" ? `Created ${name}.` : `Created ${name}, under ${parent}.`;
+    const changed = [entityKey({ type: "node", id: name })];
+    const payload = ticketPayload(name, words, asked.assignee);
+    if (Object.keys(payload).length === 1) return said({ ok: true, text: made, changed }); // nothing for its ticket to say
+    const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: name, version: 1 }, actor, payload })).result;
+    said(w.status === "appended" ? { ok: true, text: made, changed } : { ok: true, text: `${made} Its details weren't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}): add them on its ticket.`, changed });
+  };
+
+  // Create's answer: JSON for the page's script; else back to the board, or to Create, opened again
+  // with it (and still ticked to keep open)
+  const createdSaid = (res: ServerResponse, ws: Workspace, f: { ok: boolean; text: string; changed?: string[] }, fragment: boolean, more: boolean) => {
+    const key = flashKey();
+    flashes.set(key, f);
+    if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+    const go = withQ(`/?r=${key}`, ws.q);
+    if (fragment) return send(res, f.ok ? 200 : 400, "application/json; charset=utf-8", JSON.stringify({ ok: f.ok, text: f.text, go }));
+    const keep = more ? "&more=1" : "";
+    send(res, 303, text, "", { Location: f.ok && !more ? go : `${go}&c=1${keep}#create` });
+  };
+  // why a new task can't be made, if it can't: its name taken, a parent that isn't here, or a word its
+  // ticket can't take
+  const createProblem = async (ws: Workspace, actor: string, name: string, parent: string, ticket: TicketAsked): Promise<string | undefined> => {
+    const { r } = await now(ws.stream);
+    const here = (id: string) => r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id);
+    if (here(name)) return `${name} is already a task here: pick another name.`;
+    if (parent !== "" && !here(parent)) return "That task isn't in this project.";
+    const { people, agents } = await assignees(ws.stream, actor);
+    const why = ticketProblem(ticket, [...people, ...agents]);
+    return why ? `${name} wasn't created: ${why}` : undefined;
   };
 
   // GET /projects/new: + New project's page (new-project.ts), opened from the board you're on, which
@@ -1185,7 +1290,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
       if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
       send(res, 303, text, "", { Location: to(k) });
     };
-    const stay = (why: string) => go({ ok: false, text: why }, (k) => withQ(`/integrations?r=${k}`, ws.q));
+    const stay = (why: string) => go({ ok: false, text: why }, (k) => withQ(`/integrations?r=${k}#delete`, ws.q));
     const actor = actorNow();
     if (actor === undefined) return stay("Sign in with GitHub first, so tira knows who deletes it. Nothing was deleted.");
     const login = who(req).login;
@@ -1207,11 +1312,13 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const renameProject = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
+    // back to General, with the result; or, saved as you typed it (autosave.mjs), the result alone
     const done = (f: { ok: boolean; text: string }) => {
+      if (form.get("fragment") === "1") return send(res, f.ok ? 200 : 400, text, f.text);
       const k = flashKey();
       flashes.set(k, f);
       if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
-      send(res, 303, text, "", { Location: withQ(`/integrations?r=${k}`, ws.q) });
+      send(res, 303, text, "", { Location: withQ(`/integrations?r=${k}#general`, ws.q) });
     };
     const actor = actorNow();
     if (actor === undefined) return done({ ok: false, text: "Sign in with GitHub first, so tira knows who renames it." });
@@ -1237,7 +1344,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const wsNow = (): Workspace => current.getStore()?.ws ?? { stream: opts.stream, q: "" };
   const integrations = integrationRoutes({
     store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, home: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links, ...(opts.site ? { site: opts.site } : {}),
-    now: async () => ({ r: (await now(wsNow().stream)).r }), formOf, people: peopleNow, projectsOf: (login) => projectsOf(login),
+    now: async () => ({ r: (await now(wsNow().stream)).r }), titleOf: async (stream: string) => workspaceOf((await now(stream)).r, stream)?.title ?? stream, formOf, people: peopleNow, projectsOf: (login) => projectsOf(login),
     send: (res, status, type, body, extra = {}) => {
       const q = wsNow().q;
       const at = extra.Location;
@@ -1346,7 +1453,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { code, ...state, iss: opts.site.origin }) });
   };
 
-  const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
+  const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "POST /tasks": createTask, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
   // an agent works while the person who connected it is still in its project and not removed (once
   // people sign in: before that, there's no one to check)
@@ -1359,7 +1466,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // The pages that are yours, not a project's: signing in, your settings and profile, your project
   // list and making a project, approving Claude. Every other page is its project's, and only its
   // people get it (src/serve/team.ts); anyone else finds no such project.
-  const YOURS = new Set(["GET /welcome", "GET /settings", "GET /u", "GET /projects", "GET /projects/new", "POST /projects", "GET /oauth/authorize", "POST /oauth/authorize", "GET /api/workspaces", "POST /onboarding",
+  const YOURS = new Set(["GET /welcome", "GET /settings", "GET /u", "GET /projects", "GET /inbox", "POST /invites", "GET /projects/new", "POST /projects", "GET /oauth/authorize", "POST /oauth/authorize", "GET /api/workspaces", "POST /onboarding",
     "GET /signup/email", "POST /signup/email", "POST /integrations/setup", "POST /integrations/setup/reveal", "POST /integrations/profile", "POST /integrations/accounts", "POST /integrations/github/disconnect",
     "GET /integrations/jira/connect", "GET /integrations/jira/callback", "POST /integrations/jira/site", "POST /integrations/jira/disconnect",
     "POST /signin/start", "GET /signin/start", "GET /signin/code", "GET /signin/github/callback", "POST /signin/poll", "POST /signout"]);

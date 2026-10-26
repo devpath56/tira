@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 964 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 1034 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -647,12 +647,12 @@ Calls made here, for the PM:
 
 ## Agents through MCP: `/mcp` and `tira mcp`
 
-Claude Code, Cursor, VS Code, Claude Desktop or any MCP client can work a project's tasks directly, each agent with its own token, which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, three steps: choose your app, name your agent (its token is made then), and do the one thing step 3 shows in that app (Cursor's and VS Code's **Add to** button, which asks first; Claude Code's command; Claude Desktop's config entry), then **Test connection**. Claude's own Connectors reach a connector over the internet, so they add tira at its public address (Hosting tira on Render, below); on this computer they can't. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call.
+Claude Code, Cursor, VS Code, Claude Desktop or any MCP client can work a project's tasks directly, each agent with its own token, which names the project and the agent. Nothing connects by default. In **Project settings → Connect agents**, **Claude Code** comes first. At tira's public address it connects by a connector in your Claude account: add tira's address as a custom connector in Claude, approve it on tira's page, and Claude Code signed in with that account picks it up (no command, no token; its command is folded in, for an API key). On this computer it connects by its command, since Claude reaches a connector over the internet (Hosting tira on Render, below). Cursor and VS Code follow (**Add to**, which asks first: name the agent, its token is made, one click); Claude Desktop's config entry is folded under them on this computer. Each way turns green on the page the moment the agent first calls tira. Only the token's fingerprint is kept, and **Revoke** there stops the agent at its next call.
 
 Claude Code, Cursor and VS Code reach `tira serve` itself, at `http://127.0.0.1:<port>/mcp`, with the token in an `Authorization: Bearer` header: it answers on 127.0.0.1 only, while `tira serve` runs. Claude Desktop can only start a program, so it starts `tira mcp`, an MCP server on stdio with the token in `TIRA_AGENT_TOKEN`, which reads the database as every tira command does (tira's own `.env`; the section says whether it would reach this board). Claude Code's, for example:
 
 ```bash
-claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer <token>'
+claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope user --transport http tira-factory-ui http://127.0.0.1:4772/mcp --header 'Authorization: Bearer <token>' && claude mcp list
 ```
 
 | Tool | What it does |
@@ -685,6 +685,7 @@ It won't start until it's safe. It needs:
 - `TIRA_SECRET_KEY` (Render makes it);
 - `TIRA_ADMIN` (the owner's GitHub login: tira's setup, and removing an account);
 - `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
+- Optional, for Jira: `TIRA_ATLASSIAN_CLIENT_ID` and `TIRA_ATLASSIAN_CLIENT_SECRET` (an Atlassian OAuth 2.0 app whose callback is `<address>/integrations/jira/callback`). Then everyone connects their own Jira with one button in Account settings; no one has to set anything up in tira.
 
 There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Welcome back! Log in** and, smaller, **New user? Sign up**, both with GitHub and always both: anyone is in at once. Sign up shows GitHub's account picker, so another GitHub account can be picked; an account tira already has is told to log in instead, and Log in with one it doesn't have, to sign up first. **Remember this browser** keeps someone logged in for 30 days; unticked, the login ends when the browser closes (12 hours at most). Each person may be admin of 5 projects here.
 
@@ -724,8 +725,10 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
 the email their GitHub profile shows, or asks for one once (only they see it). Each project is
 seen only by its own people:
 - whoever makes a project is its admin;
-- its admins add people by GitHub username in Project settings → Team (they're in at once), make
-  others admin, and remove people (their agents in it stop); a project always keeps an admin;
+- its admins invite people by GitHub username in Project settings → Collaborators; the invite
+  arrives as a letter (once over the board, and in their Inbox until they answer), and they're in
+  once they accept (Isha, 2026-10-26); admins make others admin, and remove people (their agents in
+  it stop); a project always keeps an admin;
 - your username is in Account settings, with your profile (`/u/<username>`), to send to an admin;
 - someone who isn't in a project finds no such project, and lands on their own list (`/projects`).
 
@@ -736,9 +739,8 @@ before has whoever made it as its admin (else the owner), and the people everyon
 members, until its team is first changed.
 
 Until someone signs in, every page leads to the landing and nothing can be changed. Later
-changes (another repo, Jira, Sync, the team) are in **Project settings** in the sidebar (your
-accounts, in **Account settings**), where each choice
-shows its `tira link` command under **Show the command**. `tira serve --actor NAME` still runs
+changes (another repo, Jira, collaborators) are in **Project settings** in the sidebar (your
+accounts, in **Account settings**); **Sync** is in the bar above the board. `tira serve --actor NAME` still runs
 without sign-in, as NAME, until GitHub sign-in is set up.
 
 Tokens, app keys and the secret live in the private store, never in the history or on a page:

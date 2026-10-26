@@ -38,7 +38,7 @@ export function makers(all: readonly { stream: string; metadata: { actor?: strin
 }
 
 // a change an admin makes in Project settings → Team
-export type TeamMove = "add" | "remove" | "admin" | "member";
+export type TeamMove = "add" | "remove" | "admin" | "member" | "uninvite";
 // signedUp: whether that login has signed in to tira yet (an added person sees the project once they do)
 export function changeTeam(p: ProjectPeople, move: TeamMove, login: string, signedUp: boolean): { next: ProjectPeople; said: string } | { why: string } {
   const without = (list: string[]) => list.filter((x) => !same(x, login));

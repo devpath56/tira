@@ -35,21 +35,21 @@ const copyText = async (text) => {
   }
 };
 
-// Agents: Copy puts the command (or Claude Desktop's entry) on the clipboard, or selects it for ⌘C.
-for (const b of document.querySelectorAll("button[data-copy-target]")) {
-  const target = document.getElementById(b.dataset.copyTarget ?? "");
-  if (!target) continue;
-  b.addEventListener("click", async () => {
-    if (await copyText(target.textContent ?? "")) {
-      b.dataset.done = "";
-      b.title = "Copied";
-      setTimeout(() => { delete b.dataset.done; b.title = "Copy"; }, 1500);
-      return;
-    }
-    getSelection()?.selectAllChildren(target);
-    b.title = "Press ⌘C to copy";
-  });
-}
+// Agents: Copy puts the address, the command (or Claude Desktop's entry) on the clipboard, or selects
+// it for ⌘C. Asked of the page, not each button, so a step changed in place (agents.mjs) copies too.
+document.addEventListener("click", async (e) => {
+  const b = e.target instanceof Element ? e.target.closest("button[data-copy-target]") : null;
+  const target = b ? document.getElementById(b.dataset.copyTarget ?? "") : null;
+  if (!b || !target) return;
+  if (await copyText(target.textContent ?? "")) {
+    b.dataset.done = "";
+    b.title = "Copied";
+    setTimeout(() => { delete b.dataset.done; b.title = "Copy"; }, 1500);
+    return;
+  }
+  getSelection()?.selectAllChildren(target);
+  b.title = "Press ⌘C to copy";
+});
 
 for (const row of document.querySelectorAll("[data-env]")) {
   const key = row.dataset.env;

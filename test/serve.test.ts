@@ -90,7 +90,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=colors&#38;event=UNBLOCK" data-act="UNBLOCK">Unblock<\/a>/);
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=loading_state&#38;event=COMPLETE" data-act="COMPLETE">Complete<\/a>/);
     assert.match(page.body, /<section class="drawer guide" id="guide"[^>]*data-guide>/);
-    assert.ok(!/<script(?![^>]*src="\/app\.mjs")/.test(page.body), "no inline script");
+    assert.ok(!/<script(?![^>]*src="\/(?:app|keys|coach|create|combo)\.mjs")/.test(page.body), "no inline script");
     // the same log rendered to a file: no script, no actions, no search button
     const events = await s.store.readStream(S);
     const file = renderHtml(fold(events, s.registry), S, "h", events);
@@ -210,7 +210,7 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
     assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><textarea name="steps" class="tk-in tk-steps-in" rows="1" placeholder="Add steps, one per line…"[^>]*><\/textarea><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // no Edit fold: the ticket is its form
     const form = /id="(tk-\d+)" data-ticket/.exec(ls)?.[1] ?? "";
-    assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><input type="text" name="estimate" form="${form}" class="prop-in" maxlength="10" value="" placeholder="2h, 1d…"`)); // beside, in the same form
+    assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="" placeholder="Effort" aria-label="Effort" form="${form}"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-${form}-h" form="${form}" checked>`)); // beside, in the same form: effort, a number in hours or days
     assert.match(ls, /<div class="subtasks" data-subtasks><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div>/); // none yet: just the way to add one
     assert.match(ls, /<div class="comments" data-comments><h3>Comments<\/h3><form method="post" action="\/comments" class="cm-form" data-comment-form>[^]*?placeholder="Add a comment…"/);
     assert.match(ls, /<details class="trail"><summary>History <span class="ev-seq">\d+<\/span><\/summary>/); // folded
@@ -227,12 +227,12 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     ls = dialog(saved.page, "loading_state");
     assert.match(ls, /value="Loading state" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p>/);
     assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><h3 class="tk-steps-h">Steps<\/h3><textarea name="steps" class="tk-in tk-steps-in" rows="2" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>Add the spinner\nTest on 3G<\/textarea>/);
-    assert.match(ls, /name="estimate" form="tk-\d+" class="prop-in" maxlength="10" value="2h"/); // properties, beside
+    assert.match(ls, /<span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="2" placeholder="Effort" aria-label="Effort" form="tk-\d+"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-tk-\d+-h" form="tk-\d+" checked>/); // properties, beside: its effort, 2 in hours
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
     // its parent's row for it: its title (and id), estimate and who; the parent adds the estimates up
     const parent = dialog(saved.page, "improve_visual");
     assert.match(parent, /data-subtask="node:loading_state"><span class="sub-ico s-in_progress" aria-hidden="true"><\/span><span class="sub-name">Loading state<small>loading_state<\/small><\/span><span class="sub-est">2h<\/span><span class="who" title="isha" aria-label="Assigned to isha">IS<\/span><span class="state s-in_progress">/);
-    assert.match(parent, /value="" placeholder="2h, 1d…" aria-label="Estimate" autocomplete="off"><small class="dim">2h in subtasks<\/small>/);
+    assert.match(parent, /value="" placeholder="Effort" aria-label="Effort" form="tk-\d+"><span class="effort-u"[^]*?<\/span><\/span><small class="dim">2h in subtasks<\/small>/);
     await post("/tickets", { task: "font", back, estimate: "1.5d" }); // a day is 8 hours
     assert.match(dialog((await s.http("GET", "/")).body, "improve_visual"), /<small class="dim">1d 6h in subtasks<\/small>/);
     // what a ticket can't say, and nothing written
@@ -647,12 +647,20 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
   const s = await serving();
   try {
     const block = (await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body;
-    assert.match(block, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="table"><\/label>/);
+    // a dropdown, not a wall of chips (Isha, 2026-10-26): the field as a combobox, the open tasks a list under it (combo.mjs)
+    assert.match(block, /<div class="combo" data-combo><label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="table" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="blocker-list"><\/label><ul class="combo-list" id="blocker-list" role="listbox" aria-label="Open tasks" hidden><li class="combo-opt" role="option" id="blocker-opt-0" data-fill="blocker" data-value="/);
     const open = () => [...block.matchAll(/data-fill="blocker" data-value="([^"]*)"/g)].map((m) => m[1]);
     for (const id of ["colors", "loading_state", "font", "filters", "fetch_metrics"]) assert.ok(open().includes(id), id);
     assert.ok(!open().includes("table"), "not itself");
     assert.ok(!open().includes("dashboard"), "not a task it sits under");
-    assert.match(block, /<div class="fills" data-fills><span>Or an open task:<\/span>/);
+    assert.match(block, /<\/ul><p class="combo-hint">Pick an open task, or type a new ticket(?:'|&#39;)s name\.<\/p><\/div><label class="field" data-field="reason">/);
+    assert.doesNotMatch(block, /Or an open task:/);
+    const combo = readFileSync(new URL("../src/serve/combo.mjs", import.meta.url), "utf8");
+    assert.match(combo, /const hit = q === "" \|\| \(o\.dataset\.value \?\? ""\)\.toLowerCase\(\)\.includes\(q\);/);
+    assert.match(combo, /\} else if \(e\.key === "Escape" && !list\.hidden\) \{\n    e\.preventDefault\(\);\n    e\.stopPropagation\(\);/);
+    // shut until asked for (Isha: "by default the drop down should not be open"): not on focus, as the dialog opens; a click on the field opens it or shuts it
+    assert.doesNotMatch(combo, /addEventListener\("focusin"/);
+    assert.match(combo, /if \(field\) \{\n    if \(listOf\(field\)\?\.hidden\) open\(field\);\n    else close\(field\);/);
     // the confirm page (no script) lists them as text
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=BLOCK")).body, /<p class="cmd-help">Open tasks it could wait on: metrics_card · fetch_metrics · improve_visual · colors · loading_state · font · filters<\/p>/);
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time
@@ -786,7 +794,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   // browser scripts never build markup from data
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
-  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/new-project.ts", "src/serve/onboarding.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/invites.ts", "src/serve/new-project.ts", "src/serve/onboarding.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
   assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
   assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
   // total over the class, and nothing else changes

@@ -27,9 +27,9 @@ const tokenField = (token: string) => `<input type="hidden" name="token" value="
 export function checklistHtml(p: Progress, token: string, q: string): string {
   const steps: [boolean, string, string, string][] = [
     [p.repo, "Link your GitHub repo", withQ("/integrations", q) + "#github", ""],
-    [p.tasks, "Get your first task on the board", "", "Ask your agent, or run tira create"],
+    [p.tasks, "Get your first task on the board", withQ("/", q) + "#create", ""],
     [p.agent, "Connect an agent", withQ("/integrations", q) + "#agents", ""],
-    [p.team, "Add a teammate", withQ("/integrations", q) + "#team", ""],
+    [p.team, "Add a collaborator", withQ("/integrations", q) + "#team", ""],
     [p.proven, "Finish a task with proof", "", "A commit or pull request"],
   ];
   const done = steps.filter(([d]) => d).length;
@@ -57,10 +57,11 @@ const TREE = `<svg class="ts-tree" viewBox="0 0 560 220" role="presentation">`
   + card(18, 174, 104, "Logo", "n3 done") + card(158, 174, 104, "Colours", "n4 done") + card(298, 174, 104, "Pages", "n5 doing") + card(438, 174, 104, "Deploy", "n6 todo")
   + `</svg>`;
 
-const BOARD = `<div class="tk"><div class="tk-search"><kbd>⌘K</kbd><b class="tk-type">checkout</b></div><div class="tk-cols">`
-  + `<div class="tk-col"><i>To do</i><span class="tk-card">Logo</span><span class="tk-card">Pages</span></div>`
-  + `<div class="tk-col"><i>In progress</i><span class="tk-card doing">Colours</span></div>`
-  + `<div class="tk-col"><i>Done</i><span class="tk-card done">Design</span></div></div><span class="tk-move">Checkout</span></div>`;
+// (its classes are tv-: the board's own tk- are the ticket's, and a tour sharing them broke tickets)
+const BOARD = `<div class="tv"><div class="tv-search"><kbd>⌘K</kbd><b class="tv-type">checkout</b></div><div class="tv-cols">`
+  + `<div class="tv-col"><i>To do</i><span class="tv-card">Logo</span><span class="tv-card">Pages</span></div>`
+  + `<div class="tv-col"><i>In progress</i><span class="tv-card doing">Colours</span></div>`
+  + `<div class="tv-col"><i>Done</i><span class="tv-card done">Design</span></div></div><span class="tv-move">Checkout</span></div>`;
 
 const BOLT = `<path class="tp-bolt" d="M374 18 l-9 14 h7 l-4 12 l11 -16 h-7 z"/>`;
 const PROOF = `<svg class="ts-proof" viewBox="0 0 560 220" role="presentation">`
@@ -137,18 +138,18 @@ background:radial-gradient(60% 80% at 20% 100%,color-mix(in srgb,var(--done) 16%
 .tour-scene.on .ts-tree .l3,.tour-scene.on .ts-tree .l4{animation:tour-line-c 8s ease-out infinite both}
 .tour-scene.on .ts-tree .l5,.tour-scene.on .ts-tree .l6{animation:tour-line-d 8s ease-out infinite both}
 /* 2: a card crosses the board; ⌘K finds it */
-.tk{position:absolute;inset:0;padding:14px 16px}
-.tk-search{display:flex;align-items:center;gap:8px;width:220px;height:30px;padding:0 10px;border-radius:9px;background:var(--panel);box-shadow:0 0 0 1px var(--line);font-size:13px;color:var(--mut)}
-.tk-search kbd{font:600 11px var(--mono);padding:2px 5px;border-radius:5px;background:var(--panel-2);color:var(--mut)}
-.tk-type{display:inline-block;overflow:hidden;white-space:nowrap;width:8ch;color:var(--fg);font-weight:500;border-right:1.5px solid var(--accent)}
-.tk-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
-.tk-col{display:grid;align-content:start;gap:6px;min-height:150px;padding:8px;border-radius:10px;background:color-mix(in srgb,var(--panel) 60%,transparent)}
-.tk-col i{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;font-style:normal;color:var(--dim)}
-.tk-card,.tk-move{display:block;padding:7px 9px;border-radius:8px;background:var(--panel);box-shadow:0 0 0 1px var(--line);font-size:12px;font-weight:600;border-left:3px solid var(--dim)}
-.tk-card.doing{border-left-color:var(--accent)}.tk-card.done{border-left-color:var(--done)}
-.tk-move{position:absolute;top:144px;left:calc(68% + 4px);width:calc(29% - 14px);border-left-color:var(--done);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent),0 10px 24px -10px rgba(0,0,0,.4)}
-.tour-scene.on .tk-move{animation:tour-cross 7s cubic-bezier(.5,0,.2,1) infinite both}
-.tour-scene.on .tk-type{animation:tour-type 7s steps(8) infinite both}
+.tv{position:absolute;inset:0;padding:14px 16px}
+.tv-search{display:flex;align-items:center;gap:8px;width:220px;height:30px;padding:0 10px;border-radius:9px;background:var(--panel);box-shadow:0 0 0 1px var(--line);font-size:13px;color:var(--mut)}
+.tv-search kbd{font:600 11px var(--mono);padding:2px 5px;border-radius:5px;background:var(--panel-2);color:var(--mut)}
+.tv-type{display:inline-block;overflow:hidden;white-space:nowrap;width:8ch;color:var(--fg);font-weight:500;border-right:1.5px solid var(--accent)}
+.tv-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.tv-col{display:grid;align-content:start;gap:6px;min-height:150px;padding:8px;border-radius:10px;background:color-mix(in srgb,var(--panel) 60%,transparent)}
+.tv-col i{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;font-style:normal;color:var(--dim)}
+.tv-card,.tv-move{display:block;padding:7px 9px;border-radius:8px;background:var(--panel);box-shadow:0 0 0 1px var(--line);font-size:12px;font-weight:600;border-left:3px solid var(--dim)}
+.tv-card.doing{border-left-color:var(--accent)}.tv-card.done{border-left-color:var(--done)}
+.tv-move{position:absolute;top:144px;left:calc(68% + 4px);width:calc(29% - 14px);border-left-color:var(--done);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent),0 10px 24px -10px rgba(0,0,0,.4)}
+.tour-scene.on .tv-move{animation:tour-cross 7s cubic-bezier(.5,0,.2,1) infinite both}
+.tour-scene.on .tv-type{animation:tour-type 7s steps(8) infinite both}
 /* 3: a pull request proves a task; tira closes the parent */
 .tp-parent rect{fill:var(--panel);stroke:var(--line-2)}
 .tp-parent-done,.tp-pay-done{fill:color-mix(in srgb,var(--done) 22%,var(--panel))!important;stroke:var(--done)!important}
@@ -218,7 +219,7 @@ background:radial-gradient(60% 80% at 20% 100%,color-mix(in srgb,var(--done) 16%
 @keyframes tour-flow{to{background-position:12px 0}}
 @keyframes tour-show-5{0%,50%{opacity:0}58%,90%{opacity:1}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.tour *,.tour *::before{animation:none!important;transition:none!important}}
-@media (max-width:560px){.tour-box{padding:16px 14px 14px;border-radius:18px}.tour-stage{height:190px}.tour-scene h2{font-size:19px}.tk-search{width:170px}.tour-skip{padding:8px 4px}}
+@media (max-width:560px){.tour-box{padding:16px 14px 14px;border-radius:18px}.tour-stage{height:190px}.tour-scene h2{font-size:19px}.tv-search{width:170px}.tour-skip{padding:8px 4px}}
 /* the Get started checklist, in the sidebar */
 .gs{margin:10px 0 4px;padding:12px 12px 10px;border-radius:12px;background:color-mix(in srgb,var(--accent) 7%,var(--panel));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 22%,var(--line))}
 .gs-head{display:flex;align-items:center;gap:8px;font-size:13px}.gs-head b{margin-right:auto}
