@@ -114,8 +114,9 @@ Project settings (the project's mark and name at the top), in this order:
   never shown). Only each token's fingerprint is kept; a revoked agent's next call is refused.
 - **Danger zone**, last, as GitHub keeps it: type the project's name to confirm, then **Delete this project**. It leaves
   the project list and its board closes, for everyone; tira never erases, so its history stays in
-  the log (a new version of its link, marked deleted). The project tira serve was started with
-  can't be deleted here.
+  the log (a new version of its link, marked deleted). The project tira opens on (the one tira
+  serve was started with) can't be deleted: it says so plainly, and points to renaming it in
+  General.
 
 Sync is the board's, in the bar above it, not a setting (`workspace-bar.md`); and the pages show
 buttons and pickers, never the commands they amount to (Isha, 2026-10-26). A form's result shows

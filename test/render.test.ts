@@ -16,7 +16,7 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { WritePath } from "../src/write/write-path.ts";
 import { canonicalJson, fold } from "../src/fold/fold.ts";
-import { CSS, divergenceHtml, isAgent, renderHtml } from "../src/render/html.ts";
+import { CSS, divergenceHtml, isAgent, nameHtml, renderHtml } from "../src/render/html.ts";
 import { streamView, textTree } from "../src/render/tree-view.ts";
 
 const S = "tasktree-dash";
@@ -910,7 +910,16 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
 test("after Linear: a sidebar; the project's mark and name in the header (no 'stream') with its numbers in one quiet row; audit parts in History; ideas tagged, not blue", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
-  assert.match(html, /<h1><span class="pav t\d" aria-hidden="true">T<\/span>tasktree-dash<\/h1><div class="title-acts"><a class="history-btn"[^]*?<\/a><\/div><\/div><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  assert.match(html, /<h1><span class="pav t\d" aria-hidden="true">T<\/span><span class="h1-name">tasktree-dash<\/span><\/h1><div class="title-acts"><a class="history-btn"[^]*?<\/a><\/div><\/div><ul class="stats"><li title="tasks still open"><b>2<\/b> left<\/li><li title="parents tira closed by itself">[^]*?<b>2<\/b> closed by tira<\/li><li title="parents whose every subtask is done or dropped"><b>2<\/b> parents finished<\/li>/);
+  // a long name (Isha, 2026-10-26: "longer board names are not elegantly put"): the title breaks after its dots, not mid-word; lists keep it to one line, all of it on hover
+  assert.equal(nameHtml("PM.Engg.Spec.Handoff"), "PM.<wbr>Engg.<wbr>Spec.<wbr>Handoff");
+  assert.equal(nameHtml("a_b/c."), "a_<wbr>b/<wbr>c.");
+  assert.equal(nameHtml("<b>.x"), "&#60;b&#62;.<wbr>x"); // escaped first: its entities have no dots to break at
+  assert.match(CSS, /\.ws-item b\{min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+  assert.match(CSS, /\.hero h1>\.h1-name\{min-width:0;overflow-wrap:break-word\}/);
+  assert.doesNotMatch(CSS, /\.hero h1\{[^}]*overflow-wrap:anywhere/);
+  assert.match(CSS, /\.find\{order:-1;flex:1 1 220px;min-width:0;/); // the task search, with the name in it, stays on a phone's screen
+  assert.match(CSS, /\.grp\.danger \.grp-k b\{font-family:var\(--mono\);font-size:13px;overflow-wrap:break-word\}\.grp\.danger \.grp-k\{min-width:0\}/); // Type <name> to confirm: wraps, not into the box
   assert.doesNotMatch(CSS, /content:"stream"/);
   assert.match(CSS, /\.t0\{--t:#5e6ad2\}/);
   // a sidebar on a wide screen (a top bar on a narrow one); the board page only, not a decision's page
