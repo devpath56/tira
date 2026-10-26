@@ -2,7 +2,8 @@
 // with Back, Next and Skip, the arrow keys and Esc. It opens by itself once per person (the page
 // says so: data-auto), and from the Take the tour button in Help. Closing it, either way, tells tira the person
 // has seen it, on their account; finishing it (Get started) brings the checklist back if it was
-// hidden. Focus stays inside while it's open and goes back where it was after.
+// hidden, then the board's walkthrough (coach.mjs). Focus stays inside while it's open and goes back
+// where it was after.
 const tour = document.querySelector("[data-tour]");
 if (tour instanceof HTMLElement) play(tour);
 
@@ -47,8 +48,13 @@ function play(tour) {
     tour.hidden = true;
     document.documentElement.style.overflow = "";
     tell(finished);
-    if (finished && !document.querySelector("[data-get-started]")) location.reload(); // the checklist was hidden: show it again
     if (before instanceof HTMLElement) before.focus();
+    if (!finished) return;
+    // Get started: the walkthrough of the real board follows (coach.mjs), after the page comes back
+    // when the checklist was hidden and shows it again
+    if (document.querySelector("[data-get-started]")) return void dispatchEvent(new Event("tira:coach"));
+    try { sessionStorage.setItem("tira-coach", "1"); } catch { /* no storage: no walkthrough after the reload */ }
+    location.reload();
   };
 
   back?.addEventListener("click", () => show(at - 1));

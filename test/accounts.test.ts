@@ -294,21 +294,21 @@ if (!url) {
       assert.match(cookie, /^tira_session=[0-9a-f]{64}$/);
       // the same session works on the other computer: the sign-in is in the database
       assert.equal((await b.http("GET", "/settings", undefined, cookie)).status, 200);
-      // the project's admin adds someone on one computer; the other shows them
+      // the project's admin invites someone on one computer; the other shows the invite
       await b.http("POST", "/integrations/people", "token=k&do=add&login=octo", cookie);
-      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row" data-team-member><span class="grp-k">octo<\/span>/);
+      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row team-row" data-team-invited><span class="av t\d" aria-hidden="true">O<\/span><span class="grp-k">octo<small class="grp-sub">Invited by [^<]*<\/small><\/span><span class="pill">Invited<\/span>/);
       // an email changed on one shows on the other (sealed in the database)
       await b.http("POST", "/signup/email", "token=k&back=%2Fsettings&email=isha%40work.example", cookie);
       assert.match((await a.http("GET", "/settings", undefined, cookie)).body, /name="email" value="isha@work\.example"/);
       const sealed = new PostgresAccounts(url, schema, KEY);
       assert.doesNotMatch(JSON.stringify((await sealed.query(`SELECT email FROM ${schema}.account_emails`)).rows), /work\.example/);
       // a change from a computer with its own connection shows on the next page here too
-      await sealed.saveProject("s", (p) => (p ? { admins: p.admins, members: [...p.members, "zed"] } : undefined));
+      await sealed.saveProject("s", (p) => ({ admins: p?.admins ?? ["isha-gh"], members: [...(p?.members ?? []), "zed"] })); // its people saved here first (octo is only invited)
       // two admins' changes at once don't undo each other
       const other = new PostgresAccounts(url, schema, KEY);
       await Promise.all([sealed.saveProject("s", (p) => p && { ...p, members: [...p.members, "ana"] }), other.saveProject("s", (p) => p && { ...p, members: [...p.members, "raj"] })]);
       await sealed.refresh(); // the other's write may have landed after this one's
-      assert.deepEqual([...(sealed.snapshot().projects?.s?.members ?? [])].sort(), ["ana", "octo", "raj", "zed"]);
+      assert.deepEqual([...(sealed.snapshot().projects?.s?.members ?? [])].sort(), ["ana", "raj", "zed"]); // octo is invited, not in
       // an account removed, once however often, and let back in in any case
       await sealed.block("mallory", "isha-gh");
       await other.block("mallory", "isha-gh");
@@ -325,9 +325,17 @@ if (!url) {
       await sealed.unmarkSeen("isha-gh", "tour");
       await other.refresh();
       assert.deepEqual(other.snapshot().seen, {});
+      // an invite (Isha, 2026-10-26), from one computer to the other: once, by whom; then answered
+      assert.equal(await sealed.invite("factory", "zed", "isha-gh"), true);
+      assert.equal(await other.invite("factory", "zed", "isha-gh"), false); // already invited
+      await other.refresh();
+      assert.deepEqual(other.snapshot().invites?.map((x) => [x.stream, x.login, x.by]), [["s", "octo", "isha-gh"], ["factory", "zed", "isha-gh"]]); // octo's, from the page, first
+      await other.dropInvite("factory", "ZED");
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().invites?.map((x) => x.login), ["octo"]);
       await other.close();
       await sealed.close();
-      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row" data-team-member><span class="grp-k">zed<\/span>/);
+      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row team-row" data-team-member><span class="av t\d" aria-hidden="true">Z<\/span><span class="grp-k">zed(?:<small class="grp-sub">[^<]*<\/small>)?<\/span>/);
     } finally {
       await new Promise<void>((r) => a.server.close(() => r()));
       await new Promise<void>((r) => b.server.close(() => r()));

@@ -276,10 +276,27 @@ test("Claude's connector signs in: discovery, registration, the person's approva
     assert.deepEqual((await t.tokens.list(S)).map((x) => x.agent), ["claude", "claude-2"]);
     await t.tokens.revoke(agent?.id ?? "");
     assert.equal((await t.http("POST", "/mcp", { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), type: "application/json" })).status, 401);
-    // Project settings: Claude by its Connectors, with tira's address; no local Claude Desktop entry here
+    // Project settings: Claude Code first, by a connector in the person's Claude account (tira's
+    // address, watched until a new agent calls), its command folded in; then Cursor and VS Code; no
+    // local Claude Desktop entry here
     const settings = (await t.http("GET", "/integrations")).body;
-    assert.match(settings, /<div class="agent-connector" data-agent-connector>[^]*?<pre class="agent-code" id="agent-connector-url">https:\/\/tira\.example\.com\/mcp<\/pre>/);
-    assert.doesNotMatch(settings, /data-agent-tile="claude-desktop"|data-agent-database/);
+    assert.match(settings, /<p class="grp-desc">[^<]*<\/p><\/div><\/div><div class="agent-claude" data-agent-code data-agent-connector><h3><span class="agent-icon" aria-hidden="true"><svg[^]*?<\/svg><\/span>Claude Code <span class="pill">Recommended<\/span><\/h3>[^]*?<pre class="agent-code" id="agent-connector-url">https:\/\/tira\.example\.com\/mcp<\/pre>[^]*?Customize → Connectors[^]*?<form method="post" action="\/integrations\/agents\/heard" class="agent-watch" data-agent-watch>[^]*?<input type="hidden" name="since" value="\d+">/);
+    // the connector's steps, played (cplay.mjs): five, each beside a small moving picture
+    assert.deepEqual([...settings.matchAll(/<span class="cplay-t"><b>([^<]+)<\/b>/g)].map((m) => m[1]), ["Copy tira(?:'|&#39;)s address", "Open Claude → Connectors", "Add custom connector", "Connect, then approve", "Run /mcp in Claude Code"].map((x) => x.replace("(?:'|&#39;)", "&#39;")));
+    assert.equal((settings.match(/data-cplay-scene/g) ?? []).length, 5);
+    assert.match(settings, /<script type="module" src="\/cplay\.mjs"><\/script>/);
+    assert.match(settings, /Run \/mcp in Claude Code[^]*?<summary>Claude Code with an API key, or rather the terminal\?<\/summary>[^]*?data-agent-tile="claude-code" data-agent-go>Set up by command<\/a>[^]*?<\/div><h3 class="agent-list-h">Or Cursor, VS Code<\/h3>/);
+    // the watch: nothing to say until an agent connected since then has called; then green
+    const since = Date.now();
+    assert.equal((await t.form("/integrations/agents/heard", { since: String(since), fragment: "1" })).body, "");
+    await swap(await approve());
+    const fresh = (await t.tokens.list(S)).find((x) => Date.parse(x.createdAt) >= since);
+    assert.ok(fresh);
+    assert.equal((await t.form("/integrations/agents/heard", { since: String(since), fragment: "1" })).body, "", "connected, but no call yet");
+    await t.tokens.used(fresh.id); // its first call
+    assert.match((await t.form("/integrations/agents/heard", { since: String(since), fragment: "1" })).body, new RegExp(`^<div class="flash ok" role="status" data-flash>${fresh.agent} is connected: tira heard from it just now\\. Ask it &#34;what(?:'|&#39;)s next in tira\\?&#34;</div>$`));
+    assert.equal((await t.form("/integrations/agents/heard", { since: String(Date.now() + 1000), fragment: "1" })).body, "", "an older agent doesn't count");
+    assert.doesNotMatch(settings, /data-agent-tile="claude-desktop"|data-agent-app="claude-desktop"|data-agent-database/); // not in More either
     assert.match(settings, /<b>claude-2<\/b><small>Claude(?:'|&#39;)s Connectors · tira_/);
   } finally {
     await t.done();
@@ -300,7 +317,11 @@ test("at its public address: each person may be admin of 5 projects; an agent st
     const { token } = await t.tokens.create("m1", "bot", "mallory");
     assert.equal((await mcp(token)).status, 200);
     // she makes isha an admin too; isha removes her: her agent there stops
-    await t.form("/integrations/people?w=m1", { do: "add", login: "isha-gh" });
+    await t.form("/integrations/people?w=m1", { do: "add", login: "isha-gh" }); // an invite: she accepts it
+    await t.signIn("isha-gh");
+    assert.equal((await t.http("GET", "/?w=m1")).status, 404, "invited, not in yet");
+    await t.form("/invites", { stream: "m1", do: "accept" });
+    await t.signIn("mallory");
     await t.form("/integrations/people?w=m1", { do: "admin", login: "isha-gh" });
     await t.signIn("isha-gh");
     assert.equal((await t.http("GET", "/?w=m1")).status, 200);

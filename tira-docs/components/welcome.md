@@ -40,7 +40,7 @@ fully grown, under Reduce Motion. The card's parts rise in one after another whe
 
 Who gets in (Isha, 2026-10-25): anyone with GitHub, at once, with no one to approve them. Each
 project is seen only by its own people: whoever makes a project is its admin, and its admins add
-people by GitHub username (Project settings → Team). The first person to sign in (or the one the
+people by GitHub username (Project settings → Collaborators). The first person to sign in (or the one the
 server names, `TIRA_ADMIN`) is this tira's owner: its setup, and removing an account, nothing more.
 Someone whose account the owner removed is turned back to the landing.
 

@@ -90,7 +90,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=colors&#38;event=UNBLOCK" data-act="UNBLOCK">Unblock<\/a>/);
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=loading_state&#38;event=COMPLETE" data-act="COMPLETE">Complete<\/a>/);
     assert.match(page.body, /<section class="drawer guide" id="guide"[^>]*data-guide>/);
-    assert.ok(!/<script(?![^>]*src="\/app\.mjs")/.test(page.body), "no inline script");
+    assert.ok(!/<script(?![^>]*src="\/(?:app|keys|coach|create)\.mjs")/.test(page.body), "no inline script");
     // the same log rendered to a file: no script, no actions, no search button
     const events = await s.store.readStream(S);
     const file = renderHtml(fold(events, s.registry), S, "h", events);
@@ -786,7 +786,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   // browser scripts never build markup from data
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
-  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/new-project.ts", "src/serve/onboarding.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/invites.ts", "src/serve/new-project.ts", "src/serve/onboarding.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
   assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
   assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
   // total over the class, and nothing else changes

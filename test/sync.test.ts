@@ -15,12 +15,13 @@ import { SqliteEventStore } from "../src/store/sqlite-store.ts";
 import { defaultRegistry } from "../src/tables/registry.ts";
 import { Dispatcher } from "../src/write/dispatcher.ts";
 import { fold } from "../src/fold/fold.ts";
+import { flatten, streamView } from "../src/render/tree-view.ts";
 import { linksOf, reportLines, sync, tasksNamed, workspaceOf } from "../src/sync/sync.ts";
 import { commitsOf } from "../src/fold/tickets.ts";
 import { lookedSaid, lookForCommits, proveWith } from "../src/sync/commits.ts";
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
-import { access, appKeys, atlassianAuth, emailOf, githubAuth, jiraLogin, knownLogin, saveAccess, savedProjects, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
+import { access, appKeys, atlassianAuth, dropInvite, emailOf, githubAuth, invitesNow, jiraLogin, knownLogin, saveAccess, savedProjects, saveJiraLogin, saveProject, saveSession, sessionLogin } from "../src/sync/credentials.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
 import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
@@ -503,7 +504,7 @@ async function serving(home: string, actor: string | null = "isha") {
   const post = (path: string, fields: Record<string, string>) => http("POST", path, new URLSearchParams({ token: "k", ...fields }).toString());
   // the result a write left, on the page it sends you to (following the page's own redirects)
   const flash = async (r: { headers: Record<string, string | string[] | undefined>; body: string }) => {
-    let to = String(r.headers.location ?? /data-go="([^"]+)"/.exec(r.body)?.[1] ?? "/");
+    let to = String(r.headers.location ?? /data-go="([^"]+)"/.exec(r.body)?.[1] ?? "/").replace(/#.*$/, ""); // the page, not its section
     let got = await http("GET", to);
     for (let hops = 0; got.status === 303 && hops < 3; hops++) got = await http("GET", (to = String(got.headers.location)));
     return (got.body.match(/data-flash>([^<]+)</)?.[1] ?? "").replaceAll("&#39;", "'");
@@ -546,12 +547,12 @@ test("before setup: the board points to Project settings, and Account settings o
     assert.doesNotMatch(page, /class="set-proj"|data-int="(?:github|jira|sync|delete)"/);
     assert.match(page, /<span class="grp-k">Working as<\/span><span class="grp-v">isha<\/span>/);
     assert.match(page, /GitHub sign-in isn't set up\. Add it under Setup\./);
-    assert.match(page, /<details class="grp" data-int="setup" id="setup" open>/);
+    assert.match(page, /<section class="grp" id="setup" data-int="setup"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Setup<\/h2>/);
     assert.match(page, /Callback <code>http:\/\/localhost:\d+\/integrations\/jira\/callback<\/code>/);
     // Project settings: the project's own (its GitHub, Jira, Sync and Delete), none of yours
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);
-    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "team", "github", "jira", "sync", "agents", "delete"]);
+    assert.deepEqual([...project.matchAll(/<a class="set-link" href="#(\w+)">/g)].map((m) => m[1]), ["general", "team", "github", "jira", "agents", "delete"]);
     assert.doesNotMatch(project, /data-int="(?:account|appearance|people|setup)"/);
     // without sign-in set up, tira serve's own name still acts
     assert.equal((await s.post("/integrations/link", { what: "repo", repo: "acme/app" })).status, 303);
@@ -580,7 +581,7 @@ test("Setup shows tira's app keys as Render shows secrets: dots, with Show and C
     assert.match(page, /<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira&#39;s apps">|<input class="view-radio" type="checkbox" id="setup-edit" aria-label="Edit tira's apps">/);
     assert.match(page, /<label class="act" for="setup-edit" data-env-edit>Edit<\/label>/);
     assert.match(page, /<input type="password" name="atlassian_secret" value="" autocomplete="off" spellcheck="false" placeholder="Saved: leave empty to keep">/);
-    assert.match(page, /<details class="grp" data-int="setup" id="setup">/); // both set: folded away
+    assert.match(page, /<section class="grp" id="setup" data-int="setup"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Setup<\/h2>/); // both set: still open, the only section shown when picked
     assert.match(page, /<script type="module" src="\/secrets\.mjs"><\/script>/);
     // the list or the form, never both: the form's own rule outweighs every list's display:block
     assert.match(page, /\.grp-list\.env-edit,#setup-edit:checked~\.env-list\{display:none\}#setup-edit:checked~\.env-edit\{display:block\}/);
@@ -603,9 +604,9 @@ test("Setup shows tira's app keys as Render shows secrets: dots, with Show and C
     s.githubAuthApi.login = "octo";
     s.signOut();
     await s.signInWithGitHub();
+    await s.post("/invites", { stream: S, do: "accept" }); // in the project, as a member
     const theirs = (await s.http("GET", "/settings")).body;
-    assert.doesNotMatch(theirs, /data-env-copy|data-env-show|data-setup-form|id="setup-edit"/);
-    assert.match(theirs, /<div class="grp-foot">Only this tira's owner can see or change these\.<\/div>/);
+    assert.doesNotMatch(theirs, /data-env-copy|data-env-show|data-setup-form|id="setup-edit"|data-int="setup"|href="#setup"/); // tira's apps are the owner's business alone
     const refused = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
     assert.equal(refused.status, 403);
     assert.doesNotMatch(refused.body, /SECRET/);
@@ -881,6 +882,83 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
   }
 });
 
+test("+ Create on the board (Isha, 2026-10-26): a task by name, at the top or under an open one, as the person acting; C opens it, and every move has a key (keys.mjs); after the tour, a walkthrough of the real board (coach.mjs)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tira-home-"));
+  const s = await serving(home);
+  try {
+    let board = (await s.http("GET", "/")).body;
+    // the button beside History, with its key; the dialog, and the shortcuts, on the page
+    assert.match(board, /<div class="title-acts"><a class="history-btn"[^]*?<\/a><a class="act primary create-btn" href="#create" data-create-open><svg[^]*?<\/svg>Create <kbd>C<\/kbd><\/a><\/div>/);
+    // Create, a composer after Linear's: the project and New task, the name large, a description, its
+    // properties as pills (To do, Assignee, Estimate, Parent), "Keep open for the next one" and Create task (⌘↵)
+    assert.match(board, /<section class="drawer create-dialog" id="create" aria-label="Create a task" role="dialog" aria-modal="true" data-create>[^]*?<form method="post" action="\/tasks" class="composer-form" data-create-form><input type="hidden" name="token" value="k"><header class="composer-top"><span class="composer-crumb">[^]*?<b>New task<\/b><\/span>[^]*?<input class="composer-title" type="text" name="name" required maxlength="80"[^>]*placeholder="Task name"[^>]*><textarea class="composer-desc" name="description"/);
+    assert.match(board, /<div class="composer-props"><span class="prop-pill is-fixed" title="Every task starts in To do"><i class="prop-dot" aria-hidden="true"><\/i>To do<\/span><label class="prop-pill" data-pill="Assignee"><svg[^]*?<\/svg><span class="prop-said">Assignee<\/span><select name="assignee" aria-label="Assignee"><option value="">No assignee<\/option><optgroup label="People">/);
+    assert.match(board, /<select name="estimate" aria-label="Estimate"><option value="">No estimate<\/option><option value="30m">30m<\/option>/);
+    assert.doesNotMatch(board, /<option[^>]*>(?:Assignee|Estimate|Parent)<\/option>/); // a pill's name is never one of its choices
+    assert.match(board, /<label class="composer-more"><input type="checkbox" name="more" value="1"><span>Keep open for the next one<\/span><\/label>[^]*?<button class="act primary composer-go" type="submit">Create task <kbd>⌘<\/kbd><kbd>↵<\/kbd><\/button>/);
+    assert.match(board, /<script type="module" src="\/create\.mjs"><\/script>/);
+    assert.equal((await s.http("GET", "/create.mjs")).status, 200);
+    assert.match(board, /<section class="drawer keys-dialog" id="keys"[^]*?<h2>Keyboard shortcuts<\/h2>[^]*?<dt><kbd>C<\/kbd><\/dt><dd>Create a task<\/dd>[^]*?<dt><kbd>G<\/kbd> <span>then<\/span> <kbd>S<\/kbd><\/dt><dd>Project settings<\/dd>/);
+    assert.match(board, /<script type="module" src="\/keys\.mjs"><\/script><script type="module" src="\/coach\.mjs"><\/script>/);
+    for (const asset of ["/keys.mjs", "/coach.mjs"]) assert.equal((await s.http("GET", asset)).status, 200, asset);
+    assert.match(board, /html\{-webkit-text-size-adjust:100%;background:var\(--bg\);overscroll-behavior:none\}/); // no Safari bounce
+    // what Create says, in Create, when it opens again (c=1) with why
+    const inCreate = async (res: { headers: Record<string, string | string[] | undefined> }) =>
+      /data-create-said>([^<]*)</.exec((await s.http("GET", String(res.headers.location).replace(/#.*$/, ""))).body)?.[1]?.replaceAll("&#39;", "'");
+    // a task at the top, then one under it; the same name twice, or under a task that isn't here, refused
+    const made = await s.post("/tasks", { name: "contact_form", parent: "" });
+    assert.match(String(made.headers.location), /^\/\?r=\d+$/);
+    assert.equal(await s.flash(made), "Created contact_form.");
+    const rows = flatten(streamView(fold(await s.store.readStream(S), s.registry), S).roots);
+    assert.deepEqual(rows.find((x) => x.id === "contact_form")?.state, "unstarted");
+    assert.equal(await s.flash(await s.post("/tasks", { name: "form_fields", parent: "contact_form" })), "Created form_fields, under contact_form.");
+    const tree = flatten(streamView(fold(await s.store.readStream(S), s.registry), S).roots);
+    assert.equal((tree.find((x) => x.id === "form_fields")?.depth ?? 0) - (tree.find((x) => x.id === "contact_form")?.depth ?? 0), 1, "under contact_form");
+    const again = await s.post("/tasks", { name: "contact_form" });
+    assert.match(String(again.headers.location), /^\/\?r=\d+&c=1#create$/); // Create again, with why in it
+    assert.equal(await inCreate(again), "contact_form is already a task here: pick another name.");
+    assert.equal(await inCreate(await s.post("/tasks", { name: "x_y", parent: "nowhere" })), "That task isn't in this project.");
+    assert.equal(await inCreate(await s.post("/tasks", { name: "" })), "Name the task: 1 to 80 characters.");
+    // the dialog offers the open tasks to put a new one under
+    board = (await s.http("GET", "/")).body;
+    assert.match(board, /<select name="parent" aria-label="Parent"><option value="">No parent<\/option>(?:<option value="[^"]+">[^<]+<\/option>)*<option value="contact_form">contact_form<\/option><option value="form_fields">form_fields<\/option><\/select>/);
+    // its ticket with it: a description, an estimate; checked first, so nothing is half made
+    assert.equal(await s.flash(await s.post("/tasks", { name: "contact_page", description: "Name, email, message.", estimate: "2h" })), "Created contact_page.");
+    assert.match((await s.http("GET", "/")).body, /aria-label="contact_page"[^]*?Name, email, message\.[^]*?name="estimate"[^>]*value="2h"/);
+    assert.equal(await inCreate(await s.post("/tasks", { name: "x_task", estimate: "soon" })), "x_task wasn't created: A time estimate is a number and a unit: 30m, 2h, 1d or 1w.");
+    assert.ok(!flatten(streamView(fold(await s.store.readStream(S), s.registry), S).roots).some((x) => x.id === "x_task"), "nothing half made");
+    // the page's script gets the answer alone; kept open, it opens again, ticked, with what happened
+    const fragment = await s.post("/tasks", { name: "y_task", fragment: "1" });
+    assert.equal(fragment.status, 200);
+    const said = JSON.parse(fragment.body) as { ok: boolean; text: string; go: string };
+    assert.deepEqual([said.ok, said.text], [true, "Created y_task."]);
+    assert.match(said.go, /^\/\?r=\d+$/);
+    const more = await s.post("/tasks", { name: "z_task", more: "1" });
+    assert.match(String(more.headers.location), /^\/\?r=\d+&c=1&more=1#create$/);
+    const again2 = (await s.http("GET", String(more.headers.location).replace(/#.*$/, ""))).body;
+    assert.match(again2, /<input type="checkbox" name="more" value="1" checked><span>Keep open for the next one<\/span><\/label><span class="composer-said" role="status" data-create-said>Created z_task\.<\/span>/);
+    const create = readFileSync(new URL("../src/serve/create.mjs", import.meta.url), "utf8");
+    assert.match(create, /body\.set\("fragment", "1"\);/);
+    assert.match(create, /if \(!\(more instanceof HTMLInputElement && more\.checked\)\) return location\.assign\(answer\.go\);/);
+    // the pills' own menu: the picker under each holds the value; Esc closes the menu, not Create
+    assert.match(create, /pick\.value = b\.dataset\.value \?\? "";\n      pillSays\(pill\);/);
+    assert.match(create, /else if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); close\(\); pill\.focus\(\); \}/);
+    assert.match(board, /\.js \.composer \.prop-pill\[data-pill\] select\{display:none\}/);
+    // the page's scripts: keys never while typing; S, E and B act in the open task; the walkthrough
+    // follows the tour's Get started
+    const keys = readFileSync(new URL("../src/serve/keys.mjs", import.meta.url), "utf8");
+    assert.match(keys, /if \(e\.defaultPrevented \|\| e\.metaKey \|\| e\.ctrlKey \|\| e\.altKey \|\| typing\(e\.target\)\) return;/);
+    assert.match(keys, /const TASK_KEYS = \{ s: "START", e: "COMPLETE", b: "BLOCK" \};/);
+    assert.match(keys, /if \(key === "c" && document\.getElementById\("create"\)\) \{\n    location\.hash = "create";/);
+    const coach = readFileSync(new URL("../src/serve/coach.mjs", import.meta.url), "utf8");
+    assert.deepEqual([...coach.matchAll(/^  \["([^"]+)", "([^"]+)"/gm)].map((m) => m[2]), ["Create a task", "Kanban or Graph", "Find anything", "Needs you", "Project settings"]);
+    assert.match(readFileSync(new URL("../src/serve/tour.mjs", import.meta.url), "utf8"), /if \(document\.querySelector\("\[data-get-started\]"\)\) return void dispatchEvent\(new Event\("tira:coach"\)\);/);
+  } finally {
+    await s.done();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("access: anyone with GitHub signs up, with an email, and is in at once; each project is seen only by its own people, whose admins add them by username; the owner can remove an account", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home, null);
@@ -909,10 +987,15 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     // Account settings: the email GitHub's profile shows, the username people add you by, and
     // (for the owner) removed accounts; no list of who may sign in
     let page = (await s.http("GET", "/settings")).body;
-    assert.match(page, /<form method="post" action="\/signup\/email" class="grp-row" data-email><input type="hidden" name="token" value="k"><input type="hidden" name="back" value="\/settings"><span class="grp-k">Email<\/span><input type="email" name="email" value="isha@example\.com"/);
+    assert.match(page, /<form method="post" action="\/signup\/email" class="grp-row" data-email data-autosave><input type="hidden" name="token" value="k"><input type="hidden" name="back" value="\/settings"><span class="grp-k">Email<\/span><input type="email" name="email" value="isha@example\.com"[^>]*><span class="save-state" data-save-state aria-live="polite"><\/span><\/form>/);
+    // saved as you type: the page's script asks, and gets the result alone
+    const typed = await s.post("/signup/email", { email: "isha@typed.example", back: "/settings", fragment: "1" });
+    assert.deepEqual([typed.status, typed.body], [200, "Your email is isha@typed.example now."]);
+    const wrong = await s.post("/signup/email", { email: "nope", back: "/settings", fragment: "1" });
+    assert.deepEqual([wrong.status, wrong.body], [400, "That isn't an email address."]);
     assert.match(page, /<div class="grp-row" data-username><span class="grp-k">Username<\/span><code class="grp-v" id="my-username">isha-gh<\/code><button type="button" class="env-btn" data-copy-target="my-username"[^>]*>[^]*?<\/button><a class="how" href="\/u\/isha-gh">Profile<\/a><\/div>/);
     assert.match(page, /<span class="pf-who"><b>Isha<\/b><span>@isha-gh · signed in with GitHub<\/span><\/span><span class="pill">Owner<\/span>/);
-    assert.match(page, /<section class="grp" id="accounts" data-int="accounts"><h2 class="grp-h">Removed accounts<\/h2>/);
+    assert.match(page, /<section class="grp" id="accounts" data-int="accounts"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Removed accounts<\/h2>/);
     assert.doesNotMatch(page, /data-people|data-add-person|data-admin-contact/);
     assert.equal(await s.flash(await s.post("/signup/email", { email: "isha@work.example", back: "/settings" })), "Your email is isha@work.example now.");
     assert.equal(await s.flash(await s.post("/signup/email", { email: "not an email", back: "/settings" })), "That isn't an email address.");
@@ -958,23 +1041,58 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     assert.match(String(made.headers.location), /^\/\?r=\d+&w=octo-app$/);
     assert.deepEqual(savedProjects(s.env)["octo-app"], { admins: ["octo"], members: [] });
     assert.match((await s.http("GET", "/projects")).body, /<a class="grp-row" href="\/\?w=octo-app" data-my-project="octo-app">[^]*?octo-app<\/span><span class="grp-v">No tasks yet<\/span><span class="pill">Admin<\/span><\/a>/);
+    // Jira is theirs to connect, with no admin to ask (Isha, 2026-10-26); until whoever runs this
+    // tira adds its Atlassian app, it says so, and only the owner is sent to Setup
+    const octoJira = (await s.http("GET", "/integrations?w=octo-app")).body;
+    const octoSettings = (await s.http("GET", "/settings")).body;
+    assert.match(octoJira, /Whoever runs this tira turns Jira on, once, for everyone\./);
+    assert.match(octoSettings, /Not available on this tira yet/);
+    assert.doesNotMatch(octoJira + octoSettings, /href="\/settings#setup"/);
     const octo = s.cookie();
     await as("isha-gh");
+    const isha = s.cookie();
+    assert.match((await s.http("GET", "/integrations")).body, /Add tira(?:'|&#39;)s Atlassian app in <a class="how" href="\/settings#setup">Account settings<\/a>\./);
     assert.equal((await s.http("GET", "/?w=octo-app")).status, 404);
     assert.equal((JSON.parse((await s.http("GET", "/api/workspaces")).body) as { stream: string }[]).some((w) => w.stream === "octo-app"), false);
-    // its admin adds isha by username (any case, with or without @): she sees it at once
+    // its admin invites isha by username (any case, with or without @) (Isha, 2026-10-26): an invite,
+    // not a way in; she sees the project once she accepts it
     s.signIn(octo);
-    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "@ISHA-GH" })), "Added isha-gh: they see this project now.");
-    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "isha-gh" })), "isha-gh is already in this project.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "@ISHA-GH" })), "Invited isha-gh: they'll see this project once they accept.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "isha-gh" })), "isha-gh is already invited.");
     assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "not a login!" })), "That isn't a GitHub username.");
+    assert.match((await s.http("GET", "/integrations?w=octo-app")).body, /<div class="grp-row team-row" data-team-invited><span class="av t\d" aria-hidden="true">I<\/span><span class="grp-k">isha-gh<small class="grp-sub">Invited by octo<\/small><\/span><span class="pill">Invited<\/span>/);
+    // isha: a letter over the board, once, and in her Inbox, with a count, until she answers
+    s.signIn(isha);
+    assert.equal((await s.http("GET", "/?w=octo-app")).status, 404, "invited, not in yet");
+    await s.post("/integrations/link", { what: "repo", repo: "acme/home" }); // a board of her own to land on
+    const first = (await s.http("GET", "/")).body;
+    assert.match(first, /<div class="letter-pop" role="dialog" aria-modal="true" aria-label="An invite" data-letter-pop>[^]*?<article class="letter" data-invite="octo-app">[^]*?<b>octo<\/b> invited you to work on octo-app with them\.[^]*?<button class="act primary" type="submit" name="do" value="accept">Accept<\/button><button class="act" type="submit" name="do" value="decline">Decline<\/button>/);
+    assert.match(first, /<a class="side-link" href="\/inbox" data-inbox><svg[^]*?<\/svg>Inbox<span class="side-n">1<\/span><\/a>/);
+    assert.doesNotMatch((await s.http("GET", "/")).body, /data-letter-pop/); // once
+    assert.match((await s.http("GET", "/inbox")).body, /<div class="letters" data-inbox><article class="letter" data-invite="octo-app">/);
+    // she accepts: the project is on her list, and its board opens
+    const accepted = await s.post("/invites", { stream: "octo-app", do: "accept" });
+    assert.match(String(accepted.headers.location), /^\/\?w=octo-app&r=\d+$/);
+    assert.equal(await s.flash(accepted), "You joined octo-app: it's on your project list.");
+    assert.equal((await s.http("GET", "/?w=octo-app")).status, 200);
+    assert.match((await s.http("GET", "/inbox")).body, /data-inbox-empty/);
+    assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "accept" })), "That invite isn't yours to answer, or it's been answered.");
+    // its admin again: she's in; an invite can be taken back
+    s.signIn(octo);
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "isha-gh" })), "isha-gh is already in this project.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "raj" })), "Invited raj: the invite waits for them to sign up with GitHub and accept.");
+    assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "accept" })), "That invite isn't yours to answer, or it's been answered."); // raj's, not octo's
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "uninvite", login: "raj" })), "Took back the invite to raj.");
+    assert.ok(!invitesNow(s.env).some((x) => x.login === "raj"), "taken back");
     // and makes her admin; then steps down; the last admin can't leave
     assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "admin", login: "isha-gh" })), "isha-gh is an admin now: they can add and remove people too.");
     assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "member", login: "octo" })), "octo is a member now.");
-    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "raj" })), "Only this project's admins can change its team.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "raj" })), "Only this project's admins can change its collaborators.");
     // a member works on it but doesn't run it
     const settings = (await s.http("GET", "/integrations?w=octo-app")).body;
     assert.match(settings, /<span class="grp-v">Only this project(?:'|&#39;)s admins can delete it<\/span>/);
-    assert.match(settings, /Only this project(?:'|&#39;)s admins add people: ask isha-gh\./);
+    assert.match(settings, /Only this project(?:'|&#39;)s admins add or remove collaborators: ask isha-gh\./);
+    assert.doesNotMatch(settings, /data-team-remove|aria-label="Role of/); // a member sees roles, changes none
     assert.doesNotMatch(settings, /data-team-add/);
     assert.equal(await s.flash(await s.post("/projects/rename?w=octo-app", { title: "Octo" })), "Only this project's admins can rename it.");
     assert.equal(await s.flash(await s.post("/projects/delete?w=octo-app", { confirm: "octo-app" })), "Only this project's admins can delete it. Nothing was deleted.");
@@ -994,6 +1112,15 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     const given = await s.post("/signup/email", { email: "quiet@example.com" });
     assert.match(String(given.headers.location), /^\/projects\?r=\d+$/);
     assert.equal((await s.http("GET", "/projects")).status, 200);
+    // an invite declined: the letter goes, and the project stays theirs, not quiet's
+    const quietNow = s.cookie();
+    await as("isha-gh");
+    await s.post("/integrations/people?w=octo-app", { do: "add", login: "quiet" });
+    s.signIn(quietNow);
+    assert.match((await s.http("GET", "/projects")).body, /<div class="letters" data-invites><article class="letter" data-invite="octo-app">/);
+    assert.equal(await s.flash(await s.post("/invites", { stream: "octo-app", do: "decline" })), "Declined the invite to octo-app.");
+    assert.doesNotMatch((await s.http("GET", "/projects")).body, /data-invites/);
+    assert.equal((await s.http("GET", "/?w=octo-app")).status, 404);
     // a profile, for anyone signed in: the username to copy, never the email
     const profile = (await s.http("GET", "/u/isha-gh")).body;
     assert.match(profile, /<code class="grp-v" id="their-username">isha-gh<\/code>/);
@@ -1046,14 +1173,19 @@ test("a first-time person's welcome on the board: an animated tour that opens by
     assert.equal((board.match(/data-tour-scene/g) ?? []).length, 5);
     for (const t of ["Your board, and the whole tree", "Done means proven", "Agents work beside you", "Bring your team"]) assert.match(board, new RegExp(`<h2 id="tour-t\\d">${t}</h2>`));
     assert.match(board, /<script type="module" src="\/tour\.mjs"><\/script>/);
-    // Take the tour: a button in Help, as help menus have it, not another link in the sidebar
-    assert.match(board, /<div class="guide-acts"><button type="button" class="act primary" data-tour-open>Take the tour<\/button><\/div><\/div><\/section>/);
+    // Take the tour: a button in Help, as help menus have it, not another link in the sidebar; beside
+    // it the board's walkthrough again (coach.mjs) and the keyboard shortcuts (Isha, 2026-10-26)
+    assert.match(board, /<div class="guide-acts"><button type="button" class="act primary" data-tour-open>Take the tour<\/button><button type="button" class="act" data-coach-open>Show me around<\/button><a class="act" href="#keys">Keyboard shortcuts<\/a><\/div><\/div><\/section>/);
     assert.doesNotMatch(/<nav class="top"[^]*?<\/nav>/.exec(board)?.[0] ?? "", /data-tour-open/);
+    // the tour's picture has classes of its own (tv-): sharing the ticket's tk-cols once forced every
+    // ticket into three columns
+    assert.match(board, /\.tv-cols\{display:grid;grid-template-columns:repeat\(3,1fr\)/);
+    assert.doesNotMatch(board, /\.tk-cols\{[^}]*repeat\(3/);
     // the checklist: the linked repo is ticked; the rest link to where they're done
     assert.match(board, /<section class="gs" aria-label="Get started" data-get-started><div class="gs-head"><b>Get started<\/b><span class="gs-count">\d of 5<\/span>/);
     assert.match(board, /<li class="done"><i aria-hidden="true"><\/i><span>Link your GitHub repo<\/span>/);
     assert.match(board, /<li><i aria-hidden="true"><\/i><a href="\/integrations#agents">Connect an agent<\/a>/);
-    assert.match(board, /<li><i aria-hidden="true"><\/i><a href="\/integrations#team">Add a teammate<\/a>/);
+    assert.match(board, /<li><i aria-hidden="true"><\/i><a href="\/integrations#team">Add a collaborator<\/a>/);
     // closing it, either way, is remembered on the account: not again, in this browser or another
     assert.equal((await s.post("/onboarding", { do: "tour-seen", fragment: "1" })).status, 204);
     board = (await s.http("GET", "/")).body;
@@ -1095,8 +1227,10 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     // the repo, from your repos
     let page = (await s.http("GET", "/integrations")).body;
     assert.match(page, /<select name="repo" aria-label="Repository"><option value="acme\/app">acme\/app<\/option><option value="acme\/web">acme\/web<\/option><\/select><button class="act primary" type="submit">Link<\/button>/);
-    assert.match(page, /<details class="int-cmd"><summary>Show the command<\/summary><code>tira link --repo acme\/app<\/code>/);
+    assert.doesNotMatch(page, /int-cmd|Show the command|tira link|tira sync/); // buttons and pickers, no commands (Isha, 2026-10-26)
+    assert.doesNotMatch(page, /GitHub<span class="set-dot"/);
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "repo", repo: "acme/app" })), "Linked (version 1).");
+    assert.match((await s.http("GET", "/integrations")).body, /href="#github"><svg[^]*?<\/svg>GitHub<span class="set-dot" title="Linked"><span class="vh"> \(linked\)<\/span><\/span><\/a>/); // linked: a green dot in the list
     // a new project, before Jira is connected: your repos to pick from, and a way to connect Jira
     let fresh = (await s.http("GET", "/projects/new")).body;
     assert.match(fresh, /<input name="repo" value="" required pattern="[^"]+" placeholder="owner\/name" autocomplete="off" spellcheck="false" list="np-repos" data-np-repo><\/label><datalist id="np-repos"><option value="acme\/app"><option value="acme\/web"><\/datalist>/);
@@ -1336,7 +1470,7 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.match(again.body, /data-np-problem>tablet was a project here, since deleted: pick another name\.<\/div>/);
     // renaming a project, from its settings: what people see changes everywhere; its address, its
     // colour and its history keep the name it was made with; two projects can't share a name
-    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<form method="post" action="\/projects\/rename\?w=mobile" class="grp-list" data-rename-project><input type="hidden" name="token" value="k"><label class="grp-row"><span class="grp-k">Project name<\/span><input type="text" name="title" value="mobile" required/);
+    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<form method="post" action="\/projects\/rename\?w=mobile" class="grp-list" data-rename-project data-autosave><input type="hidden" name="token" value="k"><label class="grp-row"><span class="grp-k">Project name<\/span><input type="text" name="title" value="mobile" required/);
     assert.equal(await s.flash(await s.post("/projects/rename?w=mobile", { title: "  Mobile   App " })), "Renamed to Mobile App. Its address and history keep mobile.");
     assert.equal(await s.flash(await s.post("/projects/rename?w=mobile", { title: "TASKTREE-DASH" })), "Another project is already called TASKTREE-DASH: pick another name.");
     assert.equal(await s.flash(await s.post("/projects/rename?w=mobile", { title: "" })), "A project's name is 1 to 80 characters, with no control characters.");
@@ -1361,11 +1495,33 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     const settings = (await s.http("GET", "/integrations?w=mobile")).body;
     assert.match(settings, /<span class="grp-k">Project id<\/span><code class="grp-v" data-project-id>mobile<\/code><\/div><div class="grp-foot">The id never changes: it(?:'|&#39;)s in the project(?:'|&#39;)s address and its tickets(?:'|&#39;) keys \(<code>TIRA_MOBILE_1<\/code>, …\)\./);
     // whoever made it is its admin, and adds people here
-    assert.match(settings, /<section class="grp" id="team" data-int="team">[^]*?<div class="grp-row" data-team-admin><span class="grp-k">isha-gh \(you\)<\/span><span class="pill">Admin<\/span>[^]*?<form method="post" action="\/integrations\/people\?w=mobile" class="grp-row" data-team-add>/);
+    assert.match(settings, /<section class="grp" id="team" data-int="team"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Collaborators<\/h2>[^]*?<div class="grp-row team-row" data-team-admin><span class="av t\d" aria-hidden="true">I<\/span><span class="grp-k">isha-gh \(you\)<\/span><span class="pill">Admin<\/span><\/div>[^]*?<form method="post" action="\/integrations\/people\?w=mobile" class="grp-row team-add" data-team-add><input type="hidden" name="token" value="k"><input type="hidden" name="do" value="add"><span class="grp-k">Invite collaborators<\/span>/);
+    // the only admin: nothing on their own row to demote or remove themselves (a project keeps an admin)
+    assert.doesNotMatch(settings, /aria-label="Role of isha-gh"|aria-label="Remove isha-gh"/);
     const added = await s.post("/integrations/people?w=mobile", { do: "add", login: "devansh" });
-    assert.match(String(added.headers.location), /^\/integrations\?r=\d+&w=mobile$/); // back to Project settings
-    assert.equal(await s.flash(added), "Added devansh: they see this project once they sign up with GitHub.");
-    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<div class="grp-row" data-team-member><span class="grp-k">devansh<\/span><span class="grp-v">Not signed up yet<\/span><form method="post" action="\/integrations\/people\?w=mobile" class="inline"><input type="hidden" name="token" value="k"><input type="hidden" name="do" value="admin"><input type="hidden" name="login" value="devansh"><button class="how" type="submit">Make admin<\/button><\/form>/);
+    assert.match(String(added.headers.location), /^\/integrations\?r=\d+&w=mobile#team$/); // back to Project settings' Team, the project kept before the section
+    assert.equal(await s.flash(added), "Invited devansh: the invite waits for them to sign up with GitHub and accept.");
+    assert.deepEqual(invitesNow(s.env).map((x) => [x.stream, x.login, x.by]), [["mobile", "devansh", "isha-gh"]]);
+    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<div class="grp-row team-row" data-team-invited><span class="av t\d" aria-hidden="true">D<\/span><span class="grp-k">devansh<small class="grp-sub">Invited by isha-gh · not signed up yet<\/small><\/span><span class="pill">Invited<\/span><form method="post" action="\/integrations\/people\?w=mobile" class="inline" data-confirm="Take back the invite to devansh\?">[^]*?aria-label="Take back the invite to devansh"/);
+    // once devansh has accepted (as /invites does): a member, with a role picker that saves when
+    // changed, and Remove, asked first (forms.mjs)
+    await saveProject("mobile", (p) => ({ admins: p?.admins ?? ["isha-gh"], members: ["devansh"] }), s.env);
+    await dropInvite("mobile", "devansh", s.env);
+    const withDevansh = (await s.http("GET", "/integrations?w=mobile")).body;
+    assert.match(withDevansh, /<div class="grp-row team-row" data-team-member><span class="av t\d" aria-hidden="true">D<\/span><span class="grp-k">devansh<small class="grp-sub">Not signed up yet<\/small><\/span><form method="post" action="\/integrations\/people\?w=mobile" class="inline" data-autosubmit><input type="hidden" name="token" value="k"><input type="hidden" name="login" value="devansh"><select name="do" class="role" aria-label="Role of devansh"><option value="admin">Admin<\/option><option value="member" selected>Member<\/option><\/select><noscript><button class="how" type="submit">Change<\/button><\/noscript><\/form><form method="post" action="\/integrations\/people\?w=mobile" class="inline" data-confirm="Remove devansh from mobile-app\? They won(?:'|&#39;)t see it any more, and their agents here stop\.">[^]*?<button class="team-del" type="submit" aria-label="Remove devansh" title="Remove" data-team-remove><svg[^]*?<\/svg><\/button><\/form><\/div>/);
+    assert.match(withDevansh, /<script type="module" src="\/forms\.mjs"><\/script>/);
+    assert.equal((await s.http("GET", "/forms.mjs")).status, 200);
+    // the page's script: Remove goes ahead only on a yes; a role picker saves when it changes
+    const forms = readFileSync(new URL("../src/serve/forms.mjs", import.meta.url), "utf8");
+    assert.match(forms, /if \(!window\.confirm\(form\.dataset\.confirm \?\? "Are you sure\?"\)\) e\.preventDefault\(\);/);
+    assert.match(forms, /form\.querySelector\("select"\)\?\.addEventListener\("change", \(\) => form\.requestSubmit\(\)\);/);
+    // two admins: now each may step down, still never remove themselves here
+    const promoted = await s.post("/integrations/people?w=mobile", { do: "admin", login: "devansh" });
+    assert.match(String(promoted.headers.location), /^\/integrations\?r=\d+&w=mobile#team$/); // back to Collaborators
+    assert.equal(await s.flash(promoted), "devansh is an admin now: they can add and remove people too.");
+    const twoAdmins = (await s.http("GET", "/integrations?w=mobile")).body;
+    assert.match(twoAdmins, /aria-label="Role of isha-gh"/);
+    assert.doesNotMatch(twoAdmins, /aria-label="Remove isha-gh"/);
   } finally {
     await s.done();
   }
@@ -1383,16 +1539,42 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut"><main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Account settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
     assert.match(project, /<main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
-    const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    // yours: you and your accounts in one list, then Setup, Appearance last (Removed accounts, for
-    // the owner, before it), on the page in that order; each page a readable column (Apple's
-    // settings), never stretched across the window
-    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["appearance", "Appearance"]]);
+    const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">(?:<svg[^]*?<\/svg>)?([^<]+)(?:<span class="set-dot"[^>]*><span class="vh">[^<]*<\/span><\/span>|<span class="set-count">[^<]*<\/span>)?<\/a>/g)].map((m) => [m[1], m[2]]); // each with its icon, and a dot or a count
+    // yours: your profile, your GitHub and Jira, how tira looks, and (for whoever runs it: here, with
+    // no sign-in, the one person) tira's own apps; each page a readable column (Apple's settings),
+    // never stretched across the window
+    assert.deepEqual(nav(page), [["profile", "Profile"], ["linked", "GitHub and Jira"], ["appearance", "Appearance"], ["setup", "Setup"]]);
     const at = (id: string) => page.indexOf(`data-int="${id}"`);
-    assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("appearance"), "Account, Setup, then Appearance");
+    assert.ok(at("profile") > 0 && at("profile") < at("linked") && at("linked") < at("appearance") && at("appearance") < at("setup"), "Profile, GitHub and Jira, Appearance, then Setup");
+    // one section at a time, as Chrome's settings (Isha, 2026-10-26): the one the address names, else
+    // the first; the list on the left marks it (sections.mjs)
+    assert.match(page, /<section class="grp" id="profile" data-default data-int="profile">/);
+    assert.match(project, /<section class="grp" id="general" data-default data-int="general">/);
+    assert.match(page, /\.set-main>\.grp\{display:none;scroll-margin-top:100vh\}\.set-main>\.grp:target,\.set-main:not\(:has\(>\.grp:target\)\)>\.grp\[data-default\]\{display:block\}/);
+    assert.match(page, /<script type="module" src="\/sections\.mjs"><\/script><script type="module" src="\/autosave\.mjs"><\/script><script type="module" src="\/forms\.mjs"><\/script>/);
+    // a form's result belongs to its section: it goes when another is picked (sections.mjs)
+    assert.match(readFileSync(new URL("../src/serve/sections.mjs", import.meta.url), "utf8"), /window\.addEventListener\("hashchange", \(\) => \{\n  mark\(\);\n  top\(\);\n  result\?\.remove\(\);\n\}\);/);
+    assert.doesNotMatch(project, /id="sync"|data-int="sync"|data-sync/); // Sync is the board's (Isha, 2026-10-26)
+    // names save as you type, and say so quietly: no Save or Rename buttons
+    assert.match(page, /<form method="post" action="\/integrations\/profile" class="grp-row" data-display-name data-autosave>[^]*?<span class="save-state" data-save-state aria-live="polite"><\/span><\/form>/);
+    for (const f of [/<form[^>]*data-display-name[^]*?<\/form>/, /<form[^>]*data-email[^]*?<\/form>/, /<form[^>]*data-rename-project[^]*?<\/form>/])
+      assert.doesNotMatch(f.exec(page + project)?.[0] ?? "", /<button/); // Setup's app keys keep their Save: half-typed keys aren't saved
+    const saved = await s.post("/integrations/profile", { name: "Isha P", fragment: "1" });
+    assert.deepEqual([saved.status, saved.body], [200, "You're shown as Isha P now."]);
+    await s.post("/integrations/profile", { name: "", fragment: "1" }); // back to the usual name
+    const renamed = await s.post("/projects/rename", { title: "Site", fragment: "1" });
+    assert.deepEqual([renamed.status, renamed.body], [200, `Renamed to Site. Its address and history keep ${S}.`]);
+    const unnamed = await s.post("/projects/rename", { title: "", fragment: "1" });
+    assert.equal(unnamed.status, 400);
     assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
-    assert.deepEqual(nav(project), [["general", "General"], ["team", "Team"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "setup", "appearance"]], [project, ["general", "team", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    assert.deepEqual(nav(project), [["general", "General"], ["team", "Collaborators"], ["github", "GitHub"], ["jira", "Jira"], ["agents", "Agents"], ["delete", "Danger zone"]]);
+    // the list on the left, after Linear's and GitHub's (Isha, 2026-10-26): groups, an icon each, the
+    // current one marked with a bar; each section's header an icon on a tile, its title and its line
+    assert.match(project, /<p class="set-group">Project<\/p><a class="set-link" href="#general"><svg[^]*?<\/svg>General<\/a>[^]*?<p class="set-group">Connections<\/p>[^]*?<p class="set-group">Advanced<\/p><a class="set-link" href="#delete"><svg/);
+    assert.match(page, /<p class="set-group">Account<\/p><a class="set-link" href="#profile"><svg/);
+    assert.match(page, /\.set-link\[aria-current="page"\]\{background:var\(--accent-bg\);color:var\(--accent-text\);font-weight:600;box-shadow:inset 3px 0 0 var\(--accent\)\}/);
+    assert.match(project, /<section class="grp" id="team" data-int="team"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"[^>]*><circle[^]*?<\/svg><\/span><div><h2 class="grp-h">Collaborators<\/h2><p class="grp-desc">/);
+    for (const [p, ids] of [[page, ["profile", "linked", "appearance", "setup"]], [project, ["general", "team", "github", "jira", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);
@@ -1404,14 +1586,14 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     // what each section is for, under its title
     assert.match(project, /<h2 class="grp-h">GitHub<\/h2><p class="grp-desc">This project&#39;s repository\./);
     // deleting the project: not the one tira serve was started with
-    assert.match(project, /<section class="grp danger" id="delete" data-int="delete"><h2 class="grp-h">Delete project<\/h2>[^]*?This is the project tira serve was started with/);
+    assert.match(project, /<section class="grp danger" id="delete" data-int="delete"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Danger zone<\/h2>[^]*?This is the project tira serve was started with/);
     assert.doesNotMatch(project, /data-delete-project/);
     // the Help centre, as a support chat: a panel that folds (remembered per browser) under a header
     // that says it answers right away; a greeting by name; the questions people ask as suggested
     // replies (with no script each opens on its answer, the app steps with this tira's address); and
     // a box to type your own, which help.mjs shows and answers
     const help = /<aside class="set-help" aria-label="Help centre" data-help>[^]*?<\/aside>/.exec(page)?.[0] ?? "";
-    assert.match(help, /^<aside[^>]*><details class="hc" data-remember="tira-help-centre" open><summary class="help-head"[^>]*><span class="av tira">\?<\/span><span class="hc-t"><b>Help centre<\/b><small><i class="hc-on" aria-hidden="true"><\/i>Answers right away<\/small>/);
+    assert.match(help, /^<aside[^>]*><details class="hc" data-remember="tira-help"><summary class="help-head"[^>]*><span class="av tira">\?<\/span><span class="hc-t"><b>Help centre<\/b><small><i class="hc-on" aria-hidden="true"><\/i>Answers right away<\/small>/);
     assert.match(readFileSync(new URL("../src/serve/theme.mjs", import.meta.url), "utf8"), /for \(const d of document\.querySelectorAll\("details\[data-remember\]"\)\)[^]*?localStorage\.setItem\(d\.dataset\.remember, d\.open \? "1" : "0"\)/);
     assert.match(help, /<div class="hc-log" role="log" aria-live="polite" aria-label="Conversation" data-help-log><div class="msg from-tira"><span class="av tira" aria-hidden="true">t<\/span><div class="msg-b"><p class="bubble">Hi isha! I'm tira's help\./);
     assert.equal((help.match(/<details class="hc-qa" data-keys="[a-z ]+"><summary class="hc-chip">/g) ?? []).length, 7);
@@ -1424,7 +1606,7 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.match(project, /<aside class="set-help" aria-label="Help centre" data-help>/); // on both
     // your display name: how you're shown (the sidebar, your profile, the help's greeting); your
     // changes stay under your name in the log
-    assert.match(page, /<form method="post" action="\/integrations\/profile" class="grp-row" data-display-name><input type="hidden" name="token" value="k"><span class="grp-k">Display name<\/span><input type="text" name="name" value="" maxlength="60" autocomplete="off" placeholder="isha" aria-label="Display name">/);
+    assert.match(page, /<form method="post" action="\/integrations\/profile" class="grp-row" data-display-name data-autosave><input type="hidden" name="token" value="k"><span class="grp-k">Display name<\/span><input type="text" name="name" value="" maxlength="60" autocomplete="off" placeholder="isha" aria-label="Display name">/);
     assert.equal(await s.flash(await s.post("/integrations/profile", { name: " Isha  M " })), "You're shown as Isha M now.");
     const named = (await s.http("GET", "/settings")).body;
     assert.match(named, /<span class="pf-who"><b>Isha M<\/b>/);

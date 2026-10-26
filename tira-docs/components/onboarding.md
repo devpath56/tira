@@ -14,9 +14,12 @@ start and the short animated tours of Linear and Notion, instead of a page of te
   the **Take the tour** button in Help, as help menus have it. Under Reduce Motion each scene
   stands still, fully drawn.
 - **Get started**, in the sidebar (its own row under the top bar on a narrow screen): five steps
-  that tick themselves off from what the project has (its repo linked, a first task, an agent
-  connected, a teammate, a task finished with proof), each linking to where it's done, with how
+  that tick themselves off from what the project has (the first task's step opens + Create) (its repo linked, a first task, an agent
+  connected, a collaborator, a task finished with proof), each linking to where it's done, with how
   many are done. **×** hides it, for that person; finishing the tour brings it back.
+- **The walkthrough** follows the tour's Get started: tooltips on the real board, each with its
+  key (`create-and-keys.md`); Help's **Show me around** plays it again, beside **Keyboard
+  shortcuts**.
 - **Help** opens on demand only, from Help (a ? at the foot of the sidebar). It no longer opens by
   itself. Written as Jira writes its help (Isha,
   2026-10-26): to you, plainly, what each thing is in a line and how to do something as "To …, …".

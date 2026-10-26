@@ -50,6 +50,9 @@ export interface AtlassianAuth {
 export interface Access { admin?: string; members?: string[]; requests?: string[]; contact?: { name?: string; email?: string } }
 // a project's people (Isha, 2026-10-25): its admins and its members, by GitHub login
 export interface ProjectPeople { admins: string[]; members: string[] }
+// an invite to a project (Isha, 2026-10-26): someone an admin invited, who sees the project once they
+// accept it; by: who invited them; at: when (ISO)
+export interface Invite { stream: string; login: string; by: string; at: string }
 
 // what the accounts hold, as credentials.ts reads it
 export interface Accounts {
@@ -63,6 +66,7 @@ export interface Accounts {
   blocked?: string[]; // accounts the owner removed: they can't sign in
   projects?: Record<string, ProjectPeople>; // each project's people, by project (none: not set yet)
   seen?: Record<string, string[]>; // what each person has seen or put away, by login ("tour", "checklist-hidden")
+  invites?: Invite[]; // invites not answered yet, oldest first
 }
 
 // why the accounts can't be used, in plain words (never the key or the connection string)
@@ -104,7 +108,7 @@ export function sealer(secret: string | undefined): Sealer {
 }
 
 // ---------- the tables ----------
-const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen"];
+const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen", "account_invites"];
 const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
@@ -129,6 +133,10 @@ CREATE TABLE IF NOT EXISTS ${s}.account_blocked (login TEXT PRIMARY KEY, by_logi
 CREATE TABLE IF NOT EXISTS ${s}.account_seen (login TEXT NOT NULL, what TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (login, what));
 CREATE TABLE IF NOT EXISTS ${s}.account_projects (
   stream TEXT NOT NULL, login TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+  at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, login)
+);
+CREATE TABLE IF NOT EXISTS ${s}.account_invites (
+  stream TEXT NOT NULL, login TEXT NOT NULL, by_login TEXT NOT NULL,
   at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, login)
 );
 `;
@@ -191,7 +199,7 @@ export class PostgresAccounts {
   async refresh(): Promise<void> {
     await this.ready();
     const s = this.schema;
-    const [apps, acc, gh, at, names, sessions, emails, blocked, projects, seen] = await Promise.all([
+    const [apps, acc, gh, at, names, sessions, emails, blocked, projects, seen, invites] = await Promise.all([
       this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
       this.pool.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
@@ -202,6 +210,7 @@ export class PostgresAccounts {
       this.pool.query(`SELECT login FROM ${s}.account_blocked ORDER BY at, login`),
       this.pool.query(`SELECT stream, login, role FROM ${s}.account_projects ORDER BY at, login`),
       this.pool.query(`SELECT login, what FROM ${s}.account_seen ORDER BY login, what`),
+      this.pool.query(`SELECT stream, login, by_login, at FROM ${s}.account_invites ORDER BY at, stream, login`),
     ]);
     const out: Accounts = {};
     const a = apps.rows[0] as AppsRow | undefined;
@@ -221,6 +230,7 @@ export class PostgresAccounts {
     }
     out.seen = {};
     for (const r of seen.rows as { login: string; what: string }[]) out.seen[r.login] = [...(out.seen[r.login] ?? []), r.what];
+    out.invites = (invites.rows as { stream: string; login: string; by_login: string; at: Date }[]).map((r) => ({ stream: r.stream, login: r.login, by: r.by_login, at: r.at.toISOString() }));
     this.now = out;
   }
 
@@ -338,6 +348,17 @@ export class PostgresAccounts {
 
   async dropSession(idHash: string): Promise<void> {
     await this.write(`DELETE FROM ${this.schema}.account_sessions WHERE id_hash = $1`, [idHash]);
+  }
+
+  // an invite to a project, and its end (accepted, declined or taken back); true when it's new
+  async invite(stream: string, login: string, by: string): Promise<boolean> {
+    await this.ready();
+    const r = await this.pool.query(`INSERT INTO ${this.schema}.account_invites (stream, login, by_login) VALUES ($1, $2, $3) ON CONFLICT (stream, login) DO NOTHING`, [stream, login, by]);
+    await this.refresh();
+    return (r.rowCount ?? 0) > 0;
+  }
+  async dropInvite(stream: string, login: string): Promise<void> {
+    await this.write(`DELETE FROM ${this.schema}.account_invites WHERE stream = $1 AND lower(login) = lower($2)`, [stream, login]);
   }
 
   // someone removed by the admin: every session of theirs ends; their links stay
