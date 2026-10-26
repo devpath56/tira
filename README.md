@@ -10,7 +10,7 @@
 
 **GitHub and Jira stay in step.** Link a project to a repo and a Jira project, then press Sync. tira links the pull requests that name a task and offers a merged one as its proof, makes a Jira issue for every task, and brings people's Jira moves back as commands. Its rules can refuse those too: Done in Jira with no proof is refused, and the refusal is in the history.
 
-**Result:** all **1058** planted bugs caught · **525** tests pass on Postgres, 0 fail · the two times the factory lied, replayed, are both refused
+**Result:** all **1072** planted bugs caught · **526** tests pass on Postgres, 0 fail · the two times the factory lied, replayed, are both refused
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kanban-dark.png">
@@ -41,9 +41,9 @@ Twice the factory lied to him. A session that had gone quiet was assumed stood d
 
 | Check | Run it | Result |
 |---|---|---|
-| Planted bugs: each breaks one rule on purpose | `npm run mutants` | **1058 / 1058** caught (last full run 2026-10-26) |
-| The test suite, Postgres included | `TIRA_PG_URL=… npm test` | **525** pass, 0 fail, 6 to do |
-| The same, with no database | `npm test` | 458 pass, 46 skipped (they need Postgres) |
+| Planted bugs: each breaks one rule on purpose | `npm run mutants` | **1072 / 1072** caught (last full run 2026-10-26) |
+| The test suite, Postgres included | `TIRA_PG_URL=… npm test` | **526** pass, 0 fail, 6 to do |
+| The same, with no database | `npm test` | 459 pass, 46 skipped (they need Postgres) |
 | The rule tables against the XState charts they come from | `npm run verify` | 282 checks pass |
 | Incident 1: a quiet session | in the suite (`scenarios/I1-silent-session.json`) | not stood down by a timeout |
 | Incident 2: landed without checks | in the suite (`scenarios/I2-unchecked-landing.json`) | not verified without a PASS, and never by whoever filed it |

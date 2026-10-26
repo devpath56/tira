@@ -6,8 +6,10 @@
 // an account, and sees no one's projects for it.
 //
 // A project made before then has no people saved: its admin is whoever made it (the person behind
-// its first event, once they've signed in here), else the owner; and the people every project had
-// then are its members. The first change to its team saves them.
+// its first event, once they've signed in here), else the owner, and no one else is in it until an
+// admin invites them and they accept (Isha, 2026-10-26: replaces "the people every project had then
+// are its members", which let people from before see a board they were never invited to). The first
+// change to its team saves it.
 import { access, knownLogin, savedProjects, same, type ProjectPeople } from "../sync/credentials.ts";
 
 type Env = Record<string, string | undefined>;
@@ -26,8 +28,7 @@ export function projectPeople(stream: string, maker: string | undefined, env: En
   const a = access(env);
   const known = (login: string) => knownLogin(login, env) !== undefined || (a.members ?? []).some((m) => same(m, login));
   const admin = maker && known(maker) ? maker : a.admin;
-  const admins = admin ? [admin] : [];
-  return { admins, members: (a.members ?? []).filter((m) => !admins.some((x) => same(x, m))) };
+  return { admins: admin ? [admin] : [], members: [] };
 }
 
 // the person behind each project's first event (all: the log, in order)

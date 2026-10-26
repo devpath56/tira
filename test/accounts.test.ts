@@ -333,6 +333,14 @@ if (!url) {
       await other.dropInvite("factory", "ZED");
       await sealed.refresh();
       assert.deepEqual(sealed.snapshot().invites?.map((x) => x.login), ["octo"]);
+      // a note to whoever invited them (Isha, 2026-10-26): one per invite, a later answer replaces it
+      await sealed.addNote({ to: "isha-gh", stream: "factory", who: "zed", did: "declined" });
+      await other.addNote({ to: "isha-gh", stream: "factory", who: "ZED", did: "accepted" });
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().notes?.map((n) => [n.to, n.stream, n.who, n.did]), [["isha-gh", "factory", "ZED", "accepted"]]); // one row, as the later answer spelt it
+      await other.dropNote("ISHA-GH", "factory", "zed");
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().notes, []);
       await other.close();
       await sealed.close();
       assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row team-row" data-team-member><span class="av t\d" aria-hidden="true">Z<\/span><span class="grp-k">zed(?:<small class="grp-sub">[^<]*<\/small>)?<\/span>/);

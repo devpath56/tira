@@ -29,18 +29,19 @@ test("a team changes by its admins' moves: add (in at once), make admin, make me
   assert.equal(isProjectAdmin(p, "octo"), false);
 });
 
-test("a project made before each had its own people: whoever made it is its admin once they've signed in here, else the owner; the people everyone had then are its members; once saved, its saved team is the one", async () => {
+test("a project made before each had its own people: whoever made it is its admin once they've signed in here, else the owner; no one else is in it until invited; once saved, its saved team is the one", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-team-"));
   const env = { TIRA_HOME: home };
   try {
     // no owner and no one known: no one yet
     assert.deepEqual(projectPeople("app", "someone", env), { admins: [], members: [] });
     await saveAccess(() => ({ admin: "isha", members: ["devansh", "octo"] }), env);
-    // made by someone who never signed in here (a name tira serve was given): the owner's
-    assert.deepEqual(projectPeople("app", "builder", env), { admins: ["isha"], members: ["devansh", "octo"] });
-    // made by someone who has: theirs, and the others are members
+    // made by someone who never signed in here (a name tira serve was given): the owner's; the people
+    // from before aren't in it until an admin invites them and they accept (Isha, 2026-10-26)
+    assert.deepEqual(projectPeople("app", "builder", env), { admins: ["isha"], members: [] });
+    // made by someone who has: theirs, and still no one else
     await saveGithubAuth("Octo", { token: "gho-x" }, env);
-    assert.deepEqual(projectPeople("app", "octo", env), { admins: ["octo"], members: ["devansh"] });
+    assert.deepEqual(projectPeople("app", "octo", env), { admins: ["octo"], members: [] });
     // the first change saves the team, from then on the only one
     assert.equal(await saveProject("app", (now) => (now ? undefined : { admins: ["raj"], members: [] }), env), true);
     assert.deepEqual(projectPeople("app", "octo", env), { admins: ["raj"], members: [] });

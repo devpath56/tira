@@ -116,7 +116,7 @@ test("M1 oracle: the page shows every fold node exactly once, with the fold's fl
   assert.deepEqual(kanbanColumns(html), { Ideas: ["7"], "To do": ["filters"], "In progress": ["table"], Done: ["metrics_card", "improve_visual", "tokens", "colors"], Dropped: ["font"] });
   // under more than one parent, a card names its own, above its name (Isha, 2026-10-26)
   assert.match(html, /<div class="par" data-card-parent title="metrics_card">metrics_card<\/div><div class="t">improve_<wbr>visual<\/div><div class="row"><span class="chip" data-subtasks>3\/3 subtasks<\/span>/);
-  assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span><span class="pin">◆ now<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">table<\/div>/); // its key first, then the cursor
+  assert.match(html, /<a class="card is-next" href="#t\d+"[^>]*><span class="pin">◆ now<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">table<\/div>/); // its key first, then the cursor
   // the halo marks the active task only; payloads read as words, not JSON
   assert.equal((html.match(/<a class="gn [^"]*is-active/g) ?? []).length, 1);
   assert.match(html, /<div class="ev-detail">under dashboard<\/div>/);
@@ -618,7 +618,7 @@ test("a task's dialog lists its subtasks as rows (state, name, estimate, assigne
   const colors = dialog("colors");
   assert.match(colors, /<nav class="tk-crumbs" aria-label="Where it sits"><a href="#t\d+" title="dashboard">dashboard<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+" title="metrics_card">metrics_card<\/a><span class="sep" aria-hidden="true">›<\/span><a href="#t\d+" title="improve_visual">improve_visual<\/a><span class="sep" aria-hidden="true">›<\/span><span aria-current="page" title="colors">colors<\/span><span class="tk-sibs" data-siblings><span class="off" aria-hidden="true">↑<\/span><span>1 of 3<\/span><a href="#t\d+" aria-label="The subtask after">↓<\/a><\/span><\/nav>/);
   assert.match(colors, /<div class="prop" data-parent><span class="lk">Parent<\/span><div><a href="#t\d+">improve_visual<\/a><span class="meter"/);
-  assert.match(dialog("dashboard"), /<div class="prop" data-parent><span class="lk">Parent<\/span><div><span class="dim">—<\/span><\/div><\/div>/);
+  assert.doesNotMatch(dialog("dashboard"), /<div class="prop" data-parent>/); // top level: no empty Parent row (Isha, 2026-10-26)
   // proof: the evidence on the completion, for a done task; none for open work
   assert.match(dialog("colors"), /<div class="proof" data-proof><span class="proof-k">Proof of work<\/span><span class="proof-v">[^<]+<\/span><span class="ev-seq">isha · seq \d+<\/span><\/div>/);
   assert.doesNotMatch(dialog("table"), /data-proof/);
@@ -887,8 +887,13 @@ test("a divergence panel that can't be evaluated is one line: the state and why,
 test("live only: every task and idea dialog offers Show on graph, and what the last action changed glows once; the rendered file has neither", async () => {
   const { r, events } = await scenario();
   const file = renderHtml(r, S, "h", events);
-  assert.doesNotMatch(file, /data-show-on-graph|class="[^"]*\bchanged\b/);
+  assert.doesNotMatch(file, /data-show-on-graph|class="[^"]*\bchanged\b|data-create-under/);
   const live = renderHtml(r, S, "h", events, { live: { flash: { ok: true, text: "Complete colors: done", changed: ["node:colors", "idea:7"] } } });
+  // a + to add under a task, where one can go and only where someone can create (Isha, 2026-10-26)
+  const creating = renderHtml(r, S, "h", events, { live: { token: "t" } });
+  assert.match(creating, /data-create-under="table"/); // in progress
+  assert.doesNotMatch(creating, /data-create-under="colors"/); // done
+  assert.doesNotMatch(live, /data-create-under/); // no way to create here
   // one button per dialog, naming its own task (or idea)
   const dialogs = [...live.matchAll(/<section class="drawer" id="([ti]\d+)"[^]*?<\/section>/g)];
   assert.ok(dialogs.length > 1);
@@ -899,7 +904,7 @@ test("live only: every task and idea dialog offers Show on graph, and what the l
     else assert.match(live, new RegExp(`<a class="gn[^"]*" href="#${id}"[^>]*data-key="${key}"`), `${id}: its graph box is ${key}`);
   }
   // the changed task: its card, its graph box; the idea's card and ghost
-  assert.match(live, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">colors<\/div>/);
+  assert.match(live, /<a class="card changed" href="#t\d+"[^>]*>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">colors<\/div>/);
   assert.match(live, /<a class="gn st-done changed" href="#t\d+"[^>]*data-key="node:colors"/);
   assert.match(live, /<a class="card idea changed" href="#i0"/);
   assert.match(live, /<a class="ghost changed" href="#i0"/);
@@ -974,8 +979,8 @@ async function planned(): Promise<{ html: string; file: string; reply: () => Pro
   await wp.submit({ stream: S, kind: "event", entity: { type: "node", id: top }, event: "START", actor: "isha", payload: {} });
   await make("node", "decide_scope", "claude-code", { parent_id: top, kind: "discovered", discovered_during: top });
   await make("node", "set_alerts", "claude-code", { parent_id: top });
-  await make("ticket", "decide_scope", "claude-code", { task: "decide_scope", title: "Decide v1 scope: answer the open questions", description: "The spec: https://example.com/spec." }, 1);
-  await make("ticket", "set_alerts", "isha", { task: "set_alerts", title: "Set up the job alerts", assignee: "isha" }, 1);
+  await make("ticket", "decide_scope", "claude-code", { task: "decide_scope", title: "Decide v1 scope: answer the open questions", description: "The spec: https://example.com/spec.", estimate: "1.2h" }, 1);
+  await make("ticket", "set_alerts", "isha", { task: "set_alerts", title: "Set up the job alerts", assignee: "isha", estimate: "2h" }, 1);
   await make("comment", "c1", "claude-code", { task: "decide_scope", text: "@isha should v1 keep contract roles?" });
   const page = async () => {
     const events = await store.readStream(S);
@@ -1004,6 +1009,25 @@ test("an agent's plan reads cleanly: cards by title, no parent repeated under a 
   assert.match(card("decide_scope"), /<span class="found" data-found title="Found while working on Create spec for job postings in the Bay Area"/);
   assert.doesNotMatch(card("set_alerts"), /data-found/);
   assert.match(CSS, /\.card \.t\{[^}]*-webkit-line-clamp:3;line-clamp:3;overflow:hidden\}/); // a long title: three lines, then …
+  // the Graph names it by its title too, and offers a + to add a task under it (Create, with it as the parent)
+  assert.match(html, /<span class="name" title="Decide v1 scope: answer the open questions">Decide v1 scope: answer the open questions<\/span>/);
+  assert.match(html, /<\/a><a class="gn-add" href="#create" data-create-under="decide_scope" style="left:[\d.]+px;top:\d+px" aria-label="Add a task under Decide v1 scope: answer the open questions" title="Add a task under Decide v1 scope: answer the open questions"><svg/);
+  // the composer lists where it can go by name
+  assert.match(html, /<option value="decide_scope">Decide v1 scope: answer the open questions<\/option>/);
+});
+
+test("a task's side panel: one status line; no Complete or Cancel while its subtasks are open, and it says why; no empty Parent row; totals to the half hour", async () => {
+  const { html } = await planned();
+  const dialog = (id: string) => new RegExp(`<section class="drawer" id="t\\d+" aria-label="${id}"[^]*?</section>`).exec(html)?.[0] ?? "";
+  const top = dialog("Create spec for job postings in the Bay Area");
+  assert.match(top, /<div class="drawer-acts" data-dialog-acts><a class="act" href="[^"]*event=BLOCK[^"]*" data-act="BLOCK">Block<\/a><\/div><p class="tk-wait" data-subtasks-open>2 subtasks are still open: they close first\.<\/p>/);
+  assert.doesNotMatch(top, /data-act="(?:COMPLETE|CANCEL)"/);
+  assert.doesNotMatch(top, /<div class="prop" data-parent>/); // top level
+  assert.match(top, /<small class="dim">3h in subtasks<\/small>/); // 1.2h and 2h, to the half hour
+  assert.doesNotMatch(top, /mark active/); // "in progress" and "active" said it twice
+  // a subtask: its parent, and every action its state allows
+  assert.match(dialog("decide_scope"), /<div class="prop" data-parent><span class="lk">Parent<\/span>/);
+  assert.match(dialog("decide_scope"), /data-act="START">Start<\/a><a class="act" href="[^"]*" data-act="BLOCK">Block<\/a><a class="act" href="[^"]*" data-act="CANCEL">Cancel<\/a>/);
 });
 
 test("needs you says when a person is needed: an @mention not yet answered, work assigned to you; a parent with open subtasks offers its next, not Complete", async () => {

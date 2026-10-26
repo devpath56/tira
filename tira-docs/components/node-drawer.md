@@ -26,9 +26,11 @@ subtask before and after. Then two columns. **The work**: the title (the id unde
 description and steps; its **subtasks**, each a row with its state, name (and id), estimate and
 who it's assigned to (an agent's spark, a person's initials), one click to its own dialog, under
 "closed/all" and its meter, with **+ Add subtask** beside them while it can take one; then its
-activity. **Beside**, its properties: status (with marks: next, active, all subtasks
-closed, closed by tira) and what it allows; assignee; estimate (its subtasks'
-added up under it, a day as 8 hours); parent, with its progress; **Found in** (the task it was
+activity. **Beside**, its properties: status on one line (with marks: next, all subtasks
+closed, closed by tira; "active" isn't one, since in progress says it: Isha, 2026-10-26) and what it
+allows (a task whose subtasks are still open offers neither Complete nor Cancel, which they'd
+refuse, and says how many are open); assignee; estimate (its subtasks' added up under it, a day as
+8 hours, to the half hour); parent, with its progress (a top-level task has no Parent row); **Found in** (the task it was
 found while working on, one click away); the blocks link both ways
 ("Blocked by design_tokens" on the blocked task, "Blocks colors" on its ticket); its Jira issue and
 pull requests; its proof of work; Show on graph. On a phone the properties come first. Few words:
@@ -65,7 +67,7 @@ under `tira serve` (which also moves focus into the dialog, and back to the task
 - `[data-ticket]` on the ticket, with `[data-ticket-description]`, `[data-ticket-steps]`, `[data-ticket-estimate]` and `[data-ticket-assignee]`; `[data-ticket-form]` on the ticket's form (live only).
 - `[data-comments]` on the comments, `[data-comment]` on each, `[data-comment-form]` on the one to add (live only); `[data-history-pane]` on the history, the other tab; `[data-tab]` on each tab's radio (`c`, `h`).
 - `[data-ticket-links]` under a description being edited: its web addresses, as links (live only). `[data-found-in]` on Found in, beside.
-- `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only).
+- `[data-dialog-acts]` on the actions and `[data-show-on-graph]` (the task's key) on Show on graph (live page only); `[data-subtasks-open]` on the line saying how many subtasks close first.
 - `.legacy` on the tag of each entry with no rules era (Activity counts them too).
 
 Assertion: every node is one click from its event trail.

@@ -142,4 +142,26 @@ if (form instanceof HTMLFormElement) {
   document.addEventListener("click", (e) => {
     if (open && e.target instanceof Node && !open.menu.contains(e.target) && !open.pill.contains(e.target)) close();
   });
+
+  // + on a Graph task (Isha, 2026-10-26): the same Create, with that task as the parent. The board's
+  // own Create then opens without one again.
+  const parentPick = form.querySelector('select[name="parent"]');
+  let fromGraph = false;
+  const parentIs = (id) => {
+    if (!(parentPick instanceof HTMLSelectElement)) return;
+    parentPick.value = [...parentPick.options].some((o) => o.value === id) ? id : "";
+    const pill = parentPick.closest(".prop-pill");
+    if (pill) pillSays(pill);
+  };
+  document.addEventListener("click", (e) => {
+    const t = e.target instanceof Element ? e.target : null;
+    const add = t?.closest("[data-create-under]");
+    if (add instanceof HTMLElement) {
+      fromGraph = true;
+      parentIs(add.dataset.createUnder ?? "");
+    } else if (t?.closest("[data-create-open]") && fromGraph) {
+      fromGraph = false;
+      parentIs("");
+    }
+  });
 }

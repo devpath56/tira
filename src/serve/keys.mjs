@@ -39,7 +39,10 @@ const inTask = (open, key) => {
 // on the board itself; true when the key did something
 const onBoard = (key) => {
   if (key === "c" && document.getElementById("create")) {
-    location.hash = "create";
+    // on a Graph task: a task under it, as its + does
+    const under = document.activeElement?.closest(".gn")?.nextElementSibling;
+    if (under instanceof HTMLElement && under.matches("[data-create-under]")) under.click();
+    else location.hash = "create";
     return true;
   }
   if (key === "/") return press("[data-open-palette]");

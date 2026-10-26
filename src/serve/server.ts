@@ -41,7 +41,7 @@ import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPay
 import { commitsOf, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
+import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, notesFor, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
 import { letterPop } from "./invites.ts";
 import { checklistHtml, provenIn, tourHtml } from "./onboarding.ts";
 import { projectName } from "../sync/jira.ts";
@@ -764,14 +764,16 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const inCreate = url.searchParams.get("c") === "1";
     return { flash: inCreate ? undefined : said, create: { more: url.searchParams.get("more") === "1", ...(inCreate && said ? { said } : {}) } };
   };
-  // invites (Isha, 2026-10-26): the Inbox's count, and a letter over the page once for a new one
+  // invites (Isha, 2026-10-26): the Inbox's count (invites and the answers to yours), and a letter
+  // over the page once for a new invite
   const inboxFor = async (login: string) => {
     const invites = invitesNow(linkEnv).filter((x) => same(x.login, login));
+    const count = invites.length + notesFor(login, linkEnv).length;
     const fresh = invites.find((x) => !hasSeen(login, `invite:${x.stream}`, linkEnv));
-    if (!fresh) return { count: invites.length };
+    if (!fresh) return { count };
     await markSeen(login, `invite:${fresh.stream}`, linkEnv);
     const title = workspaceOf((await now(fresh.stream)).r, fresh.stream)?.title ?? fresh.stream;
-    return { count: invites.length, letter: letterPop(fresh, title, token) };
+    return { count, letter: letterPop(fresh, title, token) };
   };
 
   // A first-time person's welcome (src/serve/onboarding.ts): the tour, opening by itself until they've
@@ -1469,7 +1471,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // The pages that are yours, not a project's: signing in, your settings and profile, your project
   // list and making a project, approving Claude. Every other page is its project's, and only its
   // people get it (src/serve/team.ts); anyone else finds no such project.
-  const YOURS = new Set(["GET /welcome", "GET /settings", "GET /u", "GET /projects", "GET /inbox", "POST /invites", "GET /projects/new", "POST /projects", "GET /oauth/authorize", "POST /oauth/authorize", "GET /api/workspaces", "POST /onboarding",
+  const YOURS = new Set(["GET /welcome", "GET /settings", "GET /u", "GET /projects", "GET /inbox", "POST /invites", "POST /inbox/notes", "GET /projects/new", "POST /projects", "GET /oauth/authorize", "POST /oauth/authorize", "GET /api/workspaces", "POST /onboarding",
     "GET /signup/email", "POST /signup/email", "POST /integrations/setup", "POST /integrations/setup/reveal", "POST /integrations/profile", "POST /integrations/accounts", "POST /integrations/github/disconnect",
     "GET /integrations/jira/connect", "GET /integrations/jira/callback", "POST /integrations/jira/site", "POST /integrations/jira/disconnect",
     "POST /signin/start", "GET /signin/start", "GET /signin/code", "GET /signin/github/callback", "POST /signin/poll", "POST /signout"]);

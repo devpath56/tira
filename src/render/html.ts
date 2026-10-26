@@ -142,6 +142,7 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 @media (max-width:560px){.composer-title{font-size:19px}.composer-foot{flex-wrap:wrap}.composer-said{order:3;flex-basis:100%}}
 .keys-say{margin:2px 0 14px;font-size:13px;color:var(--mut)}.keys{display:grid;gap:2px;margin:0}.keys>div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}.keys dt{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}.keys dd{margin:0;font-size:13px}
 .letters{display:grid;gap:12px;margin:0 0 22px}.letter{display:flex;gap:16px;align-items:flex-start;padding:18px 20px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);position:relative;overflow:hidden}.letter::before{content:"";position:absolute;inset:0 0 auto;height:4px;background:repeating-linear-gradient(135deg,var(--accent) 0 12px,transparent 12px 20px,var(--block) 20px 32px,transparent 32px 40px);opacity:.7}.letter-env{flex:none;display:grid;place-items:center;width:52px;height:52px;border-radius:12px;background:var(--accent-bg);color:var(--accent-text)}.letter-env svg{width:30px;height:30px}.letter-body{min-width:0}.letter-k{margin:0 0 2px;font-size:12px;font-weight:600;color:var(--accent-text)}.letter h3{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:17px}.letter h3>span:last-child{min-width:0;overflow-wrap:break-word}.letter-body>p{margin:0 0 12px;font-size:13px;color:var(--mut)}.letter-acts{display:flex;gap:8px}
+.letter.note::before{background:var(--line-2);opacity:1;height:3px}.letter.note.accepted::before{background:var(--done)}.letter.note.accepted .letter-env{background:var(--done-bg);color:var(--done)}.letter.note.declined .letter-env{background:var(--panel-2);color:var(--mut)}.letter.note .letter-k{color:var(--mut)}.letter.note.accepted .letter-k{color:var(--done)}
 #letter-later:checked+.letter-pop{display:none}.letter-pop{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:24px 16px;background:rgba(10,12,16,.55);animation:letter-in .3s var(--ease)}.letter-pop-box{width:min(520px,100%);display:grid;gap:10px;justify-items:center}.letter-pop .letter{width:100%;box-shadow:var(--shadow-raised)}.letter-later{font-size:13px;color:#fff;cursor:pointer}@keyframes letter-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){.letter-pop{animation:none}}
 .inbox-empty{display:grid;justify-items:center;gap:4px;padding:40px 16px;text-align:center;border:1px dashed var(--line-2);border-radius:14px;color:var(--mut)}.inbox-empty b{color:var(--fg);font-size:15px}.inbox-empty p{margin:0;font-size:13px}.inbox-empty-i{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;background:var(--panel-2);color:var(--mut)}.inbox-empty-i svg{width:22px;height:22px}
 .side-n{margin-left:auto;min-width:20px;padding:0 6px;border-radius:999px;background:var(--accent);color:var(--btn-fg);font-size:11px;font-weight:700;line-height:18px;text-align:center}.side-link[data-inbox] svg{width:16px;height:16px}
@@ -220,6 +221,7 @@ details.att-group .names{min-width:0;flex:1;order:3;color:var(--mut);font-size:1
 .edges{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .edges path{fill:none;stroke:var(--line-2);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .edges path.done{stroke:var(--done)}.edges path.found{stroke:var(--accent);stroke-dasharray:2 4;stroke-linecap:round}.edges path.done.found{stroke:var(--done)}
+.gn-add{position:absolute;z-index:3;display:grid;place-items:center;width:24px;height:24px;transform:translate(-60%,-60%) scale(.85);border-radius:50%;background:var(--accent);color:var(--btn-fg);box-shadow:0 0 0 3px var(--bg),var(--shadow);opacity:0;transition:opacity .15s var(--ease),transform .15s var(--ease)}.gn-add svg{width:14px;height:14px}.gn:hover+.gn-add,.gn:focus-visible+.gn-add,.gn-add:hover,.gn-add:focus-visible{opacity:1;transform:translate(-60%,-60%) scale(1)}@media (hover:none){.gn-add{opacity:.9;transform:translate(-60%,-60%) scale(1)}}@media (prefers-reduced-motion:reduce){.gn-add{transition:none}}
 .gn{position:absolute;z-index:1;width:148px;height:56px;transform:translateX(-50%);display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 10px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow)}
 .gn:hover{border-color:var(--accent);background:var(--hover)}
 .gn .gt{display:flex;align-items:flex-start;gap:6px;min-width:0}
@@ -424,7 +426,7 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 .card .row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px;color:var(--mut);font-size:12px}
 .chip{display:inline-flex;align-items:center;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}
 .hist{margin-left:auto;display:inline-flex;align-items:center;gap:4px}.hist svg,.chip svg{width:12px;height:12px}
-.card .tkey{display:inline-block;margin:0 6px 4px 0;font:600 11px var(--mono);letter-spacing:.02em;color:var(--dim)}.mention{color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:0 3px;font-weight:550}
+.mention{color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:0 3px;font-weight:550}
 .mention-menu{position:fixed;z-index:60;min-width:180px;max-height:220px;overflow:auto;margin:0;padding:4px;list-style:none;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-raised)}.mention-menu li{display:flex;justify-content:space-between;gap:12px;padding:6px 8px;border-radius:6px;font-size:13px;cursor:pointer}.mention-menu li[aria-selected="true"]{background:var(--accent-bg);color:var(--accent-text)}.mention-menu small{color:var(--dim);font-size:11px}
 .pin{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border-radius:6px;padding:1px 6px;margin-bottom:6px}
 .card.is-next{border-left:3px solid var(--accent)}
@@ -491,7 +493,8 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 .drawer .modal-box:has(.tk-view){display:flex;flex-direction:column;width:min(1040px,100%);padding:0;border-radius:16px;overflow:hidden}.modal-box:has(.tk-view)>.close{top:11px;right:12px;z-index:2}.tk-view{display:flex;flex-direction:column;flex:1;min-height:0}.modal-box .tk-crumbs{flex:none;margin:0;padding:14px 56px 14px 20px;font-size:12.5px;color:var(--dim)}.tk-crumbs a{color:var(--mut)}.tk-crumbs a:hover{color:var(--fg);text-decoration:none}.tk-crumbs .tk-project{color:var(--fg);font-weight:600}.tk-crumbs [aria-current]{font-family:var(--sans);font-weight:600}
 .modal-box .tk-cols{grid-template-columns:minmax(0,1fr) 300px;gap:0;align-items:stretch;flex:1;min-height:0}.modal-box .tk-main{padding:24px 28px 28px;overflow-y:auto;max-height:calc(min(82vh,760px) - 50px)}.modal-box .tk-side{position:static;align-content:start;gap:2px;padding:14px 14px 18px;border:0;border-left:1px solid var(--line);border-radius:0;background:var(--panel-2);overflow-y:auto;max-height:calc(min(82vh,760px) - 50px)}.tk-side .prop{grid-template-columns:82px minmax(0,1fr);align-items:center;gap:10px;padding:8px 6px;border-radius:9px}.tk-side .prop:hover{background:var(--hover)}.tk-side .prop .lk{font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mut)}.tk-side .prop:first-child{align-items:start}.tk-side .prop:first-child .lk{padding-top:2px}.tk-side .prop .drawer-acts{margin-top:8px;gap:6px}.tk-side .prop .drawer-acts .act{min-height:0;height:28px;padding:0 12px;font-size:12.5px;border-radius:999px}.tk-side select.prop-in,.tk-side input.prop-in{appearance:none;-webkit-appearance:none;width:auto;max-width:100%;height:28px;margin:0;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12.5px;field-sizing:content;min-width:72px}.tk-side .prop-in:hover{border-color:var(--line-2)}.tk-side .prop-in:focus{border-color:var(--accent);background:var(--panel)}.tk-side .links,.tk-side .task-links,.tk-side .proof{margin:8px 6px 0}.tk-side .locate{margin:12px 6px 0}
 .modal-box:has(.tk-view) .tk-title-in{font-size:24px;font-weight:650;letter-spacing:-.015em;padding:2px 8px;margin-left:-9px}.modal-box:has(.tk-view) .tk-id{margin:2px 0 12px}.modal-box:has(.tk-view) .tk-title-in::placeholder{color:var(--fg);opacity:1}.modal-box:has(.tk-view) .tk-in{font-size:14.5px;line-height:1.65;padding:4px 8px;margin-left:-9px}.modal-box:has(.tk-view) .tk-save{position:sticky;bottom:-28px;display:flex;justify-content:flex-end;margin:8px 0 0;padding:12px 0;background:linear-gradient(transparent,var(--panel) 35%)}.modal-box:has(.tk-view) .subtasks,.modal-box:has(.tk-view) .comments{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}.modal-box:has(.tk-view) .sub-add{border-radius:999px;height:30px;padding:0 13px;font-size:13px}.modal-box:has(.tk-view) .kids-list{border-radius:12px}.modal-box:has(.tk-view) .cm{border-radius:12px}.modal-box:has(.tk-view) .cm-form{position:relative;display:block}.modal-box:has(.tk-view) .cm-form textarea{display:block;width:100%;box-sizing:border-box;min-height:84px;padding:11px 13px 46px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);resize:none}.modal-box:has(.tk-view) .cm-form textarea:focus{outline:none;border-color:var(--accent)}.modal-box:has(.tk-view) .cm-form .act{position:absolute;right:8px;bottom:8px;height:30px;padding:0 14px;border-radius:999px}.modal-box:has(.tk-view) details.trail{margin-top:24px;padding-top:14px}
-.drawer .modal-box:has(.tk-view){width:min(940px,100%)}.modal-box:has(.tk-view) .tk-form .tk-id{order:-1;margin:0 0 6px}.tk-side .state{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:600 12.5px/1 var(--sans);letter-spacing:0;text-transform:capitalize}.tk-side .state::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--dim)}.tk-side .state.s-in_progress::before{background:var(--accent)}.tk-side .state.s-done::before{background:var(--done)}.tk-side .state.s-blocked::before{background:var(--block)}.tk-side .state.s-cancelled::before{background:var(--line-2)}.tk-side>.drawer-acts{display:flex;gap:6px;margin:2px 6px 10px;padding:0 0 12px;border-bottom:1px solid var(--line)}.tk-side>.drawer-acts .act{flex:1;justify-content:center;min-height:0;height:30px;padding:0 10px;font-size:12.5px;border-radius:9px}.tk-side>.drawer-acts .act:first-child{background:var(--btn);color:var(--btn-fg)}.tk-side>.drawer-acts .act:first-child:hover{filter:brightness(1.06)}.tk-side .task-links,.tk-side .links{margin:0;gap:0}.tk-side .task-links p,.tk-side .links p{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:8px 6px;border-radius:9px}.tk-side .task-links .lk,.tk-side .links .lk{flex:0 0 82px;margin:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mut)}.tk-side .task-links a{font-weight:600}.tk-side .effort{padding:2px 3px 2px 11px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}.tk-side .effort:focus-within{border-color:var(--accent)}.tk-side .locate{margin:12px 6px 0;padding:6px 8px}.modal-box:has(.tk-view) .sub-add{background:none;border:1px dashed var(--line-2);color:var(--mut)}.modal-box:has(.tk-view) .sub-add:hover{color:var(--fg);border-color:var(--accent);background:var(--accent-bg)}.modal-box:has(.tk-view) details.trail summary{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none}
+.drawer .modal-box:has(.tk-view){width:min(940px,100%)}.modal-box:has(.tk-view) .tk-form .tk-id{order:-1;margin:0 0 6px}.tk-side .badges{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;min-width:0}.tk-side .badges .mark{white-space:nowrap;font-size:12px}.tk-wait{margin:-4px 6px 10px;padding:0 0 12px;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.45;color:var(--mut)}.tk-side>.drawer-acts:has(+.tk-wait){margin-bottom:6px;padding-bottom:0;border-bottom:0}.tk-side .prop:first-child:hover{background:none}
+.tk-side .state{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:600 12.5px/1 var(--sans);letter-spacing:0;text-transform:capitalize}.tk-side .state::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--dim)}.tk-side .state.s-in_progress::before{background:var(--accent)}.tk-side .state.s-done::before{background:var(--done)}.tk-side .state.s-blocked::before{background:var(--block)}.tk-side .state.s-cancelled::before{background:var(--line-2)}.tk-side>.drawer-acts{display:flex;gap:6px;margin:2px 6px 10px;padding:0 0 12px;border-bottom:1px solid var(--line)}.tk-side>.drawer-acts .act{flex:1;justify-content:center;min-height:0;height:30px;padding:0 10px;font-size:12.5px;border-radius:9px}.tk-side>.drawer-acts .act.primary{background:var(--btn);color:var(--btn-fg)}.tk-side>.drawer-acts .act.primary:hover{filter:brightness(1.06)}.tk-side .task-links,.tk-side .links{margin:0;gap:0}.tk-side .task-links p,.tk-side .links p{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:8px 6px;border-radius:9px}.tk-side .task-links .lk,.tk-side .links .lk{flex:0 0 82px;margin:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mut)}.tk-side .task-links a{font-weight:600}.tk-side .effort{padding:2px 3px 2px 11px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}.tk-side .effort:focus-within{border-color:var(--accent)}.tk-side .locate{margin:12px 6px 0;padding:6px 8px}.modal-box:has(.tk-view) .sub-add{background:none;border:1px dashed var(--line-2);color:var(--mut)}.modal-box:has(.tk-view) .sub-add:hover{color:var(--fg);border-color:var(--accent);background:var(--accent-bg)}.modal-box:has(.tk-view) details.trail summary{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none}
 @media (max-width:760px){.modal-box .tk-cols{grid-template-columns:minmax(0,1fr)}.modal-box .tk-main,.modal-box .tk-side{max-height:none;overflow:visible}.modal-box .tk-side{order:-1;border-left:0;border-bottom:1px solid var(--line)}.drawer .modal-box:has(.tk-view){overflow-y:auto;max-height:90vh}}
 /* the task dialog in sections (Isha, 2026-10-26): key, title, then Description, Steps, Subtasks and Activity, each under its own label */
 .modal-box:has(.tk-view) .tk-main{padding:22px 32px 30px}.modal-box:has(.tk-view) .ticket{display:block;margin:0}
@@ -693,7 +696,7 @@ const word = (state: string) => STATE_WORD[state] ?? state;
 const nodeAttrs = (r: TreeRow, lines: number) =>
   `data-key="${esc(r.key)}" data-state="${esc(r.state)}" data-drained="${r.drained}" data-cursor="${r.cursor}" data-active="${r.active}" data-depth="${r.depth}" data-closed-by-tira="${r.closedByTira}" data-awaiting-close="${r.awaitingClose}" data-history="${lines}"`;
 
-function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>): string {
+function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, look: GraphLook): string {
   const kids = new Map<Placed, Placed[]>();
   for (const n of nodes) if (n.parent) kids.set(n.parent, [...(kids.get(n.parent) ?? []), n]);
   // ideas after the tree, each under its proposed parent (layout.mjs: a parent before its children)
@@ -720,7 +723,7 @@ function graphHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
     const [b, k] = [byKey.get(by) as Placed, byKey.get(key) as Placed];
     return `<path class="e blocks${CLOSED.has(b.row.state) ? " done" : ""}" data-from="${esc(by)}" data-blocks="${esc(key)}" d="${foundPath(at(b), at(k))}"/>`;
   });
-  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length, changed.has(n.row.key));
+  const node = (n: Placed) => graphNodeHtml(n, kids.get(n) ?? [], at(n), byKey, links, (trail.get(n.row.key) ?? []).length, changed.has(n.row.key), look);
   const ghostAt = (key: string) => L.at.get(key) ?? { x: 0, y: 0 };
   const ideaLines = ghosts.filter((g) => g.parent !== undefined).map((g) =>
     `<path class="e idea" data-from="${esc(g.parent as string)}" data-to="${esc(g.idea.key)}" d="${treePath(ghostAt(g.parent as string), ghostAt(g.idea.key))}"/>`);
@@ -748,7 +751,10 @@ function nodeLabel(n: Placed, ks: Placed[], closed: number, byKey: ReadonlyMap<s
 const placedAt = (p: { x: number; y: number }) => `style="left:${fx(p.x)}px;top:${p.y}px"`;
 
 // One task on the graph: a link to its dialog, carrying the fold's flags (M1).
-function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number, changed: boolean): string {
+// what the graph shows of each task: its name as people read it (its ticket's title, else its id in
+// words), and, live, a way to add a task under it
+interface GraphLook { names: ReadonlyMap<string, string>; adds: boolean }
+function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byKey: ReadonlyMap<string, Placed>, links: Links, history: number, changed: boolean, look: GraphLook): string {
   const r = n.row;
   const closed = ks.filter((c) => CLOSED.has(c.row.state)).length;
   const left = ks.length - closed;
@@ -765,10 +771,16 @@ function graphNodeHtml(n: Placed, ks: Placed[], p: { x: number; y: number }, byK
   const parentAttr = n.parent ? ` data-parent="${esc(n.parent.row.key)}"` : "";
   const pinWord = r.active ? "now" : "next";
   const pin = r.cursor ? `<span class="here">◆ ${pinWord}</span>` : "";
+  const titled = look.names.get(r.key);
+  const shown = titled ?? spaced(r.id);
+  // + at its corner (Isha, 2026-10-26): Create, with this task as the parent (create.mjs fills it in)
+  const add = look.adds && TAKES_SUBTASKS.has(r.state)
+    ? `<a class="gn-add" href="#create" data-create-under="${esc(r.id)}" style="left:${fx(p.x + 74)}px;top:${p.y + 56}px" aria-label="Add a task under ${esc(shown)}" title="Add a task under ${esc(shown)}">${ICON.plus}</a>`
+    : "";
   return `<a class="${cls}" href="#t${n.i}" ${placedAt(p)} aria-label="${esc(nodeLabel(n, ks, closed, byKey, links))}"${parentAttr} ${nodeAttrs(r, history)}>`
     + pin
-    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(r.id)}">${esc(spaced(r.id))}</span></span>`
-    + `<span class="gm">${marks}${meta}</span></a>`;
+    + `<span class="gt"><span class="sd">${STOP_GLYPH[r.state] ?? ""}</span><span class="name" title="${esc(titled ?? r.id)}">${esc(shown)}</span></span>`
+    + `<span class="gm">${marks}${meta}</span></a>${add}`;
 }
 
 // ---------- ideas (D5, the vapor catch) ----------
@@ -859,7 +871,7 @@ function boardView(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
   const switches = styles.map(([s, label, icon]) => `<label for="bv-${s}">${icon}${label}</label>`).join("");
   return radios
     + `<div class="board-bar"><span class="seg" role="group" aria-label="Board style">${switches}</span>${LEGEND}</div>`
-    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed, ext, moves)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed)}</div>`;
+    + `<div class="bv bv-kanban">${boardHtml(nodes, trail, links, ghosts, changed, ext, moves)}</div><div class="bv bv-graph">${graphHtml(nodes, trail, links, ghosts, changed, { names: titledNames(nodes, ext), adds: ext.form !== undefined })}</div>`;
 }
 
 // ---------- history ----------
@@ -982,10 +994,11 @@ const linkTo = (key: string, ctx: Pick<DialogContext, "indexOf" | "rowOf">) => {
   return row ? `<a href="#t${ctx.indexOf.get(key)}">${esc(row.id)}</a>${stateBadge(row.state)}` : "";
 };
 
+// a task's marks beside its status (in progress and "active" said the same thing twice: Isha,
+// 2026-10-26, so active isn't one; the graph and the cards' ◆ now say it)
 function marksHtml(r: TreeRow): string {
   return [
     r.cursor ? `<span class="mark cursor">◆ next</span>` : "",
-    r.active ? `<span class="mark active">● active</span>` : "",
     r.drained ? `<span class="mark drained">all subtasks closed</span>` : "",
     r.closedByTira ? `<span class="mark tira">closed by tira</span>` : "",
     r.awaitingClose ? `<span class="mark wait">tira closes it when you move on</span>` : "",
@@ -1185,11 +1198,16 @@ const hoursOf = (estimate: string | undefined) => {
 };
 const hoursSaid = (h: number) => {
   const days = Math.floor(h / 8);
-  const rest = Math.round((h - days * 8) * 10) / 10;
+  const rest = Math.round((h - days * 8) * 2) / 2; // to the half hour
   return [days > 0 ? `${days}d` : "", rest > 0 ? `${rest}h` : ""].filter(Boolean).join(" ") || "0h";
 };
 // a ticket's name as people read it: its title, else its id
 const nameOf = (ext: Ext, row: TreeRow) => ext.tickets.get(row.id)?.title ?? row.id;
+// the tasks whose tickets have a title, by key: the graph shows the title, the rest their ids in words
+const titledNames = (nodes: readonly Placed[], ext: Ext) => new Map(nodes.flatMap((n) => {
+  const t = ext.tickets.get(n.row.id)?.title;
+  return t ? [[n.row.key, t] as const] : [];
+}));
 // who it's assigned to, as a small mark: an agent's spark, a person's initials
 const whoMark = (name: string | undefined) => {
   if (!name) return `<span class="who none" title="Nobody yet" aria-label="Nobody yet">–</span>`;
@@ -1282,15 +1300,23 @@ function foundHtml(r: TreeRow, ctx: DialogContext): string {
   const body = at === undefined ? esc(name) : `<a href="#t${at}" title="${esc(name)}">${esc(name)}</a>`;
   return propHtml("Found in", `<span class="found-in">${ICON.found}${body}</span>`, " data-found-in");
 }
+// A task whose subtasks are still open can't be completed or dropped yet (they close first), so its
+// dialog offers neither, and says how many are open (Isha, 2026-10-26). A top-level task has no
+// Parent row: an empty one said nothing.
+const CLOSES = new Set(["COMPLETE", "CANCEL"]);
+const MAIN_MOVES = new Set(["START", "COMPLETE", "UNBLOCK", "REOPEN"]);
 function propertiesHtml(n: Placed, ctx: DialogContext): string {
   const r = n.row;
-  const verbs = ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : [];
-  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q)).join("")}</div>` : "";
+  const open = r.children.filter((c) => !CLOSED.has(c.state)).length;
+  const verbs = (ctx.live ? DIALOG_ACTIONS[r.state] ?? [] : []).filter(([ev]) => open === 0 || !CLOSES.has(ev));
+  const waits = ctx.live && open > 0 && !CLOSED.has(r.state) ? `<p class="tk-wait" data-subtasks-open>${open === 1 ? "1 subtask is" : `${open} subtasks are`} still open: they close first.</p>` : "";
+  // the state's main move leads, in the main button's colour; Block or Cancel alone never looks like it
+  const acts = verbs.length > 0 ? `<div class="drawer-acts" data-dialog-acts>${verbs.map(([ev, label]) => actLink(r, ev, label, ctx.q, MAIN_MOVES.has(ev))).join("")}</div>` : "";
   return `<aside class="tk-side" aria-label="Properties">`
-    + propHtml("Status", `<div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>`) + acts
+    + propHtml("Status", `<div class="badges">${stateBadge(r.state)}${marksHtml(r)}</div>`) + acts + waits
     + propHtml("Assignee", assigneeHtml(n, ctx), " data-ticket-assignee")
     + propHtml("Estimate", estimateHtml(n, ctx), " data-ticket-estimate")
-    + propHtml("Parent", parentHtml(n, ctx), " data-parent")
+    + (n.parent ? propHtml("Parent", parentHtml(n, ctx), " data-parent") : "")
     + foundHtml(r, ctx)
     + linksHtml(r, ctx) + taskLinksHtml(ctx.ext, r.id) + proofHtml(r, ctx) + locate(r.key, ctx.live)
     + `</aside>`;
@@ -1551,13 +1577,13 @@ function cardHtml(n: Placed, c: CardCtx): string {
   const found = foundMark(r, nameAt);
   const link = cardLinksHtml(r, idOf, links);
   const last = (trail.get(r.key) ?? []).filter((x) => !x.refused).at(-1)?.actor;
-  const key = ext.keys.get(r.id);
-  const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
   const cursorWord = r.active ? "now" : "next";
   const pin = r.cursor ? `<span class="pin">◆ ${cursorWord}</span>` : "";
   const title = ext.tickets.get(r.id)?.title;
   const named = title ? `<div class="t" title="${esc(title)}">${esc(title)}</div>` : `<div class="t">${wraps(r.id)}</div>`;
-  return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}${parent}${named}`
+  // no ticket key on the card (Isha, 2026-10-26: "no point keeping it on the board"): it's on the
+  // ticket, and the search finds it
+  return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${pin}${parent}${named}`
     + `<div class="row">${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
 }
 // Kanban: every ticket in its status column, named by its ticket's title (else its id). A card
@@ -1700,7 +1726,8 @@ const option = (v: string) => `<option value="${esc(v)}">${esc(v)}</option>`;
 const propPill = (name: string, label: string, icon: string, none: string, options: string) =>
   `<label class="prop-pill" data-pill="${esc(label)}">${icon}<span class="prop-said">${esc(label)}</span><select name="${name}" aria-label="${esc(label)}"><option value="">${esc(none)}</option>${options}</select></label>`;
 export interface CreateOf { more?: boolean; said?: { ok: boolean; text: string } }
-const createHtml = (o: { token: string; q: string; stream: string; name: string; open: string[]; people: string[]; agents: string[]; create?: CreateOf | undefined }) => {
+// open: the tasks that can take one under them, by id, each with its name as people read it
+const createHtml = (o: { token: string; q: string; stream: string; name: string; open: [string, string][]; people: string[]; agents: string[]; create?: CreateOf | undefined }) => {
   const group = (label: string, xs: string[]) => (xs.length > 0 ? `<optgroup label="${label}">${xs.map(option).join("")}</optgroup>` : "");
   const saidClass = o.create?.said?.ok === false ? "composer-said no" : "composer-said";
   const said = `<span class="${saidClass}" role="status" data-create-said>${esc(o.create?.said?.text ?? "")}</span>`;
@@ -1712,7 +1739,7 @@ const createHtml = (o: { token: string; q: string; stream: string; name: string;
     + `<div class="composer-props"><span class="prop-pill is-fixed" title="Every task starts in To do">${PILL_ICON.status}To do</span>`
     + propPill("assignee", "Assignee", PILL_ICON.assignee, "No assignee", group("People", o.people) + group("Agents", o.agents))
     + `<span class="prop-pill effort-pill">${PILL_ICON.estimate}${effortHtml("create-effort", undefined)}</span>`
-    + (o.open.length > 0 ? propPill("parent", "Parent", PILL_ICON.parent, "No parent", o.open.map(option).join("")) : "")
+    + (o.open.length > 0 ? propPill("parent", "Parent", PILL_ICON.parent, "No parent", o.open.map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("")) : "")
     + `</div><footer class="composer-foot"><label class="composer-more"><input type="checkbox" name="more" value="1"${o.create?.more ? " checked" : ""}><span>Keep open for the next one</span></label>${said}`
     + `<button class="act primary composer-go" type="submit">Create task <kbd>⌘</kbd><kbd>↵</kbd></button></footer></form></div></section>`;
 };
@@ -1999,7 +2026,7 @@ ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: p
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${historyHtml(`${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}`)}
 ${guideHtml(opts.live?.onboarding !== undefined)}
-${form ? createHtml({ token: form.token, q, stream, name, open: nodes.filter((n) => TAKES_SUBTASKS.has(n.row.state)).map((n) => n.row.id), people: form.people, agents: form.agents, create: opts.live?.create }) + keysHtml() : ""}
+${form ? createHtml({ token: form.token, q, stream, name, open: nodes.filter((n) => TAKES_SUBTASKS.has(n.row.state)).map((n) => [n.row.id, nameOf(ext, n.row)]), people: form.people, agents: form.agents, create: opts.live?.create }) + keysHtml() : ""}
 ${opts.live?.onboarding?.tour ?? ""}${opts.live?.inbox?.letter ?? ""}</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}${form ? `<script type="module" src="/keys.mjs"></script><script type="module" src="/coach.mjs"></script><script type="module" src="/create.mjs"></script><script type="module" src="/combo.mjs"></script>` : ""}${opts.live?.onboarding ? `<script type="module" src="/tour.mjs"></script>` : ""}</body></html>
 `;
 }
