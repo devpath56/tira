@@ -1,11 +1,13 @@
-// The way into `tira serve` for people who sign in: a landing page (one button: Continue with
-// GitHub), straight to GitHub and back once tira's app has its secret (else GitHub's code to approve), then one step to connect the workspace to a GitHub repo and,
-// if you use one, a Jira project; then the board.
+// The way into `tira serve` for people who sign in: a landing page (New user? Sign up; Welcome
+// back! Log in; both with GitHub), straight to GitHub and back once tira's app has its secret (else
+// GitHub's code to approve), then one step to connect the workspace to a GitHub repo and, if you use
+// one, a Jira project; then the board.
 //
-// Apple's Human Interface Guidelines, as in debugAssist: a material card on a quiet background,
-// the sign-in button in the label colour, blue for the one primary action, grouped lists for
-// settings, and as few words as will do. Light and dark. CSS only, apart from signin.mjs on the
-// code step (it waits for GitHub, and copies the code) and tabs.mjs (Jira's own tab).
+// Apple's Human Interface Guidelines: a material card (frosted, with depth) on a living background
+// (land.mjs: a task tree that grows, behind the card; Isha, 2026-10-26), blue for the one primary
+// action, grouped lists for settings, large touch targets, and as few words as will do. Light and
+// dark; still for Reduce Motion; solid for Reduce Transparency. Apart from the background, CSS only,
+// but signin.mjs on the code step (it waits for GitHub, and copies the code) and tabs.mjs (Jira's own tab).
 // The routes are in integrations.ts; this file only writes the pages.
 import { esc } from "../render/escape.ts";
 import { BRAND_MARK, CSS, THEME_RADIOS } from "../render/html.ts";
@@ -17,10 +19,34 @@ const JIRA_MARK = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" strok
 const FLOW = ["Sign in with GitHub", "Connect a repo", "Add Jira (optional)", "Work the board"];
 
 const LAND_CSS = `
-body.land{min-height:100vh;min-height:100dvh;display:grid;place-items:center;background:var(--bg)}
-body.land::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
-background:radial-gradient(60% 45% at 50% -10%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%)}
+body.land{min-height:100vh;min-height:100dvh;display:grid;place-items:center;overflow-x:hidden;
+background:linear-gradient(180deg,color-mix(in srgb,var(--bg) 90%,var(--done)) 0%,var(--bg) 55%,color-mix(in srgb,var(--bg) 86%,var(--done)) 100%)}
+body.land::before{content:"";position:fixed;inset:-10%;z-index:0;pointer-events:none;
+background:radial-gradient(42% 38% at 14% 92%,color-mix(in srgb,var(--done) 30%,transparent),transparent 70%),
+radial-gradient(40% 36% at 88% 8%,color-mix(in srgb,var(--accent) 28%,transparent),transparent 70%),
+radial-gradient(34% 30% at 78% 88%,color-mix(in srgb,var(--done) 18%,transparent),transparent 70%),
+radial-gradient(30% 28% at 22% 12%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 70%)}
+.land-scene{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 .land-wrap{position:relative;z-index:1;width:min(820px,calc(100vw - 32px));max-width:none;padding:32px 0;margin:0}
+.land-card.solo{grid-template-columns:1fr;max-width:440px;margin:0 auto;border-radius:24px;
+background:color-mix(in srgb,var(--panel) 72%,transparent);-webkit-backdrop-filter:blur(28px) saturate(170%);backdrop-filter:blur(28px) saturate(170%);
+box-shadow:0 0 0 .5px color-mix(in srgb,var(--fg) 14%,transparent),0 1px 0 color-mix(in srgb,#fff 18%,transparent) inset,0 30px 80px -30px rgba(0,0,0,.45)}
+.land-card.solo .land-form{gap:12px;padding:40px 36px 32px;justify-items:stretch;text-align:left}
+.land-card.solo .land-mark,.land-card.solo h1,.land-sub{justify-self:center;text-align:center}
+.land-card.solo h1{font-size:28px;letter-spacing:-.02em;margin:6px 0 0}
+.land-sub{margin:0 0 10px;font-size:15px;color:var(--mut)}
+.land-ways{display:grid;gap:10px}
+.land-k{margin:6px 0 0;font-size:13px;color:var(--mut)}.land-k b{color:var(--fg);font-weight:600}
+.land-btn.tinted{background:color-mix(in srgb,var(--fg) 9%,transparent);color:var(--fg);box-shadow:0 0 0 .5px color-mix(in srgb,var(--fg) 16%,transparent) inset}
+.land-btn.tinted:hover{background:color-mix(in srgb,var(--fg) 14%,transparent);opacity:1}
+.land-or{display:flex;align-items:center;gap:12px;margin:8px 0 0;font-size:12px;color:var(--dim)}
+.land-or::before,.land-or::after{content:"";flex:1;height:.5px;background:color-mix(in srgb,var(--fg) 22%,transparent)}
+.land-remember{display:flex;align-items:center;gap:8px;min-height:32px;font-size:14px;color:var(--mut);cursor:pointer;justify-self:start;border-radius:8px}
+.land-remember input{flex:none;width:17px;height:17px;margin:0;accent-color:var(--btn);cursor:pointer}
+.land-remember:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.land-new{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+.land-new b{color:var(--fg);font-weight:600}
+.land-btn.small{width:auto;height:36px;padding:0 14px;border-radius:10px;font-size:14px}.land-btn.small svg{width:16px;height:16px}
 .land-card{display:grid;grid-template-columns:1fr 1fr;border-radius:20px;overflow:hidden;
 background:color-mix(in srgb,var(--panel) 86%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
 box-shadow:0 0 0 .5px color-mix(in srgb,var(--fg) 12%,transparent),0 24px 60px -24px rgba(0,0,0,.35)}
@@ -62,12 +88,19 @@ background:var(--fg);color:var(--bg);font:600 15px var(--sans);cursor:pointer;te
 .land-who{display:flex;justify-content:center;align-items:center;gap:10px;font-size:13px;color:var(--mut)}.land-who form{display:inline}
 @media (max-width:720px){.land-card{grid-template-columns:1fr}.land-brand{padding:22px 22px 4px;gap:8px;background:none}
 .land-brand h2{font-size:19px}.land-flow{display:none}.land-form{padding:24px 22px 32px}.land-body{padding:18px}}
-@media (prefers-reduced-transparency:reduce){.land-card{background:var(--panel);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media (prefers-reduced-transparency:reduce){.land-card,.land-card.solo{background:var(--panel);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media (max-width:480px){.land-card.solo .land-form{padding:30px 20px 24px}.land-card.solo h1{font-size:24px}}
 @media (prefers-reduced-motion:no-preference){.land-card{animation:land-in .45s cubic-bezier(.2,.7,.2,1) both}
+.land-card.solo .land-form>*,.land-ways>*{animation:land-rise .6s cubic-bezier(.2,.7,.2,1) both}
+.land-card.solo .land-form>:nth-child(2){animation-delay:.06s}.land-card.solo .land-form>:nth-child(3){animation-delay:.12s}.land-card.solo .land-form>:nth-child(4){animation-delay:.18s}
+.land-ways>:nth-child(2){animation-delay:.22s}.land-ways>:nth-child(3){animation-delay:.28s}.land-ways>:nth-child(4){animation-delay:.34s}.land-ways>:nth-child(5){animation-delay:.4s}.land-ways>:nth-child(6){animation-delay:.46s}.land-ways>:nth-child(7){animation-delay:.52s}
+body.land::before{animation:land-drift 40s ease-in-out infinite alternate}
 .land-flow li{animation:land-row 8s calc(var(--i) * 1.4s + .4s) infinite both}.land-flow li .d{animation:land-dot 8s calc(var(--i) * 1.4s + .4s) infinite both}
 .land-status::before{animation:land-pulse 1.6s ease-in-out infinite}}
 @media (prefers-reduced-motion:reduce){.land-flow .d{background:var(--done)}}
 @keyframes land-in{from{opacity:0;transform:translateY(8px) scale(.99)}}
+@keyframes land-rise{from{opacity:0;transform:translateY(10px)}}
+@keyframes land-drift{to{transform:translate3d(3%,-2%,0) scale(1.06)}}
 @keyframes land-row{0%{background:transparent}4%,14%{background:color-mix(in srgb,var(--accent) 12%,transparent)}20%,100%{background:transparent}}
 @keyframes land-dot{0%{background:var(--line-2)}4%,14%{background:var(--accent)}20%,100%{background:var(--done)}}
 @keyframes land-pulse{50%{opacity:.35}}
@@ -81,7 +114,7 @@ const hiddenToken = (token: string) => `<input type="hidden" name="token" value=
 // choice this browser made there (theme.mjs).
 function page(title: string, card: string, script = ""): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${CSS}${LAND_CSS}</style></head><body class="land">${THEME_RADIOS}<main class="land-wrap">${card}</main><script type="module" src="/theme.mjs"></script>${script}</body></html>\n`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${CSS}${LAND_CSS}</style></head><body class="land">${THEME_RADIOS}<canvas class="land-scene" data-land-scene aria-hidden="true"></canvas><main class="land-wrap">${card}</main><script type="module" src="/theme.mjs"></script><script type="module" src="/land.mjs"></script>${script}</body></html>\n`;
 }
 
 // the left side of the landing and of the code step: what tira does, in four words each
@@ -95,20 +128,21 @@ export interface LandingOpts {
   token: string;
   githubReady: boolean; // tira's GitHub app is set up on this machine
   port: string;
-  known?: boolean; // someone has signed in on this browser: Sign in only, no Sign up
   flash?: Flash;
 }
 
-// signing in with GitHub, and (for someone new) signing up: in at once (Isha, 2026-10-25)
-const signInForm = (token: string, label: string) =>
-  `<form method="post" action="/signin/start">${hiddenToken(token)}<button class="land-btn" type="submit" data-signin-start>${GITHUB_MARK}<span>${label}</span></button></form>`;
-const signUpForm = (token: string) =>
-  `<form method="post" action="/signin/start">${hiddenToken(token)}<input type="hidden" name="signup" value="1"><button class="land-btn blue" type="submit" data-signup-start>${GITHUB_MARK}<span>Sign up with GitHub</span></button></form>`;
-// the landing's way in: Sign up and Sign in for someone new; Sign in only on a browser someone signed in on
+// The way in (Isha, 2026-10-26): Welcome back! Log in first, the one primary action; New user?
+// Sign up under it, smaller; always both, both with GitHub, in one form, so Remember this browser
+// goes with either. Left unticked, the login ends when the browser closes (and lasts 12 hours at
+// most); ticked, 30 days.
 function wayIn(o: LandingOpts): string {
-  if (o.known) return `<h1>Sign in to tira</h1>${flashHtml(o.flash)}${signInForm(o.token, "Continue with GitHub")}`;
-  return `<h1>Welcome to tira</h1>${flashHtml(o.flash)}${signUpForm(o.token)}${signInForm(o.token, "Sign in with GitHub")}`
-    + `<p class="land-foot" data-newcomer>New here? Sign up with GitHub: you're the admin of every project you make, and you add your team.</p>`;
+  return `<h1>Welcome to tira</h1><p class="land-sub">Plan the work. Prove it's done.</p>${flashHtml(o.flash)}`
+    + `<form method="post" action="/signin/start" class="land-ways" data-signin-form>${hiddenToken(o.token)}`
+    + `<p class="land-k" data-returning><b>Welcome back!</b></p>`
+    + `<button class="land-btn blue" type="submit" name="signup" value="0" data-signin-start>${GITHUB_MARK}<span>Log in with GitHub</span></button>`
+    + `<label class="land-remember" data-remember><input type="checkbox" name="remember" value="1"><span>Remember this browser</span></label>`
+    + `<p class="land-or" aria-hidden="true">or</p>`
+    + `<div class="land-new" data-newcomer><span><b>New user?</b></span><button class="land-btn tinted small" type="submit" name="signup" value="1" data-signup-start>${GITHUB_MARK}<span>Sign up with GitHub</span></button></div></form>`;
 }
 
 export interface EmailOpts { token: string; login: string; flash?: Flash }
@@ -120,10 +154,11 @@ export function emailPage(o: EmailOpts): string {
     + `<p class="land-foot">Hi ${esc(o.login)}: which email should tira keep for you? Only you see it.</p>`
     + `<form method="post" action="/signup/email" data-signup-email>${hiddenToken(o.token)}<label class="land-field"><span>Email</span><input type="email" name="email" required maxlength="200" autocomplete="email" autofocus></label>`
     + `<button class="land-btn blue" type="submit">Continue</button></form>`;
-  return page("Your email · tira", `<div class="land-card" data-landing>${brandSide()}<section class="land-form">${form}</section></div>`);
+  return page("Your email · tira", `<div class="land-card solo" data-email-step><section class="land-form">${form}</section></div>`);
 }
 
-// The landing: sign in with GitHub, or, the first time on this machine, set up tira's GitHub app.
+// The landing: one card on the living background, to sign up or log in with GitHub, or, the first
+// time on this machine, to set up tira's GitHub app.
 export function landingPage(o: LandingOpts): string {
   const form = o.githubReady
     ? `<div class="land-mark">${BRAND_MARK}</div>${wayIn(o)}`
@@ -133,7 +168,7 @@ export function landingPage(o: LandingOpts): string {
       + `<label class="land-field"><span>GitHub Secret (optional: sign in in one click)</span><input type="password" name="github_secret" autocomplete="off"></label>`
       + `<button class="land-btn blue" type="submit">Continue</button></form>`
       + `<details class="land-how"><summary>Where do I find it?</summary><ol><li>GitHub → Settings → Developer settings → OAuth Apps → New.</li><li>Homepage <code>http://localhost:${esc(o.port)}</code>, callback <code>http://localhost:${esc(o.port)}/signin/github/callback</code> (the address tira sends, exactly).</li><li>Register, tick Enable Device Flow, copy the Client ID.</li><li>For sign-in in one click: Generate a new client secret, and paste it too.</li></ol></details>`;
-  return page("Sign in to tira", `<div class="land-card" data-landing>${brandSide()}<section class="land-form">${form}</section></div>`);
+  return page("Welcome to tira", `<div class="land-card solo" data-landing><section class="land-form">${form}</section></div>`);
 }
 
 export interface CodeOpts { token: string; id: string; userCode: string; verifyAt: string; interval: number; note?: string }

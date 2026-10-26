@@ -20,7 +20,7 @@ import { commitsOf } from "../src/fold/tickets.ts";
 import { lookedSaid, lookForCommits, proveWith } from "../src/sync/commits.ts";
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
-import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveAccess, savedProjects, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
+import { access, appKeys, atlassianAuth, emailOf, githubAuth, jiraLogin, knownLogin, saveAccess, savedProjects, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
 import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
@@ -434,8 +434,8 @@ class FakeGitHubAuth implements GitHubAuthApi {
   approveAfter = 1; // polls that come back "not yet" first
   login = "isha-gh"; // who GitHub says signed in
   // the direct way: GitHub's page, and the one-time code it sends people back with
-  authorizeUrl(clientId: string, redirectUri: string, state: string) {
-    return `https://github.example/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+  authorizeUrl(clientId: string, redirectUri: string, state: string, pickAccount = false) {
+    return `https://github.example/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}${pickAccount ? "&prompt=select_account" : ""}`;
   }
   async exchange(clientId: string, secret: string, code: string) {
     if (secret !== "gh-secret") throw new Error("GitHub doesn't know tira's app: check its Client ID and secret");
@@ -508,16 +508,18 @@ async function serving(home: string, actor: string | null = "isha") {
     for (let hops = 0; got.status === 303 && hops < 3; hops++) got = await http("GET", (to = String(got.headers.location)));
     return (got.body.match(/data-flash>([^<]+)</)?.[1] ?? "").replaceAll("&#39;", "'");
   };
+  // the way in for whoever the stand-in GitHub says: Sign up the first time, Log in after
+  const wayFor = (): Record<string, string> => (knownLogin(githubAuthApi.login, env) || emailOf(githubAuthApi.login, env) ? {} : { signup: "1" });
   // sign in with the stand-in GitHub, approved at once (GitHub sign-in must be set up)
   const signInWithGitHub = async () => {
     githubAuthApi.approveAfter = 0;
-    const id = /[?&]id=([0-9a-f]+)/.exec(String((await post("/signin/start", {})).headers.location))?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await post("/signin/start", wayFor())).headers.location))?.[1] ?? "";
     const done = await post("/signin/poll", { id, fragment: "1" });
     cookie = String(done.headers["set-cookie"]).split(";")[0] ?? "";
     return done;
   };
   return {
-    ...w, env, port, http, post, flash, githubAuthApi, atlassian, signInWithGitHub,
+    ...w, env, port, http, post, flash, githubAuthApi, atlassian, signInWithGitHub, wayFor,
     signIn: (c: string) => { cookie = c; }, signOut: () => { cookie = ""; }, cookie: () => cookie,
     done: () => new Promise<void>((r) => server.close(() => r())),
   };
@@ -644,10 +646,10 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.deepEqual([unsigned.status, JSON.parse(unsigned.body)], [401, { ok: false, text: "Sign in with GitHub first." }]); // no one to check GitHub as
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "repo", repo: "acme/app" })), "Sign in with GitHub first.");
     assert.equal(workspaceOf(await s.state(), S), undefined);
-    assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Sign in with GitHub<\/span><\/button>/);
+    assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Log in with GitHub<\/span><\/button>/);
     // the code, and the page that waits for it, at its own address: Back from GitHub (when it
     // opened in the same tab) or a reload comes back to the code, never to a blank page
-    const started = await s.post("/signin/start", {});
+    const started = await s.post("/signin/start", s.wayFor());
     assert.equal(started.status, 303);
     const codeAt = String(started.headers.location);
     assert.match(codeAt, /^\/signin\/code\?id=[0-9a-f]{32}$/);
@@ -663,7 +665,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.equal(waiting.headers["set-cookie"], undefined); // not approved yet: no one is signed in
     const done = await s.post("/signin/poll", { id, fragment: "1" });
     const setCookie = String(done.headers["set-cookie"]);
-    assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
+    assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/$/); // this browser not remembered: gone when it closes
     assert.match(done.body, /^<div data-go="\/connect\?r=\d+"><\/div>$/); // no repo yet: connect one next
     const session = setCookie.split(";")[0] ?? "";
     s.signIn(session);
@@ -709,11 +711,17 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     // a browser holds a form's whole trip to the page's form-action: the way in lets Continue go on to
     // GitHub's real sign-in page and nowhere else; every other page keeps its forms to tira
     const real = new URL(new GitHubDevice().authorizeUrl("Iv1.gh", "http://localhost/", "s"));
+    // signing up asks GitHub for its account picker, so someone signed in there can pick another
+    // account; logging in doesn't
+    assert.equal(real.searchParams.get("prompt"), null);
+    assert.equal(new URL(new GitHubDevice().authorizeUrl("Iv1.gh", "http://localhost/", "s", true)).searchParams.get("prompt"), "select_account");
+    assert.equal(new URL(String((await s.post("/signin/start", { signup: "1" })).headers.location)).searchParams.get("prompt"), "select_account");
+    assert.equal(new URL(String((await s.post("/signin/start", { signup: "0" })).headers.location)).searchParams.get("prompt"), null);
     assert.equal((await s.http("GET", "/welcome")).headers["content-security-policy"], CSP.replace("form-action 'self'", `form-action 'self' ${real.origin}${real.pathname}`));
     assert.equal((await s.http("GET", "/")).headers["content-security-policy"], CSP);
     // Continue with GitHub: off to GitHub's page, with a state, and the same state in a cookie for this browser
-    const leave = async () => {
-      const start = await s.post("/signin/start", {});
+    const leave = async (remember = false) => {
+      const start = await s.post("/signin/start", { ...(remember ? { remember: "1" } : {}), ...s.wayFor() });
       assert.equal(start.status, 303);
       const to = new URL(String(start.headers.location));
       assert.equal(`${to.origin}${to.pathname}`, "https://github.example/login/oauth/authorize");
@@ -738,8 +746,9 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     const old = await leave();
     s.signIn(`tira_signin=${old}`);
     assert.equal(await s.flash(await comeBack(old, "code=used-code")), "GitHub sign-in stopped (GitHub's code was used or too old: sign in again).");
-    // the real way back: signed in as the person GitHub says, with no code to type
-    const state = await leave();
+    // the real way back: signed in as the person GitHub says, with no code to type, and this browser
+    // remembered (Remember this browser ticked): 30 days
+    const state = await leave(true);
     s.signIn(`tira_signin=${state}`);
     const back = await comeBack(state, "code=gh-code");
     assert.equal(back.status, 303);
@@ -789,7 +798,8 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.equal(await to("/integrations"), "/welcome");
     assert.equal(await to("/connect"), "/welcome");
     let landing = (await s.http("GET", "/welcome")).body;
-    assert.match(landing, /<div class="land-card" data-landing><section class="land-brand" aria-label="What tira does">/);
+    assert.match(landing, /<canvas class="land-scene" data-land-scene aria-hidden="true"><\/canvas><main class="land-wrap"><div class="land-card solo" data-landing><section class="land-form">/);
+    assert.match(landing, /<script type="module" src="\/land\.mjs"><\/script>/); // the growing tree behind the card
     assert.match(landing, /<h1>Set up sign-in<\/h1>/); // the first time on this machine: tira's GitHub app
     assert.doesNotMatch(landing, /data-signin-start/);
     assert.equal(await s.flash(await s.post("/connect", { repo: "acme/app" })), "Sign in with GitHub first.");
@@ -800,7 +810,7 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" })), "Saved. Now sign in.");
     landing = (await s.http("GET", "/welcome")).body;
     assert.match(landing, /<h1>Welcome to tira<\/h1>/);
-    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up with GitHub: you're the admin of every project you make, and you add your team\.<\/p>/);
+    assert.match(landing, /<div class="land-new" data-newcomer><span><b>New user\?<\/b><\/span>/);
     const done = await s.signInWithGitHub();
     assert.match(done.body, /data-go="\/connect\?r=\d+"/);
     // signed in, no repo yet: connect one before the board
@@ -895,7 +905,7 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     assert.equal(access(s.env).admin, "isha-gh");
     const connect = await s.http("GET", "/connect");
     assert.equal(connect.status, 200);
-    assert.match(String(connect.headers["set-cookie"]), /^tira_known=1; HttpOnly; SameSite=Lax; Path=\/; Max-Age=31536000$/); // this browser's landing offers Sign in only from now on
+    assert.equal(connect.headers["set-cookie"], undefined); // nothing kept about this browser beyond the sign-in
     // Account settings: the email GitHub's profile shows, the username people add you by, and
     // (for the owner) removed accounts; no list of who may sign in
     let page = (await s.http("GET", "/settings")).body;
@@ -907,17 +917,32 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
     assert.equal(await s.flash(await s.post("/signup/email", { email: "isha@work.example", back: "/settings" })), "Your email is isha@work.example now.");
     assert.equal(await s.flash(await s.post("/signup/email", { email: "not an email", back: "/settings" })), "That isn't an email address.");
     s.signOut();
-    // a browser no one has signed in on: Sign up and Sign in, and no one to ask
+    // the landing (Isha, 2026-10-26): Welcome back! Log in first, then New user? Sign up, smaller;
+    // always both, in one form, with Remember this browser for either (unticked)
     const landing = (await s.http("GET", "/welcome")).body;
-    assert.match(landing, /<h1>Welcome to tira<\/h1><form method="post" action="\/signin\/start"><input type="hidden" name="token" value="k"><input type="hidden" name="signup" value="1"><button class="land-btn blue" type="submit" data-signup-start>[^]*?<span>Sign up with GitHub<\/span><\/button><\/form><form method="post" action="\/signin\/start">[^]*?data-signin-start>[^]*?<span>Sign in with GitHub<\/span>/);
-    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up with GitHub: you(?:'|&#39;)re the admin of every project you make, and you add your team\.<\/p>/);
-    const known = (await s.http("GET", "/welcome", undefined, undefined, "tira_known=1")).body;
-    assert.match(known, /<h1>Sign in to tira<\/h1><form method="post" action="\/signin\/start">[^]*?<span>Continue with GitHub<\/span>/);
-    assert.doesNotMatch(known, /data-signup-start|data-newcomer/);
+    assert.match(landing, /<h1>Welcome to tira<\/h1><p class="land-sub">Plan the work\. Prove it(?:'|&#39;)s done\.<\/p><form method="post" action="\/signin\/start" class="land-ways" data-signin-form><input type="hidden" name="token" value="k"><p class="land-k" data-returning><b>Welcome back!<\/b><\/p><button class="land-btn blue" type="submit" name="signup" value="0" data-signin-start>[^]*?<span>Log in with GitHub<\/span><\/button><label class="land-remember" data-remember><input type="checkbox" name="remember" value="1"><span>Remember this browser<\/span><\/label><p class="land-or" aria-hidden="true">or<\/p><div class="land-new" data-newcomer><span><b>New user\?<\/b><\/span><button class="land-btn tinted small" type="submit" name="signup" value="1" data-signup-start>[^]*?<span>Sign up with GitHub<\/span><\/button><\/div><\/form>/);
+    assert.doesNotMatch(landing, /name="remember" value="1" checked/);
+    // a browser someone signed in on before: the same, both ways in
+    assert.equal((await s.http("GET", "/welcome", undefined, undefined, "tira_known=1")).body.replace(/r=\d+/g, ""), landing.replace(/r=\d+/g, ""));
     // someone new signs up: in at once, with their email, onto their own (empty) project list
     const joined = await signUp("octo");
     assert.match(joined.body, /^<div data-go="\/projects\?r=\d+"><\/div>$/);
     assert.equal(await s.flash(joined), "Welcome to tira, octo: make your first project, or open one someone added you to.");
+    // signing up again with an account tira already has: told to log in, and nothing changes; and
+    // logging in with one it doesn't have: told to sign up first
+    const octoIn = s.cookie();
+    s.signOut();
+    s.githubAuthApi.login = "newbie";
+    s.githubAuthApi.approveAfter = 0;
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", { signup: "0" })).headers.location))?.[1] ?? "";
+    const stranger = await s.post("/signin/poll", { id, fragment: "1" });
+    assert.equal(stranger.headers["set-cookie"], undefined);
+    assert.equal(await s.flash(stranger), "newbie doesn't have a tira account yet: sign up first.");
+    assert.equal(githubAuth("newbie", s.env), undefined); // nothing of theirs kept
+    const again = await signUp("octo");
+    assert.equal(again.headers["set-cookie"], undefined);
+    assert.equal(await s.flash(again), "octo already has a tira account: log in instead.");
+    s.signIn(octoIn);
     assert.match((await s.http("GET", "/projects")).body, /<div class="grp-row" data-no-projects><span class="grp-k">You(?:'|&#39;)re not in any project yet<\/span><a class="act primary" href="\/projects\/new">Make your first project<\/a><\/div>/);
     // isha's project isn't theirs: it doesn't exist, as far as they can tell
     assert.match(String(await to("/")), /^\/projects/);
@@ -1012,7 +1037,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
   const s = await serving(home);
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", atlassian_client_id: "at-id", atlassian_secret: "SECRET-xyz" });
-    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", {})).headers.location))?.[1] ?? "";
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", s.wayFor())).headers.location))?.[1] ?? "";
     s.githubAuthApi.approveAfter = 0;
     s.signIn(String((await s.post("/signin/poll", { id, fragment: "1" })).headers["set-cookie"]).split(";")[0] ?? "");
     // the repo, from your repos

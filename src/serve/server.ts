@@ -43,7 +43,7 @@ import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commit
 import { AsyncLocalStorage } from "node:async_hooks";
 import { appKeys, atlassianAuth, displayName, emailOf, importAccountsFile, isBlocked, postgresAccounts, refreshAccounts, saveProject, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
-import { accounts, cookieOf, integrationRoutes, KNOWN_COOKIE, NEXT_COOKIE, whoIs, type MyProject, type Outside } from "./integrations.ts";
+import { accounts, integrationRoutes, NEXT_COOKIE, whoIs, type MyProject, type Outside } from "./integrations.ts";
 import { everyone, inProject, isProjectAdmin, makers, MAX_PROJECTS, projectPeople } from "./team.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 import { consentCsp, CSP } from "./csp.ts";
@@ -76,6 +76,7 @@ const ASSETS: Record<string, string> = {
   "/secrets.mjs": readFileSync(new URL("./secrets.mjs", import.meta.url), "utf8"),
   "/drag.mjs": readFileSync(new URL("./drag.mjs", import.meta.url), "utf8"),
   "/agents.mjs": readFileSync(new URL("./agents.mjs", import.meta.url), "utf8"),
+  "/land.mjs": readFileSync(new URL("./land.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -1369,12 +1370,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (me.login && (await turnedAway(req, res, url, key, ws, me.login))) return;
     return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
   };
-  // Someone signed in: this browser is remembered (from now on its landing offers Sign in only), and
-  // where they go instead, if anywhere (true: sent there): with no email yet, the email step; on a
-  // project they aren't one of the people of, no such project (the one tira opened on: their own
-  // projects instead).
+  // Where someone signed in goes instead, if anywhere (true: sent there): with no email yet, the
+  // email step; on a project they aren't one of the people of, no such project (the one tira opened
+  // on: their own projects instead).
   const turnedAway = async (req: IncomingMessage, res: ServerResponse, url: URL, key: string, ws: Workspace, login: string): Promise<boolean> => {
-    if (!cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
     const page = req.method === "GET" && !key.startsWith("GET /api/");
     if (page && !BEFORE_EMAIL.has(key) && !emailOf(login, linkEnv)) {
       send(res, 303, text, "", { Location: "/signup/email" });
