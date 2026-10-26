@@ -208,25 +208,29 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
       return { at, page: (await s.http("GET", at)).body };
     };
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
-    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><h2 class="tk-h"><input type="text" name="title" class="tk-title-in" maxlength="120" value="" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><textarea name="steps" class="tk-in tk-steps-in" rows="1" placeholder="Add steps, one per line…"[^>]*><\/textarea><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // no Edit fold: the ticket is its form
+    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line><\/textarea><\/h2><div class="tk-sec" data-sec="description"><h3 class="tk-label">Description<\/h3><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><\/div><div class="tk-sec" data-sec="steps"><h3 class="tk-label">Steps<\/h3><ol class="tk-steplist" aria-label="Steps" data-ticket-steps><li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="Add the first step…" aria-label="Add a step" autocomplete="off"><\/textarea><\/li><\/ol><\/div><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // key, title, then each part under its own label (Isha, 2026-10-26)
     const form = /id="(tk-\d+)" data-ticket/.exec(ls)?.[1] ?? "";
     assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="" placeholder="Effort" aria-label="Effort" form="${form}"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-${form}-h" form="${form}" checked>`)); // beside, in the same form: effort, a number in hours or days
-    assert.match(ls, /<div class="subtasks" data-subtasks><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div>/); // none yet: just the way to add one
-    assert.match(ls, /<div class="comments" data-comments><h3>Comments<\/h3><form method="post" action="\/comments" class="cm-form" data-comment-form>[^]*?placeholder="Add a comment…"/);
-    assert.match(ls, /<details class="trail"><summary>History <span class="ev-seq">\d+<\/span><\/summary>/); // folded
+    assert.match(ls, /<div class="subtasks tk-sec" data-subtasks><div class="sub-head"><h3 class="tk-label">Subtasks<\/h3><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div><\/div>/); // none yet: just the way to add one
+    assert.match(ls, /<div class="tk-sec activity" data-sec="activity" role="region" aria-label="Activity"><div class="act-head"><h3 class="tk-label">Activity<\/h3><div class="act-tabs" role="group" aria-label="Show"><input class="act-radio" type="radio" name="act-(\d+)" id="act-\1-c" data-tab="c" checked><label for="act-\1-c">Comments<\/label><input class="act-radio" type="radio" name="act-\1" id="act-\1-h" data-tab="h"><label for="act-\1-h">History <span class="k">\d+<\/span><\/label><\/div><\/div><div class="comments" data-comments><form method="post" action="\/comments" class="cm-form" data-comment-form>[^]*?placeholder="Start the conversation…"/);
+    assert.match(ls, /<div class="trail" data-history-pane><ol class="feed">/); // the history: the other tab, Comments open first
+    assert.match((await s.http("GET", "/")).body, /\.activity:has\(\[data-tab=c\]:checked\) \[data-history-pane\],\.activity:has\(\[data-tab=h\]:checked\) \[data-comments\]\{display:none\}/);
     // Save shows once something in the ticket changes (a field beside it too: it's in the same form)
     assert.match((await s.http("GET", "/")).body, /\.js \.tk-form:not\(\[data-dirty\]\) \.tk-save\{display:none\}/);
     const app = (await s.http("GET", "/app.mjs")).body;
     assert.match(app, /document\.documentElement\.classList\.add\("js"\);/);
     assert.match(app, /if \(form\?\.matches\("\[data-ticket-form\]"\)\) form\.dataset\.dirty = "1";/);
+    // Refresh: while changes wait (a dialog open, a field in use), it says so; a click brings them in (Isha, 2026-10-26)
+    assert.match(app, /if \(busy\(\)\) \{\n\s+waiting = true;\n\s+flagNew\(\);\n\s+\} else reload\(\);/);
+    assert.match(app, /refresh\?\.addEventListener\("click", \(e\) => \{\n\s+e\.preventDefault\(\);\n\s+refresh\.classList\.add\("spin"\);\n\s+reload\(\);/);
     const back = /name="back" value="(#t\d+)"/.exec(ls)?.[1] ?? "";
     // saved: back to its dialog, which shows the work under its title
     const saved = await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\n\n  Test on 3G  ", estimate: "2h", assignee: "isha" }));
     assert.match(saved.at, new RegExp(`^/\\?r=\\d+${back}$`));
     assert.match(saved.page, /data-flash>Saved\.<\/div>/);
     ls = dialog(saved.page, "loading_state");
-    assert.match(ls, /value="Loading state" placeholder="loading_state" aria-label="Title" autocomplete="off"><\/h2><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p>/);
-    assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><h3 class="tk-steps-h">Steps<\/h3><textarea name="steps" class="tk-in tk-steps-in" rows="2" placeholder="Add steps, one per line…" aria-label="Steps, one per line" data-ticket-steps>Add the spinner\nTest on 3G<\/textarea>/);
+    assert.match(ls, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line>Loading state<\/textarea><\/h2>/);
+    assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><\/div><div class="tk-sec" data-sec="steps"><h3 class="tk-label">Steps<span class="tk-count">2<\/span><\/h3><ol class="tk-steplist" aria-label="Steps" data-ticket-steps><li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step 1" autocomplete="off">Add the spinner<\/textarea><\/li><li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step 2" autocomplete="off">Test on 3G<\/textarea><\/li><li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="Add a step…" aria-label="Add a step"/); // one numbered row each, then one to add the next
     assert.match(ls, /<span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="2" placeholder="Effort" aria-label="Effort" form="tk-\d+"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-tk-\d+-h" form="tk-\d+" checked>/); // properties, beside: its effort, 2 in hours
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
     // its parent's row for it: its title (and id), estimate and who; the parent adds the estimates up
@@ -249,6 +253,9 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     assert.match((await flashOf(await post("/tickets", { task: "ghost", back }))).page, /data-flash>There is no task ghost\./);
     assert.equal((await s.store.readStream(S)).length, n0);
     assert.match((await flashOf(await post("/tickets", { task: "loading_state", back, title: "Loading state", description: "A spinner while metrics load.\n\nNo layout shift.", steps: "Add the spinner\nTest on 3G", estimate: "2h", assignee: "isha" }))).page, /data-flash>Nothing changed\./);
+    // the page sends its steps one to a row: kept in order, an empty row (the one to add) dropped
+    await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams([["token", "t0k3n"], ["task", "font"], ["back", back], ["step", "Pick the face"], ["step", "  Check   the weights "], ["step", ""]]).toString() });
+    assert.deepEqual((await import("../src/fold/tickets.ts")).ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("font")?.steps, ["Pick the face", "Check the weights"]);
     // a second save is the whole ticket again, its next version
     await post("/tickets", { task: "loading_state", back, title: "Loading state v2" });
     const { ticketsOf } = await import("../src/fold/tickets.ts");
@@ -256,7 +263,7 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     // a comment: feedback on the ticket, as the person writing it
     const commented = await flashOf(await post("/comments", { task: "loading_state", back, text: "Check the dark theme too." }));
     assert.match(commented.page, /data-flash>Comment added\./);
-    assert.match(dialog(commented.page, "loading_state"), /<h3>Comments <span class="ev-seq">1<\/span><\/h3><ol class="cm-list"><li class="cm" data-comment><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]*<\/span><\/div><p>Check the dark theme too\.<\/p><\/li><\/ol>/);
+    assert.match(dialog(commented.page, "loading_state"), /<label for="act-\d+-c">Comments <span class="k">1<\/span><\/label>[^]*?<div class="comments" data-comments><ol class="cm-list"><li class="cm" data-comment><span class="cm-av" aria-hidden="true">IS<\/span><div class="cm-card"><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]*<\/span><\/div><div class="cm-body"><p>Check the dark theme too\.<\/p><\/div><\/div><\/li><\/ol>/); // a thread: their mark, then who, when and what
     assert.match((await flashOf(await post("/comments", { task: "loading_state", back, text: "   " }))).page, /data-flash>A comment is 1 to 2000 characters\./);
     assert.equal((await s.http("POST", "/comments", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: "task=loading_state&text=hi" })).status, 403); // no token
     // a comment sent with a move: on the ticket, once the move is written
@@ -703,7 +710,7 @@ test("blocking on a new ticket creates it under the blocked task and links the t
     assert.match(page, /<path class="e blocks" data-from="node:loading_state" data-to="node:qa_signoff"/); // its own subtask: the tree line is the link
     // both stay tickets on Kanban: the blocked task (now a parent) in Blocked, its new ticket in To do
     const kanban = /<div class="bv bv-kanban">[^]*?<div class="bv bv-graph">/.exec(page)?.[0] ?? "";
-    assert.match(kanban, /Blocked<span class="k">2<\/span><\/div>[^]*?<div class="t">colors<\/div>[^]*?<div class="t">loading_<wbr>state<\/div><div class="row"><span class="chip">improve_visual<\/span><span class="chip" data-subtasks>0\/1 subtasks<\/span>[^]*?blocked by qa_signoff/);
+    assert.match(kanban, /Blocked<span class="k">2<\/span><\/div>[^]*?<div class="t">colors<\/div>[^]*?<div class="par" data-card-parent title="improve_visual">improve_visual<\/div><div class="t">loading_<wbr>state<\/div><div class="row"><span class="chip" data-subtasks>0\/1 subtasks<\/span>[^]*?blocked by qa_signoff/);
     assert.match(kanban, /To do<span class="k">\d+<\/span><\/div>[^]*?<div class="t">qa_<wbr>signoff<\/div>/);
     assert.match(page, /aria-label="qa_signoff, to do, blocks loading_state/);
     // once the ticket is done, the wait looks over: said in needs attention and in the decision
@@ -842,7 +849,7 @@ test("after an action, what it changed glows once: the task it moved, or a block
     const ok = await s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", evidenceRef: await s.commit("loading_state") });
     const page = (await s.http("GET", String(ok.headers.location))).body;
     assert.deepEqual(glowing(page), ["node:loading_state"]);
-    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span><div class="t">loading_<wbr>state<\/div>/);
+    assert.match(page, /<a class="card changed" href="#t\d+"[^>]*><span class="tkey" data-ticket-key>TIRA_[A-Z0-9_]+<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">loading_<wbr>state<\/div>/);
     assert.deepEqual(glowing((await s.http("GET", "/")).body), []); // once: the next load is quiet
     // a refusal changed nothing
     await s.send("filters", "START");
@@ -1062,7 +1069,7 @@ test("every ticket has a key, TIRA_<PROJECT>_<n>, numbered in the order its proj
     assert.equal(taskOfKey(keys, "loading_state"), "loading_state"); // an id stays an id
     const page = (await s.http("GET", "/")).body;
     assert.match(page, /data-card-key="node:fetch_metrics" data-state="unstarted"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_3<\/span><span class="pin">◆ next<\/span>/); // its key, then the cursor
-    assert.match(page, /data-card-key="node:loading_state" data-state="in_progress"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_6<\/span><div class="t">/);
+    assert.match(page, /data-card-key="node:loading_state" data-state="in_progress"><span class="tkey" data-ticket-key>TIRA_TASKTREE_DASH_6<\/span>(?:<div class="par"[^>]*>[^<]*<\/div>)?<div class="t">/);
     assert.match(page, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_9<\/span><\/p>/);
     const tasks = JSON.parse((await s.http("GET", "/api/tasks")).body) as { id: string; ticket: string; state: string; path: string }[];
     assert.deepEqual((rank("6", tasks).results as { id: string }[]).map((t) => t.id), ["loading_state"]); // its number alone

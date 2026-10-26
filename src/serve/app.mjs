@@ -217,10 +217,103 @@ if (mentionable.length > 0) {
   });
 }
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(e.target instanceof HTMLTextAreaElement) || !e.target.closest(".drawer")) return;
+  const field = e.target;
+  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !(field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) || !field.closest(".drawer")) return;
   e.preventDefault();
-  e.target.form?.requestSubmit();
+  field.form?.requestSubmit();
 });
+// A ticket's title is one line that wraps: Enter saves it, and a pasted line break becomes a space.
+// Its steps are one to a row: Enter starts a new row under this one, Backspace in an empty row
+// removes it (back to the row above), arrows move between rows. The rows renumber themselves (CSS).
+const stepRow = (after) => {
+  const li = document.createElement("li");
+  li.className = "tk-step";
+  const input = document.createElement("textarea");
+  Object.assign(input, { name: "step", className: "tk-step-in", rows: 1, maxLength: 300, autocomplete: "off" });
+  input.setAttribute("aria-label", "Step");
+  li.append(input);
+  after.after(li);
+  return input;
+};
+// the last row is the one that adds: once it says something it's a step, and a new last row waits
+// under it (that new row's field comes back)
+const keepAsStep = (row, field) => {
+  row.classList.remove("tk-step-new");
+  field.setAttribute("aria-label", "Step");
+  const next = stepRow(row);
+  next.closest(".tk-step")?.classList.add("tk-step-new");
+  next.placeholder = "Add a step…";
+  next.setAttribute("aria-label", "Add a step");
+  return next;
+};
+const stepEnter = (e, field, row) => {
+  e.preventDefault();
+  if (field.value.trim() === "") return;
+  (row.classList.contains("tk-step-new") ? keepAsStep(row, field) : stepRow(row)).focus();
+  field.form?.setAttribute("data-dirty", "1");
+};
+const stepBackspace = (e, field, row) => {
+  if (field.value !== "" || row.classList.contains("tk-step-new")) return;
+  e.preventDefault();
+  const back = row.previousElementSibling?.querySelector("textarea") ?? row.nextElementSibling?.querySelector("textarea");
+  row.remove();
+  back?.focus();
+  field.form?.setAttribute("data-dirty", "1");
+};
+const stepArrow = (e, field, row) => {
+  const up = e.key === "ArrowUp";
+  if (up ? field.selectionStart !== 0 : field.selectionEnd !== field.value.length) return; // inside the words: the caret moves
+  const to = (up ? row.previousElementSibling : row.nextElementSibling)?.querySelector("textarea");
+  if (!to) return;
+  e.preventDefault();
+  to.focus();
+};
+const STEP_KEYS = { Enter: stepEnter, Backspace: stepBackspace, ArrowUp: stepArrow, ArrowDown: stepArrow };
+document.addEventListener("keydown", (e) => {
+  const field = e.target;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || !(field instanceof HTMLTextAreaElement)) return;
+  if (field.matches("[data-one-line]")) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    field.form?.requestSubmit();
+    return;
+  }
+  const row = field.matches(".tk-step-in") ? field.closest(".tk-step") : null;
+  if (row) STEP_KEYS[e.key]?.(e, field, row);
+});
+// several lines pasted: into the title, one line; into a step, that many steps, each its own row
+const linesOf = (text) => text.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "");
+document.addEventListener("input", (e) => {
+  const field = e.target;
+  if (!(field instanceof HTMLTextAreaElement) || !field.value.includes("\n")) return;
+  if (field.matches("[data-one-line]")) field.value = linesOf(field.value).join(" ");
+  else if (field.matches(".tk-step-in")) {
+    const [first = "", ...rest] = linesOf(field.value);
+    field.value = first;
+    let row = field.closest(".tk-step");
+    if (row?.classList.contains("tk-step-new") && first !== "") keepAsStep(row, field);
+    for (const line of rest) {
+      if (!row) break;
+      const next = stepRow(row);
+      next.value = line;
+      row = next.closest(".tk-step");
+    }
+  }
+});
+// where a browser can't grow a text box to its words by itself, it grows as you type
+if (!CSS.supports("field-sizing", "content")) {
+  const grow = (t) => {
+    t.style.height = "auto";
+    t.style.height = `${t.scrollHeight + 2}px`;
+  };
+  document.addEventListener("input", (e) => {
+    if (e.target instanceof HTMLTextAreaElement && e.target.matches(".tk-title-in, .tk-in, .tk-step-in")) grow(e.target);
+  });
+  addEventListener("hashchange", () => {
+    for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+  });
+  for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+}
 
 const confirmBox = document.createElement("dialog");
 confirmBox.className = "confirm-dialog";
@@ -579,14 +672,31 @@ if (liveMain) {
       if (!Number.isSafeInteger(at) || at < 0) return;
       latest = at;
       if (at > seen && at > triedFor) {
-        if (busy()) waiting = true;
-        else reload();
+        if (busy()) {
+          waiting = true;
+          flagNew();
+        } else reload();
       }
     } catch {
       // the server is away for a moment: ask again next time
     }
   };
   setInterval(tick, 5000);
+  // Refresh brings the latest in now, back where you were; while changes wait (a dialog open, a
+  // field in use), it says so
+  const refresh = document.querySelector("[data-refresh]");
+  refresh?.addEventListener("click", (e) => {
+    e.preventDefault();
+    refresh.classList.add("spin");
+    reload();
+  });
+  const flagNew = () => {
+    if (!refresh || !waiting) return;
+    refresh.classList.add("has-new");
+    const label = refresh.querySelector("[data-refresh-label]");
+    if (label) label.textContent = "New changes";
+    refresh.title = "Changes came in: bring them in now";
+  };
   // waiting changes show as soon as you're done
   const later = () => setTimeout(() => {
     if (waiting && !busy()) reload();

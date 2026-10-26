@@ -85,10 +85,14 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ id, reason, waits_on, new_ticket }) => answer(await guarded(ctx, async () => blockTask(ctx, await taskIdOf(ctx, id), reason, waits_on === undefined ? undefined : await taskIdOf(ctx, waits_on), new_ticket))));
   server.registerTool("add_subtask", {
     title: "Add a subtask",
-    description: "Add a new task under one (marked as found while working on it when that task is under way).",
-    inputSchema: z.object({ under: taskId, name: z.string().trim().min(1).max(80).describe("the new task's id: a short name, e.g. login_copy") }),
+    description: "Add a new task under one. Breaking a task into its planned steps: leave found out. Came across this work while doing that task: say found: true, so the board shows where the scope grew.",
+    inputSchema: z.object({
+      under: taskId,
+      name: z.string().trim().min(1).max(80).describe("the new task's id: a short name, e.g. login_copy"),
+      found: z.boolean().optional().describe("true only when you found this work while doing the task it goes under; leave it out for planned steps"),
+    }),
     annotations: { ...WRITES, idempotentHint: false },
-  }, async ({ under, name }) => answer(await guarded(ctx, async () => addSubtask(ctx, await taskIdOf(ctx, under), name))));
+  }, async ({ under, name, found }) => answer(await guarded(ctx, async () => addSubtask(ctx, await taskIdOf(ctx, under), name, found === true))));
   server.registerTool("file_idea", {
     title: "File an idea",
     description: "File an idea for later, not a task yet: one sentence and why it's worth doing. tira drafts its file and proposes where it goes; a person approves both before it becomes a task.",
@@ -97,7 +101,7 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ summary, why, under }) => answer(await guarded(ctx, () => fileIdea(ctx, summary, why, under))));
   server.registerTool("add_comment", {
     title: "Comment on a task",
-    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. Write @name to mention a person (their GitHub login) or another agent. People see it on the ticket, under your name.",
+    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. Write @name to mention a person (their GitHub login) or another agent. When you need a person to decide or answer, @mention them: it waits in their Needs you, under For you, until they reply. People see it on the ticket, under your name.",
     inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
     annotations: { ...WRITES, idempotentHint: false },
   }, async ({ id, text }) => answer(await guarded(ctx, async () => addComment(ctx, await taskIdOf(ctx, id), text))));

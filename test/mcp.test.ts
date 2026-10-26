@@ -133,11 +133,12 @@ test("tira mcp acts through tira's rules, as the agent: start, complete with pro
     assert.match((await call("get_task", { id: "header" })).text, /\n  seq 7 · node.start · claude-code$/); // as the agent
     // one in progress at a time: refused, with the board's hint (the refusal is in the log, as from the CLI)
     assert.deepEqual(await call("start_task", { id: "footer" }), { error: true, text: "Start footer: refused (gate: one active task: node:header is already active). The refusal is in the log (seq 8). What to do: Only one task can be in progress. Complete or block header first, then start footer." });
-    // a subtask under work in progress is found while working on it
+    // breaking a task into its steps: planned, even under a task in progress (Isha, 2026-10-26)
     assert.deepEqual(await call("add_subtask", { under: "header", name: "header_logo" }), { error: false, text: "Add subtask header_logo under header: done (seq 9)." });
-    assert.match((await call("get_task", { id: "header_logo" })).text, /^header_logo · TIRA_DEMO_\d+ · to do · under site › header · ◆ next · found during header\n/);
-    assert.match((await call("add_subtask", { under: "footer", name: "footer_links" })).text, /^Add subtask footer_links under footer: done/);
-    assert.doesNotMatch((await call("get_task", { id: "footer_links" })).text, /found during/); // footer isn't under way
+    assert.match((await call("get_task", { id: "header_logo" })).text, /^header_logo · TIRA_DEMO_\d+ · to do · under site › header · ◆ next\n/);
+    // work it came across while doing a task: found, when the agent says so
+    assert.match((await call("add_subtask", { under: "footer", name: "footer_links", found: true })).text, /^Add subtask footer_links under footer: done/);
+    assert.match((await call("get_task", { id: "footer_links" })).text, /^footer_links · TIRA_DEMO_\d+ · to do · under site › footer · found during footer\n/);
     // proof of work, and the rules' order
     const unproved = await logged();
     for (const args of [{ id: "header" }, { id: "header", proof: "   " }]) { // no proof, or blank: the schema says no, before the log
@@ -196,7 +197,7 @@ test("agents read a ticket: its words, its comments, what's assigned to them and
   assert.deepEqual(await call("add_comment", { id: "nope", text: "hi" }), { error: true, text: "There is no task nope in demo: list_tasks shows them. Nothing was written." });
   assert.match((await call("add_comment", { id: "footer", text: "x".repeat(2001) })).text, /^Input validation error/); // the schema says no, before the log
   const page = renderHtml(fold(await w.store.readStream(S), w.registry), S, "h");
-  assert.match(page, /<li class="cm" data-comment><div class="cm-h"><b>claude-code<\/b><span class="chip agent-chip">agent<\/span>/); // people see it, marked as an agent's
+  assert.match(page, /<li class="cm" data-comment><span class="cm-av agent" aria-hidden="true"><svg[^]*?<\/svg><\/span><div class="cm-card"><div class="cm-h"><b>claude-code<\/b><span class="chip agent-chip">agent<\/span>/); // people see it, marked as an agent's
 });
 
 test("agents fill in a ticket: its title, description, steps and estimate, as themselves; what they leave out stays, an empty one clears, and who it's assigned to is a person's", async () => {
@@ -231,7 +232,7 @@ test("agents fill in a ticket: its title, description, steps and estimate, as th
   assert.equal(await logged(), before);
   // people see the agent's words on the ticket
   const page = renderHtml(fold(await w.store.readStream(S), w.registry), S, "h");
-  assert.match(page, /<h2>Site header<\/h2><p class="tk-id"><span data-ticket-key>TIRA_DEMO_2<\/span> · header<\/p>/);
+  assert.match(page, /<p class="tk-id"><span data-ticket-key>TIRA_DEMO_2<\/span> · header<\/p><h2 class="tk-h">Site header<\/h2>/);
 });
 
 test("agents name a task by its key (TIRA_<PROJECT>_<n>) as well as its id, and next_task says where someone @mentioned them, until they answer", async () => {

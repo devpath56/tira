@@ -101,14 +101,14 @@ export async function blockTask(c: AgentContext, id: string, reason: string, wai
   return write(c, event(c, id, "BLOCK", { reason, ...(waitsOn === undefined ? {} : { blocker: waitsOn }) }), id, row);
 }
 
-// add a subtask: a new task under one, marked found while working on it when that one is under way
-export async function addSubtask(c: AgentContext, under: string, name: string): Promise<ToolText> {
-  const parent = (await treeNow(c)).rows.find((x) => x.id === under);
-  if (!parent) return missing(c, under);
+// add a subtask: a new task under one, planned unless the agent says it found the work while doing
+// that task (Isha, 2026-10-26: an agent breaking a task into its steps had every step marked found)
+export async function addSubtask(c: AgentContext, under: string, name: string, found = false): Promise<ToolText> {
+  if (!(await treeNow(c)).rows.some((x) => x.id === under)) return missing(c, under);
   const id = subtaskName(name);
   if (id === undefined) return { ok: false, text: "A subtask's name is 1 to 80 characters, with no control characters. Nothing was written." };
-  const found = parent.state === "in_progress" || parent.state === "blocked" ? { kind: "discovered", discovered_during: under } : {};
-  return write(c, birth(c, id, { parent_id: under, ...found }), `${id} under ${under}`, undefined);
+  const kind = found ? { kind: "discovered", discovered_during: under } : {};
+  return write(c, birth(c, id, { parent_id: under, ...kind }), `${id} under ${under}`, undefined);
 }
 
 // comment on a task: a reply to its feedback, a question or a note, shown on its ticket as the agent's

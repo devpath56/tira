@@ -539,7 +539,7 @@ test("before setup: the board points to Project settings, and Account settings o
     assert.match(board, /main\[data-stream\]>\.top \.me-menu\{top:auto;bottom:calc\(100% \+ 6px\);left:0;right:0;width:auto;/);
     assert.match(board, /<a class="side-link" href="\/integrations" data-project-settings><svg[^]*?<\/svg>Project settings<\/a>/);
     assert.doesNotMatch(board, /Acting as|class="ws-head"/);
-    assert.match(board, /<\/h1><div class="proj-links" data-workspace aria-label="Linked to"><a class="act primary" href="\/integrations" data-integrations><svg[^]*?<\/svg><svg[^]*?<\/svg>Connect GitHub and Jira<\/a><\/div><div class="title-acts">/); // on the name's line, only while nothing is linked
+    assert.match(board, /<\/h1><div class="proj-links" data-workspace aria-label="Linked to"><a class="act primary" href="\/integrations" data-integrations><svg[^]*?<\/svg><svg[^]*?<\/svg>Connect GitHub and Jira<\/a><a class="act refresh" href="" data-refresh title="Bring in the latest changes"><svg[^]*?<\/svg><span data-refresh-label>Refresh<\/span><\/a><\/div><div class="title-acts">/); // under the name, at the right, only while nothing is linked; Refresh beside it
     assert.doesNotMatch(board, /data-sign-in|data-user[ >]|data-signout/); // no GitHub sign-in set up: nothing to sign in with
     // Account settings: yours, in every project (no project on it)
     const page = (await s.http("GET", "/settings")).body;
@@ -1277,7 +1277,7 @@ test("Connect Jira through Atlassian, pick a repo and a project from lists (in P
     const synced = await s.post("/sync", {});
     assert.match(await s.flash(synced), /^Sync: synced with GitHub acme\/app and Jira DOG; acme\/app#7 linked to table; acme\/app#7 merged \(table\); dashboard: made Jira DOG-1; table: made Jira DOG-2; filters: made Jira DOG-3\.$/);
     const board = (await s.http("GET", "/")).body;
-    assert.match(board, /title="Jira: Dogma \(DOG\)" data-link-jira><svg[^]*?<\/svg><span>Dogma<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><\/div>/); // linked to both: nothing to add, and no Connect
+    assert.match(board, /title="Jira: Dogma \(DOG\)" data-link-jira><svg[^]*?<\/svg><span>Dogma<\/span><\/a><form method="post" action="\/sync" class="inline"><input type="hidden" name="token" value="k"><button class="act" type="submit" data-sync>Sync<\/button><\/form><a class="act refresh" href="" data-refresh[^>]*>[^]*?<\/a><\/div>/); // linked to both: nothing to add, and no Connect
     assert.doesNotMatch(board, /Connect GitHub and Jira|data-add-jira|data-add-repo/);
     assert.match(board, /<span class="chip jira" data-jira-key="DOG-2">DOG-2<\/span>/);
     assert.match(board, /<div class="task-links" data-task-links><p><span class="lk">Jira<\/span><a href="https:\/\/acme\.atlassian\.net\/browse\/DOG-2" target="_blank" rel="noopener noreferrer">DOG-2<\/a><span class="pill">To Do<\/span><\/p><p><span class="lk">Pull request<\/span><a href="https:\/\/github\.com\/acme\/app\/pull\/7" target="_blank" rel="noopener noreferrer">#7<\/a><span class="pill merged">merged<\/span><span>tira: table<\/span><\/p><\/div>/);
