@@ -19,7 +19,8 @@ export interface Progress { repo: boolean; tasks: boolean; agent: boolean; team:
 export const provenIn = (events: readonly { type: string; data: Record<string, unknown> }[]): boolean =>
   events.some((e) => e.type.endsWith(".complete") && typeof (e.data.payload as { evidenceRef?: unknown } | undefined)?.evidenceRef === "string");
 
-const withQ = (path: string, q: string) => (q === "" ? path : `${path}${path.includes("?") ? "&" : "?"}${q}`);
+const joiner = (path: string) => (path.includes("?") ? "&" : "?");
+const withQ = (path: string, q: string) => (q === "" ? path : path + joiner(path) + q);
 const tokenField = (token: string) => `<input type="hidden" name="token" value="${esc(token)}">`;
 
 // ---------- the Get started checklist ----------
@@ -34,7 +35,8 @@ export function checklistHtml(p: Progress, token: string, q: string): string {
   const done = steps.filter(([d]) => d).length;
   const step = ([d, label, href, hint]: [boolean, string, string, string]) => {
     const what = href && !d ? `<a href="${esc(href)}">${esc(label)}</a>` : `<span>${esc(label)}</span>`;
-    return `<li${d ? ` class="done"` : ""}><i aria-hidden="true"></i>${what}${hint && !d ? `<small>${esc(hint)}</small>` : ""}<span class="sr">${d ? " (done)" : ""}</span></li>`;
+    const how = hint && !d ? `<small>${esc(hint)}</small>` : "";
+    return `<li${d ? ' class="done"' : ""}><i aria-hidden="true"></i>${what}${how}<span class="sr">${d ? " (done)" : ""}</span></li>`;
   };
   const head = done === steps.length ? "You're all set" : "Get started";
   return `<section class="gs" aria-label="Get started" data-get-started><div class="gs-head"><b>${head}</b><span class="gs-count">${done} of ${steps.length}</span>`
@@ -89,7 +91,7 @@ const SCENES = (name: string): [string, string, string][] => [
 export function tourHtml(name: string, token: string, q: string, auto: boolean): string {
   const scenes = SCENES(name).map(([pic, title, line], i) => `<li class="tour-scene" data-tour-scene hidden><div class="tour-stage" aria-hidden="true">${pic}</div><h2 id="tour-t${i + 1}">${esc(title)}</h2><p>${esc(line)}</p></li>`).join("");
   const dots = SCENES(name).map((_, i) => `<span class="tour-dot" data-tour-dot aria-label="Step ${i + 1} of 5"></span>`).join("");
-  return `<style>${TOUR_CSS}</style><div class="tour" data-tour${auto ? ` data-auto="1"` : ""} data-action="${esc(withQ("/onboarding", q))}" hidden role="dialog" aria-modal="true" aria-labelledby="tour-t1">`
+  return `<style>${TOUR_CSS}</style><div class="tour" data-tour${auto ? ' data-auto="1"' : ""} data-action="${esc(withQ("/onboarding", q))}" hidden role="dialog" aria-modal="true" aria-labelledby="tour-t1">`
     + `<div class="tour-scrim" data-tour-skip></div><div class="tour-box">${tokenField(token)}<ol class="tour-scenes">${scenes}</ol>`
     // Back on the left (kept in its place on the first scene, where it's hidden), the dots in the
     // middle, Skip tour and Next together on the right: neither moves from scene to scene

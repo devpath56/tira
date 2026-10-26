@@ -945,7 +945,7 @@ const MUTANTS: Mutant[] = [
   { name: "checklist: finishing the tour doesn't bring it back", file: "src/serve/integrations.ts", find: "    if (login && what === \"tour-finished\") await unmarkSeen(login, \"checklist-hidden\", env);\n", replace: "" },
   { name: "checklist: a linked repo isn't ticked", file: "src/serve/onboarding.ts", find: "[p.repo, \"Link your GitHub repo\"", replace: "[false, \"Link your GitHub repo\"" },
   { name: "tour: no way back to it from Help", file: "src/render/html.ts", find: "${guideHtml(opts.live?.onboarding !== undefined)}", replace: "${guideHtml()}" },
-  { name: "seen: Postgres forgets what someone has seen", file: "src/sync/accounts-pg.ts", find: "    for (const r of seen.rows as { login: string; what: string }[]) (out.seen[r.login] ??= []).push(r.what);\n", replace: "", needs: "postgres" },
+  { name: "seen: Postgres forgets what someone has seen", file: "src/sync/accounts-pg.ts", find: "    for (const r of seen.rows as { login: string; what: string }[]) out.seen[r.login] = [...(out.seen[r.login] ?? []), r.what];\n", replace: "", needs: "postgres" },
   { name: "projects: someone else's project opens", file: "src/serve/server.ts", find: "    if (YOURS.has(key) || inProject(await peopleNow(ws.stream), login)) return false;", replace: "    return false;" },
   { name: "projects: your list shows every project", file: "src/serve/server.ts", find: "      return inProject(p, login) ? [", replace: "      return true ? [" },
   { name: "team: Add doesn't add", file: "src/serve/team.ts", find: "    return { next: { admins: p.admins, members: [...p.members, login] }", replace: "    return { next: { admins: p.admins, members: p.members }" },

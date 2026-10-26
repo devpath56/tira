@@ -65,7 +65,7 @@ function play(tour) {
     const stops = [...tour.querySelectorAll("button:not([disabled])")].filter((b) => b.offsetParent !== null);
     if (stops.length === 0) return;
     const first = stops[0];
-    const last = stops[stops.length - 1];
+    const last = stops.at(-1);
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };

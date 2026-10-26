@@ -220,7 +220,7 @@ export class PostgresAccounts {
       (r.role === "admin" ? p.admins : p.members).push(r.login);
     }
     out.seen = {};
-    for (const r of seen.rows as { login: string; what: string }[]) (out.seen[r.login] ??= []).push(r.what);
+    for (const r of seen.rows as { login: string; what: string }[]) out.seen[r.login] = [...(out.seen[r.login] ?? []), r.what];
     this.now = out;
   }
 
