@@ -549,6 +549,7 @@ test("before setup: the board points to Project settings, and Account settings o
     assert.match(page, /GitHub sign-in isn't set up\. Add it under Setup\./);
     assert.match(page, /<section class="grp" id="setup" data-int="setup"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Setup<\/h2>/);
     assert.match(page, /Callback <code>http:\/\/localhost:\d+\/integrations\/jira\/callback<\/code>/);
+    assert.match(page, /<summary class="hc-chip">Why does Jira need localhost\?<\/summary><p class="bubble">Atlassian sends you back to tira(?:'|&#39;)s callback on localhost\. Open tira at <code>http:\/\/localhost:\d+<\/code> to connect Jira\.<\/p>/);
     // Project settings: the project's own (its GitHub, Jira, Sync and Delete), none of yours
     const project = (await s.http("GET", "/integrations")).body;
     assert.match(project, /<h1>Project settings<\/h1><p><span class="pav t\d" aria-hidden="true">T<\/span><b>tasktree-dash<\/b><\/p>/);

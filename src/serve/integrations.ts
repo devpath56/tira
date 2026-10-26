@@ -232,6 +232,9 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   };
   // where GitHub and Atlassian send people back to: the public address, else the one the page was opened at
   const own = (host: string) => (c.site ? c.site.origin : `http://${host}`);
+  // where the Help centre's steps point GitHub and Atlassian back to: a hosted tira's own address, else
+  // localhost (Jira connects only there on a computer)
+  const helpAt = (host: string): HelpAt => (c.site ? { address: c.site.origin, hosted: true } : { address: `http://localhost:${portOf(host)}`, hosted: false });
   const redirectUri = (host: string) => `${own(host)}/integrations/jira/callback`;
   const githubBack = (host: string) => `${own(host)}/signin/github/callback`;
 
@@ -602,7 +605,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const body = `<header class="int-head"><h1>Account settings</h1><p>Yours, in every project on this tira.</p></header>` + flashOf(url) + profileGroup + linked + appearanceGroup() + setup + removed;
     const admin: Section[] = [...(setup ? [["setup", "Setup"] as Section] : []), ...(removed ? [["accounts", "Removed accounts"] as Section] : [])];
     const sections: Section[] = [["", "Account"], ["profile", "Profile"], ["linked", "GitHub and Jira", me.login && githubAuth(me.login, env) ? "on" : ""], ["appearance", "Appearance"], ...(admin.length > 0 ? [["", "This tira"] as Section, ...admin] : [])];
-    c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections }, body, helpPanel(portOf(host), shown), scripts));
+    c.send(res, 200, html, settingsPage({ title: "Account settings", label: "Account settings", sections }, body, helpPanel(helpAt(host), shown), scripts));
   };
 
   // A person's profile (GET /u/<username>), for anyone signed in: who they are, and the username a
@@ -622,12 +625,12 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     }
     const asked = (GITHUB_LOGIN.test(said) ? knownLogin(said, env) : undefined) ?? said; // as GitHub spells it
     const gh2 = GITHUB_LOGIN.test(asked) ? githubAuth(asked, env) : undefined;
-    if (!gh2) return c.send(res, 404, html, settingsPage({ title: "Profile", label: "Profile", sections: [] }, `<header class="int-head"><h1>No one here by that name</h1><p>No one called ${esc(asked)} has signed up to this tira yet.</p></header>`, helpPanel(portOf(host), me.actor), scripts));
+    if (!gh2) return c.send(res, 404, html, settingsPage({ title: "Profile", label: "Profile", sections: [] }, `<header class="int-head"><h1>No one here by that name</h1><p>No one called ${esc(asked)} has signed up to this tira yet.</p></header>`, helpPanel(helpAt(host), me.actor), scripts));
     const shown = displayName(asked, env) ?? gh2.name ?? asked;
     const card = `<div class="profile" data-person-card><span class="av av-lg">${initial(shown)}</span><span class="pf-who"><b>${esc(shown)}</b><span>@${esc(asked)} · on tira</span></span>${ownerPill(asked)}</div>`
       + `<div class="grp-row" data-username><span class="grp-k">Username</span><code class="grp-v" id="their-username">${esc(asked)}</code>${copyButton("their-username", "the username")}</div>`;
     const body = `<header class="int-head"><h1>${esc(shown)}</h1><p>A person on this tira.</p></header>` + group("person", "Profile", card, "A project's admin adds them by this username, in Project settings → Team.");
-    c.send(res, 200, html, settingsPage({ title: `${shown} · Profile`, label: "Profile", sections: [["person", "Profile"]] }, body, helpPanel(portOf(host), me.actor), scripts));
+    c.send(res, 200, html, settingsPage({ title: `${shown} · Profile`, label: "Profile", sections: [["person", "Profile"]] }, body, helpPanel(helpAt(host), me.actor), scripts));
   };
 
   // Your projects (GET /projects): every project you're in, with whether you're its admin; where
@@ -648,7 +651,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const letters = await lettersFor(me.login); // invites first: a project to join may be all there is
     const body = `<header class="int-head"><h1>Your projects</h1><p>Only a project's people see it. You're the admin of the ones you make; to join someone else's, they invite you, and the invite arrives here and in your Inbox.</p></header>`
       + flashOf(url) + (letters ? `<div class="letters" data-invites>${letters}</div>` : "") + `<section class="grp" id="projects" data-int="projects"><div class="grp-list" data-projects>${list}</div></section>`;
-    c.send(res, 200, html, settingsPage({ title: "Your projects", label: "Projects", sections: [["projects", "Your projects"]] }, body, helpPanel(portOf(host), displayName(me.login, env) ?? me.login), scripts));
+    c.send(res, 200, html, settingsPage({ title: "Your projects", label: "Projects", sections: [["projects", "Your projects"]] }, body, helpPanel(helpAt(host), displayName(me.login, env) ?? me.login), scripts));
   };
 
   // ---------- invites (Isha, 2026-10-26): the Inbox, and an answer to one ----------
@@ -668,7 +671,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const empty = `<div class="inbox-empty" data-inbox-empty><span class="inbox-empty-i">${INBOX_ICON}</span><b>Nothing new</b><p>When someone invites you to a project, the invite arrives here.</p></div>`;
     const body = `<header class="int-head"><h1>Inbox</h1><p>Invites to projects, until you answer them.</p></header>` + flashOf(url)
       + `<section class="grp" id="inbox" data-int="inbox"><div class="letters" data-inbox>${letters || empty}</div></section>`;
-    c.send(res, 200, html, settingsPage({ title: "Inbox", label: "Inbox", sections: [["inbox", "Inbox"]] }, body, helpPanel(portOf(host), displayName(me.login, env) ?? me.login), scripts));
+    c.send(res, 200, html, settingsPage({ title: "Inbox", label: "Inbox", sections: [["inbox", "Inbox"]] }, body, helpPanel(helpAt(host), displayName(me.login, env) ?? me.login), scripts));
   };
   const invitesPost = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
     const form = await c.formOf(req, res, host);
@@ -1050,7 +1053,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const team = await teamGroup(me.login, t, shown);
     const agentCount = ((await tokensNow()?.list(c.stream)) ?? []).length;
     const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${nameHtml(shown)}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + team + github + jira + agents + remove;
-    c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["", "Project"], ["general", "General"], ["team", "Collaborators"], ["", "Connections"], ["github", "GitHub", ws?.repo ? "on" : ""], ["jira", "Jira", ws?.jira_project ? "on" : ""], ["agents", "Agents", agentCount > 0 ? String(agentCount) : ""], ["", "Advanced"], ["delete", "Danger zone"]] }, body, helpPanel(portOf(host), me.actor), scripts));
+    c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["", "Project"], ["general", "General"], ["team", "Collaborators"], ["", "Connections"], ["github", "GitHub", ws?.repo ? "on" : ""], ["jira", "Jira", ws?.jira_project ? "on" : ""], ["agents", "Agents", agentCount > 0 ? String(agentCount) : ""], ["", "Advanced"], ["delete", "Danger zone"]] }, body, helpPanel(helpAt(host), me.actor), scripts));
   };
 
   // ---------- the team: a project's admins add, promote and remove its people ----------
@@ -1450,16 +1453,24 @@ function settingsPage(o: SettingsOf, body: string, help: string, script = ""): s
 // typing, tira's answer on the left) and matches what you type to the answers it has; nothing you
 // type leaves the page. With no script, each suggestion opens on its answer.
 const SEND = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>`;
-function helpPanel(port: string, name?: string): string {
+// at: the address tira answers at, as GitHub and Atlassian must be told it (a hosted tira's, not
+// localhost: Isha, 2026-10-26)
+type HelpAt = { address: string; hosted: boolean };
+function helpPanel(at: HelpAt, name?: string): string {
+  const home = esc(at.address);
+  // Atlassian takes one callback per app: a tira at another address needs an app of its own
+  const jiraWhere: [string, string, string] = at.hosted
+    ? ["Why does Jira need its own app here?", `Atlassian sends you back to one address per app, and this tira's is <code>${home}/integrations/jira/callback</code>. A tira at another address (on your computer, say) needs an Atlassian app of its own.`, "localhost callback redirect connect address url port own app hosted"]
+    : ["Why does Jira need localhost?", `Atlassian sends you back to tira's callback on localhost. Open tira at <code>${home}</code> to connect Jira.`, "localhost callback redirect connect address url port"];
   // a question, its answer, and the words someone might type for it
   const qa: [string, string, string][] = [
-    ["How do I make tira's GitHub app?", `On GitHub: Settings → Developer settings → OAuth Apps → New. Homepage <code>http://localhost:${esc(port)}</code>, callback <code>http://localhost:${esc(port)}/signin/github/callback</code>, exactly (a GitHub App without wildcard matching takes only that address). Tick Enable Device Flow, then paste its Client ID under Setup. For sign-in in one click (straight to GitHub and back, no code), generate a client secret there too and paste it beside the Client ID.`, "github app oauth client id secret device flow setup create sign in code direct"],
-    ["How do I make the Atlassian app for Jira?", `In Atlassian's developer console: Create → OAuth 2.0. Jira scopes <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code>. Callback <code>http://localhost:${esc(port)}/integrations/jira/callback</code>. Paste its Client ID and secret under Setup.`, "atlassian jira app oauth scopes console client secret create"],
+    ["How do I make tira's GitHub app?", `On GitHub: Settings → Developer settings → OAuth Apps → New. Homepage <code>${home}</code>, callback <code>${home}/signin/github/callback</code>, exactly (a GitHub App without wildcard matching takes only that address). Tick Enable Device Flow, then paste its Client ID under Setup. For sign-in in one click (straight to GitHub and back, no code), generate a client secret there too and paste it beside the Client ID.`, "github app oauth client id secret device flow setup create sign in code direct"],
+    ["How do I make the Atlassian app for Jira?", `In Atlassian's developer console: Create → OAuth 2.0. Jira scopes <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code>. Callback <code>${home}/integrations/jira/callback</code>, exactly (one per app). Paste its Client ID and secret under Setup.`, "atlassian jira app oauth scopes console client secret create"],
     ["Where are my keys and tokens kept?", "In tira's private store, sealed, and never in the project's log. tira's own app keys show as dots in Setup; only this tira's owner can show or copy them, one at a time.", "keys tokens secret stored kept saved private safe credentials password"],
     ["What does Sync do?", "Sync is on the board, in the bar above it. It links pull requests that name a task, makes a Jira issue for each task, and brings moves made in Jira back as commands, which tira's rules may refuse. A merged pull request counts as proof of work.", "sync syncing pull request pr issue mirror update proof merge"],
     ["Who can sign in?", "Anyone with a GitHub account. Each project is seen only by its own people: whoever makes a project is its admin, and its admins add people by GitHub username in Project settings → Team. Your username is in Account settings, to send to an admin.", "sign signin login admin people access invite add user member team join username"],
     ["How do my agents use tira?", "Through tira's MCP server, each with its own token and name. In Project settings → Connect agents: choose your app (Claude Code, Cursor, VS Code or Claude Desktop), name your agent, then do the one thing it shows in that app and test the connection. Agents can see what's next, start, complete with proof, block, add subtasks and file ideas; tira's rules apply as they do to you, and cancelling or unblocking stays with people. Revoke an agent there to stop it.", "agent agents claude mcp ai bot automation code assistant tools"],
-    ["Why does Jira need localhost?", `Atlassian sends you back to tira's callback on localhost. Open tira at <code>http://localhost:${esc(port)}</code> to connect Jira.`, "localhost callback redirect connect address url port"],
+    jiraWhere,
   ];
   const hi = name ? `Hi ${esc(name)}! I'm tira's help.` : "Hi! I'm tira's help.";
   return `<aside class="set-help" aria-label="Help centre" data-help><details class="hc" data-remember="tira-help">`

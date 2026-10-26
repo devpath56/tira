@@ -189,6 +189,12 @@ test("at its public address: tira answers only that address (its host's check to
     assert.match(String(started.headers["set-cookie"]), /^tira_signin=[0-9a-f]+; HttpOnly; SameSite=Lax; Path=\/signin; Max-Age=600; Secure$/);
     assert.match(String(done.headers["set-cookie"]), /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Secure$/); // not remembered: gone with the browser
     assert.equal((await t.http("GET", "/api/tasks")).status, 200);
+    // the Help centre's steps name this tira's own address for GitHub and Atlassian, never localhost (Isha, 2026-10-26)
+    const help = (await t.http("GET", "/settings")).body.split('data-help>')[1] ?? "";
+    assert.match(help, /Homepage <code>https:\/\/tira\.example\.com<\/code>, callback <code>https:\/\/tira\.example\.com\/signin\/github\/callback<\/code>/);
+    assert.match(help, /Callback <code>https:\/\/tira\.example\.com\/integrations\/jira\/callback<\/code>, exactly \(one per app\)/);
+    assert.match(help, /<summary class="hc-chip">Why does Jira need its own app here\?<\/summary><p class="bubble">Atlassian sends you back to one address per app, and this tira(?:'|&#39;)s is <code>https:\/\/tira\.example\.com\/integrations\/jira\/callback<\/code>/);
+    assert.doesNotMatch(help, /<code>http:\/\/localhost/); // ("localhost" stays among the words that find the answer)
     // a way on after sign-in is only ever Claude's approval page
     t.jar.clear();
     t.jar.set("tira_next", encodeURIComponent("https://evil.example/"));
