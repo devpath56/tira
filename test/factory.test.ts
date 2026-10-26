@@ -1,5 +1,5 @@
 // Track B1: the factory tables (brief gate / claim / outcome, session, drop) through
-// the real write path and dispatcher. The scripted scenarios include both README
+// the real write path and dispatcher. The scripted scenarios include both of the guide's
 // incidents; the property test checks a brief never leaves Devansh's 10 joint
 // configurations (B1 §5) under any sequence of commands.
 import { test } from "node:test";
@@ -112,7 +112,7 @@ test("a brief end to end: dispatch → claimable (H1), claim, drop → evidence 
   await clean(t);
 });
 
-// ---------- README incident 1: the silent session ----------
+// ---------- incident 1: the silent session ----------
 
 test("incident 1: silent ≠ active; only the claimant makes it active; no timeout or VM ends a session; ending releases its briefs (H5)", async () => {
   const t = setup();
@@ -155,7 +155,7 @@ test("one claim at a time: a second session's claim on a held brief is rejected;
   assert.equal(st(await t2.ev(brief("c"), "CLAIMED", "s1", { session: "s1" })), "appended");
 });
 
-// ---------- README incident 2: landed without checks ----------
+// ---------- incident 2: landed without checks ----------
 
 test("incident 2: dropped ≠ verified; no verify without a PASS; only the orchestrator verifies; a session can't verify its own drop", async () => {
   const t = setup();
@@ -679,9 +679,9 @@ test("the fx: key rule: fx: + sha256 of the transition's canonical JSON; same tr
 test("the README's fx: key test vectors (numbers, UTF-8, UTF-16 key order, REVISED, no actor) match the code", async () => {
   const { fxKey } = await import("../src/write/fxkey.ts");
   const { readFileSync } = await import("node:fs");
-  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const readme = readFileSync(new URL("../docs/ENGINEERING.md", import.meta.url), "utf8");
   const block = /<!-- fx-vectors -->\n```jsonl\n([\s\S]*?)\n```\n<!-- \/fx-vectors -->/.exec(readme)?.[1];
-  assert.ok(block, "README has the fx-vectors block");
+  assert.ok(block, "docs/ENGINEERING.md has the fx-vectors block");
   const vectors = block.split("\n").map((l) => JSON.parse(l) as { key: string; transition: Parameters<typeof fxKey>[0] & { actor: string | null } });
   assert.equal(vectors.length, 5);
   for (const v of vectors) {

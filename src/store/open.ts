@@ -31,7 +31,7 @@ const TLS_MODES = new Set(["require", "verify-ca", "verify-full"]);
 export function liveDatabase(flag: string | undefined, env: Record<string, string | undefined>): string {
   const db = flag ?? env[DATABASE_ENV] ?? env.TIRA_DB;
   if (db === undefined || db.trim() === "") {
-    throw new DatabaseRefused(`no database: set ${DATABASE_ENV} to your Postgres connection string (README, "Running on Postgres")`);
+    throw new DatabaseRefused(`no database: set ${DATABASE_ENV} to your Postgres connection string (docs/ENGINEERING.md, "Running on Postgres")`);
   }
   if (!isPostgresUrl(db)) {
     throw new DatabaseRefused(`tira keeps its data in Postgres only, and ${flag !== undefined ? "--db" : "the database setting"} names a file. Set ${DATABASE_ENV} to your Postgres connection string; to bring an old SQLite log over, run tira import <file>.`);

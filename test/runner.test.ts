@@ -1,5 +1,5 @@
 // A3 — table runner. The outcome matrices below are written by hand from the
-// rulings (chart comments; README rule 7), NOT generated from the JSON. They are
+// rulings (chart comments; rule 7 in docs/ENGINEERING.md), NOT generated from the JSON. They are
 // the control the acceptance review found missing: a JSON or chart change that
 // flips a no-op to denied (or back) passes all 273 chart checks, but fails here.
 import { test } from "node:test";

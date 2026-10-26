@@ -25,7 +25,7 @@ import { dragMoves } from "../src/serve/command.ts";
 
 const S = "tasktree-dash";
 
-// The README's dashboard, mid-work: colors blocked (why: tokens), loading_state in progress.
+// The dashboard in docs/ENGINEERING.md, mid-work: colors blocked (why: tokens), loading_state in progress.
 async function world() {
   const store = new SqliteEventStore();
   const registry = defaultRegistry();
