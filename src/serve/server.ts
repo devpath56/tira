@@ -127,6 +127,8 @@ export const withQ = (path: string, q: string) => (q === "" ? path : `${path}${j
 const MAX_NAME = 200;
 // a new project's name: the same rule the New project page's field shows
 const NEW_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+// a request's route: its method and path (a profile, /u/<username>, is one route)
+const routeKey = (method: string | undefined, path: string) => `${method} ${/^\/u\/[^/]+$/.test(path) ? "/u" : path}`;
 // the workspace a request names, or undefined when the name can't be one
 export function workspaceIn(url: URL, home: string): Workspace | undefined {
   const w = url.searchParams.get("w");
@@ -1357,22 +1359,22 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (await oauthMachine(req, res, url)) return; // Claude's servers, signing a connector in
     const asset = req.method === "GET" ? ASSETS[url.pathname] : undefined;
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
-    const key = `${req.method} ${/^\/u\/[^/]+$/.test(url.pathname) ? "/u" : url.pathname}`; // a profile: /u/<username>
+    const key = routeKey(req.method, url.pathname);
     const route = routes[key];
     if (!route) return send(res, 404, text, "not found\n");
     if (route !== liveSeq) await accountsNow(); // the live check reads no one's account
     const ws = workspaceIn(url, opts.stream);
     if (!ws) return send(res, 400, text, "that can't be a project's name\n");
     const me = who(req);
-    // someone signed in on this browser: from now on its landing offers Sign in only
-    if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
     if (me.login && (await turnedAway(req, res, url, key, ws, me.login))) return;
     return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
   };
-  // Where someone signed in goes instead, if anywhere (true: sent there): with no email yet, the
-  // email step; on a project they aren't one of the people of, no such project (the one tira opened
-  // on: their own projects instead).
+  // Someone signed in: this browser is remembered (from now on its landing offers Sign in only), and
+  // where they go instead, if anywhere (true: sent there): with no email yet, the email step; on a
+  // project they aren't one of the people of, no such project (the one tira opened on: their own
+  // projects instead).
   const turnedAway = async (req: IncomingMessage, res: ServerResponse, url: URL, key: string, ws: Workspace, login: string): Promise<boolean> => {
+    if (!cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
     const page = req.method === "GET" && !key.startsWith("GET /api/");
     if (page && !BEFORE_EMAIL.has(key) && !emailOf(login, linkEnv)) {
       send(res, 303, text, "", { Location: "/signup/email" });

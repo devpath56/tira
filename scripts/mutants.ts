@@ -930,7 +930,7 @@ const MUTANTS: Mutant[] = [
   { name: "email: anything is kept as an email", file: "src/serve/integrations.ts", find: "    if (!EMAIL.test(email)) return back(res, back2, { ok: false, text: \"That isn't an email address.\" });\n", replace: "" },
   { name: "landing: no Sign up for someone new", file: "src/serve/welcome.ts", find: "  if (o.known) return", replace: "  if (true) return" },
   { name: "landing: Sign up where someone signed in before", file: "src/serve/welcome.ts", find: "if (o.known) return", replace: "if (false) return" },
-  { name: "landing: a browser someone signed in on isn't remembered", file: "src/serve/server.ts", find: "    if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader(", replace: "    if (false) res.setHeader(" },
+  { name: "landing: a browser someone signed in on isn't remembered", file: "src/serve/server.ts", find: "    if (!cookieOf(req, KNOWN_COOKIE)) res.setHeader(", replace: "    if (false) res.setHeader(" },
   { name: "projects: someone else's project opens", file: "src/serve/server.ts", find: "    if (YOURS.has(key) || inProject(await peopleNow(ws.stream), login)) return false;", replace: "    return false;" },
   { name: "projects: your list shows every project", file: "src/serve/server.ts", find: "      return inProject(p, login) ? [", replace: "      return true ? [" },
   { name: "team: Add doesn't add", file: "src/serve/team.ts", find: "    return { next: { admins: p.admins, members: [...p.members, login] }", replace: "    return { next: { admins: p.admins, members: p.members }" },
