@@ -14,24 +14,20 @@ const start = (root) => {
   let at = 0;
   let timer = 0;
   let held = false;
-  // a scene's own moves start over each time it's shown
+  // a scene's own moves start over each time it's shown: taken off, then put back two frames on
   const show = (i) => {
     at = (i + scenes.length) % scenes.length;
-    scenes.forEach((s, k) => {
-      s.classList.remove("on");
-      if (k === at) {
-        void s.offsetWidth;
-        s.classList.add("on");
-      }
-    });
+    scenes.forEach((s) => s.classList.remove("on"));
     steps.forEach((b, k) => {
       b.classList.toggle("on", k === at);
       if (k === at) b.setAttribute("aria-current", "step");
       else b.removeAttribute("aria-current");
     });
     root.classList.remove("ticking");
-    void root.offsetWidth;
-    if (!held && !still.matches) root.classList.add("ticking");
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      scenes[at]?.classList.add("on");
+      if (!held && !still.matches) root.classList.add("ticking");
+    }));
   };
   const tick = () => {
     clearTimeout(timer);

@@ -71,7 +71,7 @@ const end = () => {
   removeEventListener("resize", place);
   removeEventListener("scroll", place, true);
 };
-const go = (i) => {
+const stepTo = (i) => {
   if (i < 0) return;
   if (i >= steps.length) return end();
   at = i;
@@ -89,25 +89,25 @@ const start = () => {
   box.className = "coach";
   box.setAttribute("role", "dialog");
   box.setAttribute("aria-label", "Walkthrough");
-  box.setAttribute("data-coach", "");
+  box.dataset.coach = "";
   box.addEventListener("click", (e) => {
     const t = e.target instanceof Element ? e.target : null;
-    if (t?.closest("[data-coach-next]")) go(at + 1);
-    else if (t?.closest("[data-coach-back]")) go(at - 1);
+    if (t?.closest("[data-coach-next]")) stepTo(at + 1);
+    else if (t?.closest("[data-coach-back]")) stepTo(at - 1);
     else if (t?.closest("[data-coach-skip]")) end();
   });
   document.body.append(spot, box);
   addEventListener("resize", place);
   addEventListener("scroll", place, true);
-  go(0);
+  stepTo(0);
 };
 
 // first, so the board's own keys don't also act while it's open
 document.addEventListener("keydown", (e) => {
   if (!box) return;
   if (e.key === "Escape") { e.preventDefault(); end(); }
-  else if (e.key === "ArrowRight") { e.preventDefault(); go(at + 1); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); go(at - 1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); stepTo(at + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); stepTo(at - 1); }
 }, true);
 for (const b of document.querySelectorAll("[data-coach-open]")) {
   b.addEventListener("click", () => {

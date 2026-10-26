@@ -527,7 +527,8 @@ details.trail summary{cursor:pointer;color:var(--mut);font-size:11px;font-weight
 button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--accent);cursor:pointer}
 .confirm-dialog{width:min(1000px,calc(100vw - 32px));max-height:min(90vh,860px);padding:0;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--fg);box-shadow:var(--shadow-raised)}
 .confirm-dialog::backdrop{background:rgba(9,30,66,.54)}
-.confirm-dialog .packet{padding:20px 24px 6px}.confirm-dialog .packet h1{margin-top:0}
+.confirm-dialog .packet{padding:20px 24px 6px}.confirm-dialog .packet h1{margin-top:0}.confirm-dialog .split{align-items:start}.confirm-dialog .run{position:sticky;bottom:0;margin:0;padding:14px 0 18px;background:linear-gradient(transparent,var(--bg) 35%);z-index:2}
+.combo{position:relative;margin:0 0 12px}.combo .field{margin:0}.combo-list{position:absolute;left:0;right:0;top:calc(100% - 22px);z-index:6;max-height:248px;overflow-y:auto;margin:0;padding:6px;list-style:none;border-radius:12px;background:var(--raised);border:1px solid var(--line);box-shadow:var(--shadow-raised);animation:pill-in .14s var(--ease)}.combo-list::before{content:"Open tasks";display:block;margin:2px 8px 6px;font-size:11px;font-weight:600;color:var(--dim)}.combo-opt{padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--fg);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.combo-opt:hover,.combo-opt[aria-selected="true"]{background:var(--hover)}.combo-opt[aria-selected="true"]{box-shadow:inset 2px 0 0 var(--accent)}.combo-hint{margin:6px 0 0;font-size:12px;font-weight:400;color:var(--mut)}
 .guide h2{margin-bottom:6px}.guide code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
 .guide-intro{margin:0 0 6px;font-size:14px;line-height:1.5;color:var(--mut)}
 .guide-h{margin:16px 0 6px;font-size:13px;font-weight:600;color:var(--fg)}
@@ -1500,7 +1501,8 @@ const propPill = (name: string, label: string, icon: string, none: string, optio
 export interface CreateOf { more?: boolean; said?: { ok: boolean; text: string } }
 const createHtml = (o: { token: string; q: string; stream: string; name: string; open: string[]; people: string[]; agents: string[]; create?: CreateOf | undefined }) => {
   const group = (label: string, xs: string[]) => (xs.length > 0 ? `<optgroup label="${label}">${xs.map(option).join("")}</optgroup>` : "");
-  const said = o.create?.said ? `<span class="composer-said${o.create.said.ok ? "" : " no"}" role="status" data-create-said>${esc(o.create.said.text)}</span>` : `<span class="composer-said" role="status" data-create-said></span>`;
+  const saidClass = o.create?.said?.ok === false ? "composer-said no" : "composer-said";
+  const said = `<span class="${saidClass}" role="status" data-create-said>${esc(o.create?.said?.text ?? "")}</span>`;
   return `<section class="drawer create-dialog" id="create" aria-label="Create a task" role="dialog" aria-modal="true" data-create>${SCRIM}<div class="modal-box composer">`
     + `<form method="post" action="${esc(withQ("/tasks", o.q))}" class="composer-form" data-create-form><input type="hidden" name="token" value="${esc(o.token)}">`
     + `<header class="composer-top"><span class="composer-crumb">${projectMark(o.stream, o.name)}<span>${esc(o.name)}</span><span class="composer-sep" aria-hidden="true">›</span><b>New task</b></span><a class="close" href="#_" aria-label="Close">×</a></header>`
@@ -1520,9 +1522,10 @@ const KEYS: [string, string][] = [
   ["S", "Start the open task"], ["E", "Complete it, with proof"], ["B", "Block it"], ["G then S", "Project settings"], ["Esc", "Close"], ["?", "These shortcuts"],
 ];
 const keyWords = (k: string) => k.split(" ").map((w) => (w === "or" || w === "then" || w === "/" ? `<span>${w}</span>` : `<kbd>${esc(w)}</kbd>`)).join(" ");
+const keyRow = ([k, what]: [string, string]) => `<div><dt>${keyWords(k)}</dt><dd>${esc(what)}</dd></div>`;
 const keysHtml = () =>
   `<section class="drawer keys-dialog" id="keys" aria-label="Keyboard shortcuts" role="dialog" aria-modal="true" data-keys>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>Keyboard shortcuts</h2>`
-  + `<p class="keys-say">Every move on the board has a key, so you never reach for the mouse.</p><dl class="keys">${KEYS.map(([k, what]) => `<div><dt>${keyWords(k)}</dt><dd>${esc(what)}</dd></div>`).join("")}</dl></div></section>`;
+  + `<p class="keys-say">Every move on the board has a key, so you never reach for the mouse.</p><dl class="keys">${KEYS.map(keyRow).join("")}</dl></div></section>`;
 
 const historyHtml = (body: string) =>
   `<section class="drawer log-dialog" id="history" aria-label="History" role="dialog" aria-modal="true" data-log>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>History</h2>${body}</div></section>`;
@@ -1665,7 +1668,8 @@ function navHtml(live: RenderOptions["live"], views: [string, string][], home: s
   const settings = live ? `<a class="side-link" href="${esc(withQ("/integrations", q))}" data-project-settings>${ICON.sliders}Project settings</a>` : "";
   // the Inbox (Isha, 2026-10-26): invites to projects, with how many wait for an answer
   const n = live?.inbox?.count ?? 0;
-  const inbox = live?.inbox ? `<a class="side-link" href="/inbox" data-inbox>${INBOX_ICON}Inbox${n > 0 ? `<span class="side-n">${n}</span>` : ""}</a>` : "";
+  const count = n > 0 ? `<span class="side-n">${n}</span>` : "";
+  const inbox = live?.inbox ? `<a class="side-link" href="/inbox" data-inbox>${INBOX_ICON}Inbox${count}</a>` : "";
   const me = live?.user ?? live?.actor; // who is signed in with GitHub, else who the page acts as
   const welcome = live?.onboarding;
   return `${SIDE_TOGGLE}<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${inbox}${live ? projectsHtml(stream, home, q, name) : ""}${welcome?.side ?? ""}`
@@ -1774,6 +1778,8 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
   const name = ext.ws?.title ?? stream; // as people see it (renamed in Project settings)
   const first = !board && lanesFirst ? "lanes" : "board";
+  const firstTask = form ? `<a href="#create">Create the first</a> (or press <kbd>C</kbd>)` : "Add the first with <code>tira create</code>";
+  const emptyBoard = `<p class="empty board-empty">No tasks yet. ${firstTask}; Sync then mirrors them to Jira and links their pull requests.</p>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tira · ${esc(name)}</title><style>${CSS}</style></head>
@@ -1783,13 +1789,13 @@ ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}${esc(name)}</h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}${form ? `<a class="act primary create-btn" href="#create" data-create-open>${ICON.plus}Create <kbd>C</kbd></a>` : ""}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>
 ${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q) : ""}
-<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : (form ? `<p class="empty board-empty">No tasks yet. <a href="#create">Create the first</a> (or press <kbd>C</kbd>); Sync then mirrors them to Jira and links their pull requests.</p>` : `<p class="empty board-empty">No tasks yet. Add the first with <code>tira create</code>; Sync then mirrors them to Jira and links their pull requests.</p>`)}</section>
+<section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : emptyBoard}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${historyHtml(`${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}`)}
 ${guideHtml(opts.live?.onboarding !== undefined)}
 ${form ? createHtml({ token: form.token, q, stream, name, open: nodes.filter((n) => TAKES_SUBTASKS.has(n.row.state)).map((n) => n.row.id), people: form.people, agents: form.agents, create: opts.live?.create }) + keysHtml() : ""}
-${opts.live?.onboarding?.tour ?? ""}${opts.live?.inbox?.letter ?? ""}</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}${form ? `<script type="module" src="/keys.mjs"></script><script type="module" src="/coach.mjs"></script><script type="module" src="/create.mjs"></script>` : ""}${opts.live?.onboarding ? `<script type="module" src="/tour.mjs"></script>` : ""}</body></html>
+${opts.live?.onboarding?.tour ?? ""}${opts.live?.inbox?.letter ?? ""}</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}${form ? `<script type="module" src="/keys.mjs"></script><script type="module" src="/coach.mjs"></script><script type="module" src="/create.mjs"></script><script type="module" src="/combo.mjs"></script>` : ""}${opts.live?.onboarding ? `<script type="module" src="/tour.mjs"></script>` : ""}</body></html>
 `;
 }

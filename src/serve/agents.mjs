@@ -30,7 +30,11 @@ const ask = async (form) => {
 // the section as tira has it now, quietly (where you are on the page stays): once an agent has
 // called, so its row says when it was last used
 const refresh = async () => {
-  const fresh = (await parse(await fetch(location.href))).querySelector(SECTION);
+  const here = section()?.querySelector("[data-agents-here]")?.getAttribute("data-agents-here"); // the section's own address, as tira gave it
+  if (!here) return;
+  const url = new URL(here, location.origin);
+  if (url.origin !== location.origin) return; // only ever tira itself
+  const fresh = (await parse(await fetch(url))).querySelector(SECTION);
   if (!fresh) return;
   const green = section()?.querySelector("[data-agent-connector].ok [data-agent-tested]"); // Claude's card stays green
   section()?.replaceChildren(...fresh.childNodes);
@@ -51,7 +55,10 @@ const watch = () => {
     if (!form.isConnected) return;
     if (!document.hidden) {
       try {
-        if (await ask(form)) return void refresh().catch(() => {});
+        if (await ask(form)) {
+          refresh().catch(() => {});
+          return;
+        }
       } catch {
         // no answer this time: ask again
       }
@@ -63,7 +70,7 @@ const watch = () => {
 
 // a step, in place: the section's insides from the page it leads to (the section itself stays, so
 // it stays the one shown); the address follows, for Back and a reload
-const go = async (url, init, push = true, form = undefined) => {
+const go = async (url, init, form = undefined) => {
   try {
     const res = await fetch(url, init);
     const fresh = (await parse(res)).querySelector(SECTION);
@@ -72,8 +79,7 @@ const go = async (url, init, push = true, form = undefined) => {
     now.replaceChildren(...fresh.childNodes);
     dispatchEvent(new Event("tira:swapped")); // what's drawn in new (cplay.mjs) starts
     const to = res.url.split("#")[0] + "#agents";
-    if (push) history.pushState({ agents: true }, "", to);
-    else history.replaceState({ agents: true }, "", to);
+    history.pushState({ agents: true }, "", to);
     window.scrollTo(0, 0);
     watch();
   } catch {
@@ -86,7 +92,7 @@ document.addEventListener("click", (e) => {
   const a = e.target instanceof Element ? e.target.closest(`${SECTION} a[data-agent-go]`) : null;
   if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
-  go(a.href);
+  go(a.href).catch(() => {});
 });
 document.addEventListener("submit", (e) => {
   const form = e.target instanceof HTMLFormElement ? e.target : null;
@@ -100,9 +106,10 @@ document.addEventListener("submit", (e) => {
   }
   if (!form.matches("[data-agent-go]")) return;
   e.preventDefault();
-  go(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) }, true, form);
+  go(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) }, form).catch(() => {});
 });
+// Back and Forward between its steps: the page as it was at that step
 window.addEventListener("popstate", () => {
-  if (location.hash === "#agents") go(location.href, undefined, false);
+  if (location.hash === "#agents") location.reload();
 });
 watch();

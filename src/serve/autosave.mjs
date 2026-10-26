@@ -36,6 +36,6 @@ for (const form of document.querySelectorAll("form[data-autosave]")) {
   input.addEventListener("blur", save);
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    save();
+    save().catch(() => {});
   });
 }

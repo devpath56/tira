@@ -84,6 +84,7 @@ const ASSETS: Record<string, string> = {
   "/coach.mjs": readFileSync(new URL("./coach.mjs", import.meta.url), "utf8"),
   "/create.mjs": readFileSync(new URL("./create.mjs", import.meta.url), "utf8"),
   "/cplay.mjs": readFileSync(new URL("./cplay.mjs", import.meta.url), "utf8"),
+  "/combo.mjs": readFileSync(new URL("./combo.mjs", import.meta.url), "utf8"),
   "/sections.mjs": readFileSync(new URL("./sections.mjs", import.meta.url), "utf8"),
   "/forms.mjs": readFileSync(new URL("./forms.mjs", import.meta.url), "utf8"),
   "/autosave.mjs": readFileSync(new URL("./autosave.mjs", import.meta.url), "utf8"),
@@ -449,6 +450,17 @@ function subtaskFieldHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): stri
   return fieldHtml("name", "Name", v.name ?? "", "Name…", " required maxlength=\"80\"") + `<input type="hidden" name="discovered" value="${found}">` + mark;
 }
 
+// To block, what it waits on (Isha, 2026-10-26: a dropdown, not a wall of chips): one field, with the
+// open tasks as a list under it that narrows as you type (combo.mjs; each one a fill, as the chips
+// were); what matches none is a new ticket's name. The confirm page (no script) lists them as text.
+function blockerHtml(open: string[], value: string, id: string, fragment: boolean): string {
+  const field = `<label class="field" data-field="blocker"><span>Blocked by</span><input type="text" name="blocker" value="${esc(value)}" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="${esc(id)}"`;
+  if (!fragment || open.length === 0) return `${field}></label>` + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`);
+  const items = open.map((x, i) => `<li class="combo-opt" role="option" id="blocker-opt-${i}" data-fill="blocker" data-value="${esc(x)}">${esc(x)}</li>`).join("");
+  return `<div class="combo" data-combo>${field} role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="blocker-list"></label>`
+    + `<ul class="combo-list" id="blocker-list" role="listbox" aria-label="Open tasks" hidden>${items}</ul><p class="combo-hint">Pick an open task, or type a new ticket's name.</p></div>`;
+}
+
 // What the move needs from you: to block, what it waits on (a new ticket by name, or an open task)
 // and why; to complete, the proof of work; to add a subtask, its name; a reason or a parent where
 // the move takes one.
@@ -457,10 +469,8 @@ function moveFieldsHtml(p: Packet, opts: ConfirmOpts, fragment: boolean): string
   const verb = PAGE_VERBS[opts.event];
   if (!p.ok || !verb) return "";
   if (opts.event === "BLOCK") {
-    const open = (p.waitables ?? []).slice(0, 12);
-    return fieldHtml("blocker", "Blocked by", v.blocker ?? "", "New ticket or open task…", ` data-blocked-by="${esc(opts.id)}"`)
-      + choicesHtml(open, fragment, "Or an open task:", "Open tasks it could wait on", (x) => `data-fill="blocker" data-value="${esc(x)}"`)
-      + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
+    const open = (p.waitables ?? []).slice(0, 50);
+    return blockerHtml(open, v.blocker ?? "", opts.id, fragment) + fieldHtml("reason", "Reason", v.reason ?? "", "Optional…");
   }
   if (opts.event === "COMPLETE") return proofFieldHtml(opts);
   if (verb.creates) return subtaskFieldHtml(p, opts, fragment);
@@ -735,25 +745,33 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (link?.deleted) return send(res, 410, html, deletedProject(link.title ?? ws.stream, link.by));
     if (me.login && !link?.repo) return send(res, 303, text, "", { Location: `/connect${url.search}` });
     if (events.length === 0 && ws.q !== "") return send(res, 404, html, noWorkspace(ws.stream));
-    const rk = url.searchParams.get("r") ?? "";
-    const created = flashes.get(rk);
-    // Create's own result shows in Create, opened again (c=1); Keep open for the next one stays ticked
-    const inCreate = url.searchParams.get("c") === "1";
-    const create = { more: url.searchParams.get("more") === "1", ...(inCreate && created ? { said: created } : {}) };
-    const flash = inCreate ? undefined : created;
-    flashes.delete(rk); // a result shows once
+    const { flash, create } = resultOf(url);
     const divergence = opts.divergence?.(events);
     const name = me.actor ? displayName(me.actor, linkEnv) : undefined; // as they chose to be shown
     const { people, agents } = await assignees(ws.stream, me.actor);
     const onboarding = me.login ? welcomeFor(me.login, name ?? githubAuth(me.login, linkEnv)?.name ?? me.login, ws, r, events, { repo: !!link?.repo, agent: agents.length > 0, team: people.length > 1 }) : undefined;
-    // invites (Isha, 2026-10-26): the Inbox's count, and a letter over the page once for a new one
-    const invites = me.login ? invitesNow(linkEnv).filter((x) => same(x.login, me.login ?? "")) : [];
-    const fresh = me.login ? invites.find((x) => !hasSeen(me.login ?? "", `invite:${x.stream}`, linkEnv)) : undefined;
-    if (fresh && me.login) await markSeen(me.login, `invite:${fresh.stream}`, linkEnv);
-    const freshTitle = fresh ? workspaceOf((await now(fresh.stream)).r, fresh.stream)?.title ?? fresh.stream : "";
-    const inbox = me.login ? { count: invites.length, ...(fresh ? { letter: letterPop(fresh, freshTitle, token) } : {}) } : undefined;
+    const inbox = me.login ? await inboxFor(me.login) : undefined;
     const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
+  };
+
+  // a page's result, shown once: Create's own shows in Create, opened again (c=1), and Keep open for the
+  // next one stays ticked; any other shows at the top
+  const resultOf = (url: URL) => {
+    const rk = url.searchParams.get("r") ?? "";
+    const said = flashes.get(rk);
+    flashes.delete(rk);
+    const inCreate = url.searchParams.get("c") === "1";
+    return { flash: inCreate ? undefined : said, create: { more: url.searchParams.get("more") === "1", ...(inCreate && said ? { said } : {}) } };
+  };
+  // invites (Isha, 2026-10-26): the Inbox's count, and a letter over the page once for a new one
+  const inboxFor = async (login: string) => {
+    const invites = invitesNow(linkEnv).filter((x) => same(x.login, login));
+    const fresh = invites.find((x) => !hasSeen(login, `invite:${x.stream}`, linkEnv));
+    if (!fresh) return { count: invites.length };
+    await markSeen(login, `invite:${fresh.stream}`, linkEnv);
+    const title = workspaceOf((await now(fresh.stream)).r, fresh.stream)?.title ?? fresh.stream;
+    return { count: invites.length, letter: letterPop(fresh, title, token) };
   };
 
   // A first-time person's welcome (src/serve/onboarding.ts): the tour, opening by itself until they've
@@ -1126,28 +1144,16 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (form === undefined) return;
     const fragment = form.get("fragment") === "1";
     const more = form.get("more") === "1";
-    const said = (f: { ok: boolean; text: string; changed?: string[] }) => {
-      const key = flashKey();
-      flashes.set(key, f);
-      if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
-      const go = withQ(`/?r=${key}`, ws.q);
-      if (fragment) return send(res, f.ok ? 200 : 400, "application/json; charset=utf-8", JSON.stringify({ ok: f.ok, text: f.text, go }));
-      send(res, 303, text, "", { Location: f.ok && !more ? go : `${go}&c=1${more ? "&more=1" : ""}#create` });
-    };
+    const said = (f: { ok: boolean; text: string; changed?: string[] }) => createdSaid(res, ws, f, fragment, more);
     const actor = actorNow();
     if (actor === undefined) return said({ ok: false, text: "Sign in first." });
     const name = subtaskName(form.get("name"));
     if (name === undefined) return said({ ok: false, text: "Name the task: 1 to 80 characters." });
     const parent = (form.get("parent") ?? "").trim();
-    const { r } = await now(ws.stream);
-    const here = (id: string) => r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id);
-    if (here(name)) return said({ ok: false, text: `${name} is already a task here: pick another name.` });
-    if (parent !== "" && !here(parent)) return said({ ok: false, text: "That task isn't in this project." });
     const asked = ticketAsked(form);
     const words = { title: "", description: asked.description, steps: [], estimate: asked.estimate };
-    const { people, agents } = await assignees(ws.stream, actor);
-    const why = ticketProblem({ ...words, assignee: asked.assignee }, [...people, ...agents]);
-    if (why) return said({ ok: false, text: `${name} wasn't created: ${why}` });
+    const why = await createProblem(ws, actor, name, parent, { ...words, assignee: asked.assignee });
+    if (why) return said({ ok: false, text: why });
     const cmd: Command = { stream: ws.stream, kind: "create", entity: { type: "node", id: name }, actor, payload: parent === "" ? {} : { parent_id: parent } };
     const got = (await dispatcher.submit(cmd)).result;
     if (got.status !== "appended") return said({ ok: false, text: `${name} wasn't created: ${got.status === "rejected" || got.status === "refused" ? got.detail : got.status}.` });
@@ -1157,6 +1163,29 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (Object.keys(payload).length === 1) return said({ ok: true, text: made, changed }); // nothing for its ticket to say
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: name, version: 1 }, actor, payload })).result;
     said(w.status === "appended" ? { ok: true, text: made, changed } : { ok: true, text: `${made} Its details weren't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}): add them on its ticket.`, changed });
+  };
+
+  // Create's answer: JSON for the page's script; else back to the board, or to Create, opened again
+  // with it (and still ticked to keep open)
+  const createdSaid = (res: ServerResponse, ws: Workspace, f: { ok: boolean; text: string; changed?: string[] }, fragment: boolean, more: boolean) => {
+    const key = flashKey();
+    flashes.set(key, f);
+    if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
+    const go = withQ(`/?r=${key}`, ws.q);
+    if (fragment) return send(res, f.ok ? 200 : 400, "application/json; charset=utf-8", JSON.stringify({ ok: f.ok, text: f.text, go }));
+    const keep = more ? "&more=1" : "";
+    send(res, 303, text, "", { Location: f.ok && !more ? go : `${go}&c=1${keep}#create` });
+  };
+  // why a new task can't be made, if it can't: its name taken, a parent that isn't here, or a word its
+  // ticket can't take
+  const createProblem = async (ws: Workspace, actor: string, name: string, parent: string, ticket: TicketAsked): Promise<string | undefined> => {
+    const { r } = await now(ws.stream);
+    const here = (id: string) => r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id);
+    if (here(name)) return `${name} is already a task here: pick another name.`;
+    if (parent !== "" && !here(parent)) return "That task isn't in this project.";
+    const { people, agents } = await assignees(ws.stream, actor);
+    const why = ticketProblem(ticket, [...people, ...agents]);
+    return why ? `${name} wasn't created: ${why}` : undefined;
   };
 
   // GET /projects/new: + New project's page (new-project.ts), opened from the board you're on, which

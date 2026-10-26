@@ -52,7 +52,10 @@ function play(tour) {
     if (!finished) return;
     // Get started: the walkthrough of the real board follows (coach.mjs), after the page comes back
     // when the checklist was hidden and shows it again
-    if (document.querySelector("[data-get-started]")) return void dispatchEvent(new Event("tira:coach"));
+    if (document.querySelector("[data-get-started]")) {
+      dispatchEvent(new Event("tira:coach"));
+      return;
+    }
     try { sessionStorage.setItem("tira-coach", "1"); } catch { /* no storage: no walkthrough after the reload */ }
     location.reload();
   };

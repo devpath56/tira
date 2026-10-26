@@ -958,7 +958,7 @@ test("+ Create on the board (Isha, 2026-10-26): a task by name, at the top or un
     assert.match(keys, /if \(key === "c" && document\.getElementById\("create"\)\) \{\n    location\.hash = "create";/);
     const coach = readFileSync(new URL("../src/serve/coach.mjs", import.meta.url), "utf8");
     assert.deepEqual([...coach.matchAll(/^  \["([^"]+)", "([^"]+)"/gm)].map((m) => m[2]), ["Create a task", "Kanban or Graph", "Find anything", "Needs you", "Project settings"]);
-    assert.match(readFileSync(new URL("../src/serve/tour.mjs", import.meta.url), "utf8"), /if \(document\.querySelector\("\[data-get-started\]"\)\) return void dispatchEvent\(new Event\("tira:coach"\)\);/);
+    assert.match(readFileSync(new URL("../src/serve/tour.mjs", import.meta.url), "utf8"), /if \(document\.querySelector\("\[data-get-started\]"\)\) \{\n      dispatchEvent\(new Event\("tira:coach"\)\);\n      return;/);
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });

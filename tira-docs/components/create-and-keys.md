@@ -25,6 +25,10 @@ bragging the keys as it goes.
   box, history) beside a tinted sidebar of properties as rows of label and value: the status as a
   pill with its colour, what it allows in one row under it (the first move lit), the assignee as a
   pill, and the effort as a number with h or d.
+- **Blocking a task** (B, or Block): "Blocked by" is one field with a dropdown under it
+  (`combo.mjs`): clicking or typing opens the open tasks, filtered by what's typed; the arrow keys
+  move, Enter picks, Esc closes the list but not the dialog. Typing a name that isn't there makes a
+  new ticket, as before. Without the script it's the plain field and the list of open tasks.
 - **Keys** (`keys.mjs`): C creates; / searches (as ⌘K); J and K move between tasks and Enter
   opens one; in an open task S starts it, E completes it (with proof) and B blocks it, by the same
   buttons the task has; G then S opens Project settings; ? lists them all (Help → Keyboard
@@ -38,6 +42,7 @@ bragging the keys as it goes.
 
 - `[data-create-open]` on + Create, `#create` (`[data-create]`) on its dialog, `[data-create-form]` on its form (POST `/tasks`), `.prop-pill` on each property, `[data-create-said]` on what it says.
 - `#keys` (`[data-keys]`) on the shortcuts; `kbd` on each key.
+- `[data-combo]` on Blocked by's field and its list, `.combo-opt` on each open task in it.
 - `.coach` on a walkthrough tooltip, `.coach-spot` on its spotlight; `[data-coach-open]` on Help's Show me around.
 
 Assertion: Create makes a task at the top or under an open one, and refuses a name taken or a

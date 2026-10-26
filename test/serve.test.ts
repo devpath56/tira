@@ -90,7 +90,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=colors&#38;event=UNBLOCK" data-act="UNBLOCK">Unblock<\/a>/);
     assert.match(page.body, /<a class="act" href="\/confirm\?type=node&#38;id=loading_state&#38;event=COMPLETE" data-act="COMPLETE">Complete<\/a>/);
     assert.match(page.body, /<section class="drawer guide" id="guide"[^>]*data-guide>/);
-    assert.ok(!/<script(?![^>]*src="\/(?:app|keys|coach|create)\.mjs")/.test(page.body), "no inline script");
+    assert.ok(!/<script(?![^>]*src="\/(?:app|keys|coach|create|combo)\.mjs")/.test(page.body), "no inline script");
     // the same log rendered to a file: no script, no actions, no search button
     const events = await s.store.readStream(S);
     const file = renderHtml(fold(events, s.registry), S, "h", events);
@@ -647,12 +647,17 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
   const s = await serving();
   try {
     const block = (await s.http("GET", "/confirm?type=node&id=table&event=BLOCK&fragment=1")).body;
-    assert.match(block, /<label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="table"><\/label>/);
+    // a dropdown, not a wall of chips (Isha, 2026-10-26): the field as a combobox, the open tasks a list under it (combo.mjs)
+    assert.match(block, /<div class="combo" data-combo><label class="field" data-field="blocker"><span>Blocked by<\/span><input type="text" name="blocker" value="" placeholder="New ticket or open task…" autocomplete="off" spellcheck="false" data-blocked-by="table" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="blocker-list"><\/label><ul class="combo-list" id="blocker-list" role="listbox" aria-label="Open tasks" hidden><li class="combo-opt" role="option" id="blocker-opt-0" data-fill="blocker" data-value="/);
     const open = () => [...block.matchAll(/data-fill="blocker" data-value="([^"]*)"/g)].map((m) => m[1]);
     for (const id of ["colors", "loading_state", "font", "filters", "fetch_metrics"]) assert.ok(open().includes(id), id);
     assert.ok(!open().includes("table"), "not itself");
     assert.ok(!open().includes("dashboard"), "not a task it sits under");
-    assert.match(block, /<div class="fills" data-fills><span>Or an open task:<\/span>/);
+    assert.match(block, /<\/ul><p class="combo-hint">Pick an open task, or type a new ticket(?:'|&#39;)s name\.<\/p><\/div><label class="field" data-field="reason">/);
+    assert.doesNotMatch(block, /Or an open task:/);
+    const combo = readFileSync(new URL("../src/serve/combo.mjs", import.meta.url), "utf8");
+    assert.match(combo, /const hit = q === "" \|\| \(o\.dataset\.value \?\? ""\)\.toLowerCase\(\)\.includes\(q\);/);
+    assert.match(combo, /\} else if \(e\.key === "Escape" && !list\.hidden\) \{\n    e\.preventDefault\(\);\n    e\.stopPropagation\(\);/);
     // the confirm page (no script) lists them as text
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=BLOCK")).body, /<p class="cmd-help">Open tasks it could wait on: metrics_card · fetch_metrics · improve_visual · colors · loading_state · font · filters<\/p>/);
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time

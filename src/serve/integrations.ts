@@ -75,8 +75,11 @@ const APP_ICON: Record<App, string> = {
 };
 const TRASH = svg24('<path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
 // a section's header: its icon on a tile, its title, and a line on what it's for
-const sectionTop = (id: string, title: string) =>
-  `<div class="grp-top"><span class="grp-icon" aria-hidden="true">${SET_ICON[id] ?? ""}</span><div><h2 class="grp-h">${title}</h2>${descOf(id) ? `<p class="grp-desc">${esc(descOf(id) ?? "")}</p>` : ""}</div></div>`;
+const sectionTop = (id: string, title: string) => {
+  const desc = descOf(id);
+  const line = desc ? `<p class="grp-desc">${esc(desc)}</p>` : "";
+  return `<div class="grp-top"><span class="grp-icon" aria-hidden="true">${SET_ICON[id] ?? ""}</span><div><h2 class="grp-h">${title}</h2>${line}</div></div>`;
+};
 const EYE = `<svg class="i-show" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><svg class="i-hide" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 3.7A6.6 6.6 0 0 1 8 3.5c4.1 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.7 2.2M4 5.1C2.4 6.3 1.5 8 1.5 8S3.9 12.5 8 12.5c1.2 0 2.2-.4 3.1-.9M6.6 6.6a2 2 0 0 0 2.8 2.8M2 2l12 12"/></svg>`;
 
 // a direct GitHub sign-in under way, in the browser that started it (integrations.ts: signinStart)
@@ -367,7 +370,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (!login) return back(res, "/welcome", { ok: false, text: "Sign in with GitHub first." });
     const email = (form.get("email") ?? "").trim();
     const fragment = form.get("fragment") === "1";
-    if (!EMAIL.test(email)) return fragment ? c.send(res, 400, "text/plain; charset=utf-8", "That isn't an email address.") : back(res, back2 === "/settings" ? "/settings#profile" : back2, { ok: false, text: "That isn't an email address." });
+    const to = back2 === "/settings" ? "/settings#profile" : back2;
+    if (!EMAIL.test(email)) return fragment ? c.send(res, 400, "text/plain; charset=utf-8", "That isn't an email address.") : back(res, to, { ok: false, text: "That isn't an email address." });
     await saveEmail(login, email, env);
     if (fragment) return c.send(res, 200, "text/plain; charset=utf-8", `Your email is ${email} now.`);
     if (back2 === "/settings") return back(res, "/settings#profile", { ok: true, text: `Your email is ${email} now.` });
@@ -495,8 +499,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     `<form method="post" action="/integrations/people" class="inline" data-autosubmit>${t}<input type="hidden" name="login" value="${esc(login)}"><select name="do" class="role" aria-label="Role of ${esc(login)}">`
     + `<option value="admin"${admin ? " selected" : ""}>Admin</option><option value="member"${admin ? "" : " selected"}>Member</option></select><noscript><button class="how" type="submit">Change</button></noscript></form>`;
   // taking someone off the project, asked first (forms.mjs)
-  const removeButton = (t: string, login: string, project: string) =>
-    `<form method="post" action="/integrations/people" class="inline" data-confirm="${esc(`Remove ${login} from ${project}? They won't see it any more, and their agents here stop.`)}">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(login)}"><button class="team-del" type="submit" aria-label="Remove ${esc(login)}" title="Remove" data-team-remove>${TRASH}</button></form>`;
+  const removeButton = (t: string, login: string, project: string) => {
+    const ask = esc(`Remove ${login} from ${project}? They won't see it any more, and their agents here stop.`);
+    return `<form method="post" action="/integrations/people" class="inline" data-confirm="${ask}">${t}<input type="hidden" name="do" value="remove"><input type="hidden" name="login" value="${esc(login)}"><button class="team-del" type="submit" aria-label="Remove ${esc(login)}" title="Remove" data-team-remove>${TRASH}</button></form>`;
+  };
   // collaborators (Isha, 2026-10-25; named after GitHub's, 2026-10-26): this project's admins and
   // members, who alone see it, and the agents connected to it. Its admins add people by GitHub
   // username, pick each one's role, and remove them; everyone else sees who to ask. Your own row
@@ -515,7 +521,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     };
     const people = p.admins.map((x) => person(x, true)).join("") + p.members.map((x) => person(x, false)).join("");
     // invited, not answered yet (Isha, 2026-10-26): they see it once they accept; an admin can take it back
-    const takeBack = (x: string) => `<form method="post" action="/integrations/people" class="inline" data-confirm="${esc(`Take back the invite to ${x}?`)}">${t}<input type="hidden" name="do" value="uninvite"><input type="hidden" name="login" value="${esc(x)}"><button class="team-del" type="submit" aria-label="Take back the invite to ${esc(x)}" title="Take back the invite" data-team-uninvite>${TRASH}</button></form>`;
+    const takeBack = (x: string) => `<form method="post" action="/integrations/people" class="inline" data-confirm="Take back the invite to ${esc(x)}?">${t}<input type="hidden" name="do" value="uninvite"><input type="hidden" name="login" value="${esc(x)}"><button class="team-del" type="submit" aria-label="Take back the invite to ${esc(x)}" title="Take back the invite" data-team-uninvite>${TRASH}</button></form>`;
     const invited = invitesNow(env).filter((x) => x.stream === c.stream).map((x) => `<div class="grp-row team-row" data-team-invited>${avatar(x.login)}<span class="grp-k">${esc(x.login)}<small class="grp-sub">Invited by ${esc(x.by)}${knownLogin(x.login, env) ? "" : " · not signed up yet"}</small></span><span class="pill">Invited</span>${mayChange ? takeBack(x.login) : ""}</div>`).join("");
     // agents: when each last called tira, and whether that's lately (a day)
     const agentLine = (x: AgentToken) => {
@@ -650,12 +656,9 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
   // someone's invites, as letters (seen here: no letter over the page for them later)
   const lettersFor = async (login: string) => {
     const mine = invitesNow(env).filter((x) => same(x.login, login));
-    const out: string[] = [];
-    for (const x of mine) {
-      out.push(letterHtml(x, await titleOf(x.stream), c.token));
-      if (!hasSeen(login, `invite:${x.stream}`, env)) await markSeen(login, `invite:${x.stream}`, env);
-    }
-    return out.join("");
+    const titles = await Promise.all(mine.map((x) => titleOf(x.stream)));
+    await Promise.all(mine.filter((x) => !hasSeen(login, `invite:${x.stream}`, env)).map((x) => markSeen(login, `invite:${x.stream}`, env)));
+    return mine.map((x, i) => letterHtml(x, titles[i] ?? x.stream, c.token)).join("");
   };
   const inboxPage = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
     const me = who(req);
@@ -686,8 +689,9 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       return inProject(p, login) ? undefined : { admins: p.admins, members: [...p.members, login] };
     }, env);
     await dropInvite(stream, login, env);
-    const board = stream === c.home ? "/" : `/?w=${encodeURIComponent(stream)}`;
-    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: `${board}${board.includes("?") ? "&" : "?"}r=${c.flash({ ok: true, text: `You joined ${title}: it's on your project list.` })}` });
+    const joined = c.flash({ ok: true, text: `You joined ${title}: it's on your project list.` });
+    const board = stream === c.home ? `/?r=${joined}` : `/?w=${encodeURIComponent(stream)}&r=${joined}`;
+    c.send(res, 303, "text/plain; charset=utf-8", "", { Location: board });
   };
 
   // Project settings (GET /integrations): this project's name, its GitHub repo, its Jira project,
@@ -839,7 +843,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     if (!who(req).actor || !tokens) return fragment ? c.send(res, 200, html, "") : toAgents(res, "r=" + c.flash({ ok: false, text: "Sign in first." }));
     const asked = Number(form.get("since"));
     const since = Number.isFinite(asked) && asked > 0 ? asked : Date.now();
-    const fresh = (await tokens.list(c.stream)).filter((x) => Date.parse(x.createdAt) >= since && x.lastUsedAt).at(-1);
+    const fresh = [...(await tokens.list(c.stream))].reverse().find((x) => Date.parse(x.createdAt) >= since && x.lastUsedAt); // the newest
     const said: Flash = fresh?.lastUsedAt
       ? { ok: true, text: `${fresh.agent} is connected: tira heard from it ${ago(fresh.lastUsedAt)}. Ask it "what's next in tira?"` }
       : { ok: false, wait: true, text: "Not yet: once it connects and calls tira, this turns green." };
@@ -983,28 +987,32 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const db = databaseCheck(envFile, env);
     const gone = key && !made ? `<div class="flash no" role="status">That setup isn't shown any more (it shows for 10 minutes, to whoever made it). Its agent is in the list below: revoke it and connect it again for a new token.</div>` : "";
     let flow: string;
-    if (made) {
-      const heard = rows.find((x) => x.id === made.id);
-      const status = said || (heard ? flashLine(heardFrom(heard)) : "");
-      flow = step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[made.app]}</b></p>`)
-        + step(2, "Name your agent", "done", `<p class="agent-done"><b>${esc(made.agent)}</b> is connected to this project, with a token of its own.</p>`)
-        + step(3, `Finish in ${APP_NAME[made.app]}`, heard?.lastUsedAt ? "done" : "now", finish(made, at, db, envFile) + testForm(made, key ?? "", t, status) + `<p class="agent-again">${startOver("Connect another agent")}</p>`);
-    } else if (app) {
-      const suggested = freeName(APP_AGENT[app], rows.map((x) => x.agent));
-      flow = step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[app]}</b> ${startOver("Change")}</p>`)
-        + step(2, "Name your agent", "now", `<p>Its name is how its moves show on the board, never a person's. It gets a token of its own, for this project only.</p>`
-        + `<form method="post" action="/integrations/agents/connect" class="agent-name-form" data-agent-name data-agent-go>${t}<input type="hidden" name="app" value="${app}"><input type="text" name="name" value="${esc(suggested)}" maxlength="64" required autocomplete="off" spellcheck="false" aria-label="Agent's name"><button class="act primary" type="submit">Connect</button></form>` + said)
-        + step(3, `Finish in ${APP_NAME[app]}`, "later", `<p>One thing to do in ${APP_NAME[app]}. tira turns green the moment it calls.</p>`);
-    } else {
-      flow = chooser(at, t);
-    }
+    if (made) flow = madeFlow(made, rows, said, key ?? "", at, db, envFile, t);
+    else if (app) flow = namingFlow(app, rows, said, t);
+    else flow = chooser(at, t);
     const top = made || app ? gone : said + gone; // a step's own result shows in that step
     const admin = !!me.login && await adminHere(me.login);
     const list = rows.length === 0 ? '<p class="agent-none">No agents connected yet.</p>' : rows.map((x) => agentRow(x, me, t, admin)).join("");
     return head + top + flow
       + `<h3 class="agent-list-h">Connected agents</h3><div class="agent-list" data-agents>${list}</div>`
       + more(at, db, envFile)
-      + `<div class="grp-foot">A token works for this project only. Revoke it here and the agent's next call is refused.</div></section>`;
+      + `<div class="grp-foot">A token works for this project only. Revoke it here and the agent's next call is refused.</div><span hidden data-agents-here="${esc(url.pathname + url.search)}"></span></section>`;
+  };
+  // an agent just made: its app and name done, then the one thing to do in its app, and its status
+  const madeFlow = (made: Made, rows: AgentToken[], said: string, key: string, at: Where, db: DatabaseCheck, envFile: string, t: string) => {
+    const heard = rows.find((x) => x.id === made.id);
+    const status = said || (heard ? flashLine(heardFrom(heard)) : "");
+    return step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[made.app]}</b></p>`)
+      + step(2, "Name your agent", "done", `<p class="agent-done"><b>${esc(made.agent)}</b> is connected to this project, with a token of its own.</p>`)
+      + step(3, `Finish in ${APP_NAME[made.app]}`, heard?.lastUsedAt ? "done" : "now", finish(made, at, db, envFile) + testForm(made, key, t, status) + `<p class="agent-again">${startOver("Connect another agent")}</p>`);
+  };
+  // an app picked: name its agent (its name suggested), then the one thing to do in its app
+  const namingFlow = (app: App, rows: AgentToken[], said: string, t: string) => {
+      const suggested = freeName(APP_AGENT[app], rows.map((x) => x.agent));
+      return step(1, "Choose your app", "done", `<p class="agent-done"><b>${APP_NAME[app]}</b> ${startOver("Change")}</p>`)
+        + step(2, "Name your agent", "now", `<p>Its name is how its moves show on the board, never a person's. It gets a token of its own, for this project only.</p>`
+        + `<form method="post" action="/integrations/agents/connect" class="agent-name-form" data-agent-name data-agent-go>${t}<input type="hidden" name="app" value="${app}"><input type="text" name="name" value="${esc(suggested)}" maxlength="64" required autocomplete="off" spellcheck="false" aria-label="Agent's name"><button class="act primary" type="submit">Connect</button></form>` + said)
+        + step(3, `Finish in ${APP_NAME[app]}`, "later", `<p>One thing to do in ${APP_NAME[app]}. tira turns green the moment it calls.</p>`);
   };
 
   const page = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string) => {
@@ -1125,7 +1133,10 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const me = who(req);
     if (!me.actor) return back(res, "/welcome", { ok: false, text: "Sign in with GitHub first." });
     const name = (form.get("name") ?? "").trim().replace(/\s+/g, " ");
-    const said = (f: Flash) => (form.get("fragment") === "1" ? c.send(res, f.ok ? 200 : 400, "text/plain; charset=utf-8", f.text) : back(res, "/settings#profile", f));
+    const said = (f: Flash) => {
+      if (form.get("fragment") !== "1") return back(res, "/settings#profile", f);
+      c.send(res, f.ok ? 200 : 400, "text/plain; charset=utf-8", f.text);
+    };
     if (name !== "" && !NAME.test(name)) return said({ ok: false, text: "A display name is 1 to 60 characters, with no angle brackets." });
     await saveDisplayName(me.actor, name || undefined, env);
     said({ ok: true, text: name ? `You're shown as ${name} now.` : "You're shown by your usual name again." });
@@ -1380,7 +1391,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/jira/site": jiraSite,
     "POST /integrations/jira/disconnect": jiraDisconnect,
     "POST /signin/start": signinStart,
-    "GET /signin/start": (_req: IncomingMessage, res: ServerResponse) => Promise.resolve(back(res, "/welcome")), // a reload of the button's address
+    "GET /signin/start": async (_req: IncomingMessage, res: ServerResponse) => { back(res, "/welcome"); }, // a reload of the button's address
     "GET /signin/code": signinCode,
     "GET /signin/github/callback": signinBack,
     "POST /signin/poll": signinPoll,
