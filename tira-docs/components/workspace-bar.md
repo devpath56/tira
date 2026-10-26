@@ -14,6 +14,12 @@ the pages, as the person signed in; the result shows in the banner), and **Add J
 GitHub** while one is missing (straight to that section of Project settings). Project settings
 themselves are in the sidebar.
 
+**A long name** (Isha, 2026-10-26): the title above the board takes two lines if it must, breaking
+after a dot, an underscore or a slash, never inside a word ("PM.Engg.Spec.Handoff." then
+"Review_Notes"). Where space is one line (the sidebar's projects, Project settings' list, Create's
+header), it's cut with "…" and the whole name shows on hover. The task search beside it stays on
+a phone's screen.
+
 Each task's card carries its Jira key, and its dialog lists its Jira issue (with the status tira
 last set) and its pull requests (open, merged or closed). Completing a task with a merged pull
 request offers it as the proof.

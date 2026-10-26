@@ -3,7 +3,7 @@
 // as a letter: once over the page when they next arrive (Later folds it away), and in their Inbox
 // until they answer. Nothing here writes: the answer posts to /invites (integrations.ts).
 import { esc } from "../render/escape.ts";
-import { projectMark } from "../render/html.ts";
+import { projectMark, nameHtml } from "../render/html.ts";
 import type { Invite } from "../sync/credentials.ts";
 
 const ENVELOPE = `<svg viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="56" height="38" rx="6"/><path d="M6 10l26 20 26-20"/><path d="M6 42l20-16M58 42 38 26"/></svg>`;
@@ -12,7 +12,7 @@ export { INBOX_ICON } from "../render/html.ts";
 // one invite, as a letter: who invited you, to which project, and the answer
 export function letterHtml(inv: Invite, title: string, token: string): string {
   return `<article class="letter" data-invite="${esc(inv.stream)}"><span class="letter-env">${ENVELOPE}</span><div class="letter-body">`
-    + `<p class="letter-k">You have an invite</p><h3>${projectMark(inv.stream, title)}${esc(title)}</h3>`
+    + `<p class="letter-k">You have an invite</p><h3>${projectMark(inv.stream, title)}<span>${nameHtml(title)}</span></h3>`
     + `<p><b>${esc(inv.by)}</b> invited you to work on ${esc(title)} with them. Accept, and it's on your project list and its board opens.</p>`
     + `<form method="post" action="/invites" class="letter-acts"><input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="stream" value="${esc(inv.stream)}">`
     + `<button class="act primary" type="submit" name="do" value="accept">Accept</button><button class="act" type="submit" name="do" value="decline">Decline</button></form></div></article>`;

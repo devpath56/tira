@@ -40,7 +40,7 @@ import type { Dispatcher } from "../write/dispatcher.ts";
 import type { EventStore } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { esc } from "../render/escape.ts";
-import { brand, CSS, projectMark, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from "../render/html.ts";
+import { brand, CSS, projectMark, nameHtml, SIDE_SHUT, SIDE_TOGGLE, THEME_RADIOS } from "../render/html.ts";
 import { codePage, connectPage, emailPage, GITHUB_MARK, jiraTabPage, landingPage, type ConnectOpts } from "./welcome.ts";
 import { SIGNIN_CSP } from "./csp.ts";
 import type { PublicSite } from "./public.ts";
@@ -1033,22 +1033,23 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       + `<div class="grp-row"><span class="grp-k">Project id</span><code class="grp-v" data-project-id>${esc(c.stream)}</code></div>`
       + `<div class="grp-foot">The id never changes: it's in the project's address and its tickets' keys (<code>TIRA_${esc(projectCode(c.stream))}_1</code>, …). Names and ids are each unique on this tira.</div></section>`;
 
-    // delete: type the project's name to be sure (not the one tira serve was started with)
-    const startedHere = row("Delete", `<span class="grp-v">This is the project tira serve was started with: start it on another to delete this one</span>`);
+    // delete: type the project's name to be sure (not the one tira opens on: the one tira serve was
+    // started with, which a hosted tira's people can't change; said plainly, Isha 2026-10-26)
+    const startedHere = row("Delete", `<span class="grp-v">tira opens on this project, so it can't be deleted. You can rename it in General.</span>`);
     const adminsOnly = row("Delete", `<span class="grp-v">Only this project's admins can delete it</span>`);
     const mayDelete = await adminHere(me.login);
     const whyNot = c.stream === c.home ? startedHere : adminsOnly;
     const remove = `<section class="grp danger" id="delete" data-int="delete">${sectionTop("delete", "Danger zone")}`
       + (c.stream === c.home || !mayDelete
         ? `<div class="grp-list">${whyNot}</div></section>`
-        : `<form method="post" action="/projects/delete" class="grp-list" data-delete-project>${t}<label class="grp-row"><span class="grp-k">Type <b>${name}</b> to confirm</span><input type="text" name="confirm" autocomplete="off" spellcheck="false" required aria-label="Type ${name} to confirm"></label>`
+        : `<form method="post" action="/projects/delete" class="grp-list" data-delete-project>${t}<label class="grp-row"><span class="grp-k">Type <b>${nameHtml(shown)}</b> to confirm</span><input type="text" name="confirm" autocomplete="off" spellcheck="false" required aria-label="Type ${name} to confirm"></label>`
           + `<div class="grp-row"><span class="grp-k"></span><button class="act danger" type="submit">Delete this project</button></div></form></section>`);
 
     const fromAgents = url.searchParams.get("from") === "agents"; // its result shows in the section
     const agents = await agentsGroup(url, me, t, host);
     const team = await teamGroup(me.login, t, shown);
     const agentCount = ((await tokensNow()?.list(c.stream)) ?? []).length;
-    const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${name}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + team + github + jira + agents + remove;
+    const body = `<header class="int-head"><h1>Project settings</h1><p>${projectMark(c.stream, shown)}<b>${nameHtml(shown)}</b></p></header>` + (fromAgents ? "" : flashOf(url)) + general + team + github + jira + agents + remove;
     c.send(res, 200, html, settingsPage({ title: `Project settings · ${shown}`, label: "Project settings", project: { stream: c.stream, name: shown }, sections: [["", "Project"], ["general", "General"], ["team", "Collaborators"], ["", "Connections"], ["github", "GitHub", ws?.repo ? "on" : ""], ["jira", "Jira", ws?.jira_project ? "on" : ""], ["agents", "Agents", agentCount > 0 ? String(agentCount) : ""], ["", "Advanced"], ["delete", "Danger zone"]] }, body, helpPanel(portOf(host), me.actor), scripts));
   };
 
@@ -1436,7 +1437,7 @@ function settingsPage(o: SettingsOf, body: string, help: string, script = ""): s
   const first = o.sections.find(([id]) => id !== "")?.[0];
   if (first) body = body.replace(`id="${first}"`, `id="${first}" data-default`);
   const nav = `<nav class="set-nav" aria-label="${esc(o.label)}">${brand("/")}<p class="set-k">${esc(o.label)}</p>`
-    + (o.project === undefined ? "" : `<p class="set-proj">${projectMark(o.project.stream, o.project.name)}<span>${esc(o.project.name)}</span></p>`)
+    + (o.project === undefined ? "" : `<p class="set-proj">${projectMark(o.project.stream, o.project.name)}<span title="${esc(o.project.name)}">${esc(o.project.name)}</span></p>`)
     + o.sections.map(navItem).join("") + `</nav>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tira · ${esc(o.title)}</title><style>${CSS}</style></head><body>${THEME_RADIOS}${SIDE_SHUT}<main class="settings-page" data-settings>${SIDE_TOGGLE}${nav}<div class="set-main">`

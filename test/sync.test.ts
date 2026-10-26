@@ -1460,7 +1460,7 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     // was started with; then it's off the list and its board is closed, its history kept
     assert.match((await s.http("GET", "/integrations?w=tablet")).body, /<form method="post" action="\/projects\/delete\?w=tablet" class="grp-list" data-delete-project><input type="hidden" name="token" value="k"><label class="grp-row"><span class="grp-k">Type <b>tablet<\/b> to confirm<\/span><input type="text" name="confirm"[^>]*><\/label>[^]*?<button class="act danger" type="submit">Delete this project<\/button>/);
     assert.equal(await s.flash(await s.post("/projects/delete?w=tablet", { confirm: "tab" })), "Type tablet exactly to delete it. Nothing was deleted.");
-    assert.equal(await s.flash(await s.post("/projects/delete", { confirm: S })), "This is the project tira serve was started with: it can't be deleted here. Nothing was deleted.");
+    assert.equal(await s.flash(await s.post("/projects/delete", { confirm: S })), "tira opens on this project, so it can't be deleted. Nothing was deleted.");
     const gone = await s.post("/projects/delete?w=tablet", { confirm: "tablet" });
     assert.match(String(gone.headers.location), /^\/\?r=\d+$/);
     assert.equal(await s.flash(gone), "Deleted tablet: it's off the project list. Its history stays in tira's log.");
@@ -1483,7 +1483,7 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     assert.equal(await s.flash(await s.post("/projects/rename?w=mobile", { title: "Mobile App" })), "It's already called Mobile App.");
     const renamed = (await s.http("GET", "/?w=mobile")).body;
     assert.match(renamed, /<title>tira · Mobile App<\/title>/);
-    assert.match(renamed, new RegExp(`<h1><span class="pav t${tint("mobile")}" aria-hidden="true">M</span>Mobile App</h1>`)); // its colour stays
+    assert.match(renamed, new RegExp(`<h1><span class="pav t${tint("mobile")}" aria-hidden="true">M</span><span class="h1-name">Mobile App</span></h1>`)); // its colour stays
     assert.equal(workspaceOf(fold(await s.store.readAll(), s.registry), "mobile")?.repo, "acme/web"); // its links stay
     assert.deepEqual((JSON.parse((await s.http("GET", "/api/workspaces?w=mobile")).body) as { stream: string; title?: string }[]).find((w) => w.stream === "mobile")?.title, "Mobile App");
     // a later link change that doesn't mention the name keeps it
@@ -1592,7 +1592,7 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     // what each section is for, under its title
     assert.match(project, /<h2 class="grp-h">GitHub<\/h2><p class="grp-desc">This project&#39;s repository\./);
     // deleting the project: not the one tira serve was started with
-    assert.match(project, /<section class="grp danger" id="delete" data-int="delete"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Danger zone<\/h2>[^]*?This is the project tira serve was started with/);
+    assert.match(project, /<section class="grp danger" id="delete" data-int="delete"><div class="grp-top"><span class="grp-icon" aria-hidden="true"><svg[^>]*>[^]*?<\/svg><\/span><div><h2 class="grp-h">Danger zone<\/h2>[^]*?tira opens on this project, so it can(?:'|&#39;)t be deleted\. You can rename it in General\./);
     assert.doesNotMatch(project, /data-delete-project/);
     // the Help centre, as a support chat: a panel that folds (remembered per browser) under a header
     // that says it answers right away; a greeting by name; the questions people ask as suggested

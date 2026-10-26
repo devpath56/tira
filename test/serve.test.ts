@@ -942,7 +942,7 @@ test("workspaces: one server serves every workspace in the store at ?w=; its pag
   try {
     // the switcher, live only: the workspace you're in, its list read when it opens
     const home = (await s.http("GET", "/")).body;
-    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page" data-stream="tasktree-dash"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><a class="new-project" href="\/projects\/new" data-new-project><svg[^]*?<\/svg>New project<\/a><\/details>/);
+    assert.match(home, /<details class="ws projects" data-workspaces open><summary title="Your projects">Projects<svg[^]*?<\/svg><\/summary><div class="ws-menu" data-ws-menu><a class="ws-item" href="\/" aria-current="page" data-stream="tasktree-dash" title="tasktree-dash"><span class="pav t\d" aria-hidden="true">T<\/span><span class="ws-t"><b>tasktree-dash<\/b><\/span><\/a><\/div><a class="new-project" href="\/projects\/new" data-new-project><svg[^]*?<\/svg>New project<\/a><\/details>/);
     // the sidebar searches projects by name, and has this project's settings; the header searches
     // this project's tasks (the palette, ⌘K)
     const side = /<nav class="top"[^]*?<\/nav>/.exec(home)?.[0] ?? "";
@@ -1007,6 +1007,7 @@ test("the page's script keeps the workspace: the palette's index and verbs, and 
   assert.match(app, /void post\(form\.getAttribute\("action"\) \?\? "\/act", new URLSearchParams\(new FormData\(form\)\)/);
   assert.match(app, /const href = withW\(`\/confirm\?type=\$\{encodeURIComponent\(type\)\}/); // a dragged card's decision
   assert.match(app, /await fetch\(withW\("\/api\/workspaces"\)\)/);
+  assert.match(app, /a\.title = w\.title \?\? w\.stream;/); // a long name, cut to one line in the list: all of it on hover
 });
 
 test("the Help centre's answers: the one what you typed fits best (a rarer word counts for more; a tie goes to the first), or none", () => {

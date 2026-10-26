@@ -1295,7 +1295,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (actor === undefined) return stay("Sign in with GitHub first, so tira knows who deletes it. Nothing was deleted.");
     const login = who(req).login;
     if (login && !isProjectAdmin(await peopleNow(ws.stream), login)) return stay("Only this project's admins can delete it. Nothing was deleted.");
-    if (ws.stream === opts.stream) return stay("This is the project tira serve was started with: it can't be deleted here. Nothing was deleted.");
+    if (ws.stream === opts.stream) return stay("tira opens on this project, so it can't be deleted. Nothing was deleted.");
     const { r } = await now(ws.stream);
     const link = workspaceOf(r, ws.stream);
     const shown = link?.title ?? ws.stream; // its name as people see it

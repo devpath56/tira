@@ -424,6 +424,7 @@ if (switcher) {
     a.className = "ws-item";
     a.href = w.href;
     a.dataset.stream = w.stream;
+    a.title = w.title ?? w.stream; // a long name is cut to one line: all of it on hover
     if (w.current) a.setAttribute("aria-current", "page");
     const mark = document.createElement("span");
     mark.className = `pav t${tint(w.stream)}`;
