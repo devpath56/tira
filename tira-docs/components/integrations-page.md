@@ -24,24 +24,33 @@ question again. With no script, each suggestion opens on its answer.
 
 Account settings (no project on them):
 - **Profile**: who is signed in, as GitHub and Jira show it (the initial as a picture, the name,
-  @login, Admin or Member), and **Sign out**; a **Display name** to be shown by (the sidebar, this
-  card, the Help centre's greeting), empty for GitHub's name. Changes are still recorded under your
-  login. When `tira serve` was started with a name and GitHub sign-in isn't set up, changes are
-  recorded as that name.
+  @login, Owner for this tira's owner), and **Sign out**; a **Display name** to be shown by (the
+  sidebar, this card, the Help centre's greeting), empty for GitHub's name; your **Email** (only
+  you see it); and your **Username**, with Copy and your **Profile** (`/u/<username>`, for anyone
+  signed in: your name and username, never your email), to send to a project's admin. Changes are
+  still recorded under your login. When `tira serve` was started with a name and GitHub sign-in
+  isn't set up, changes are recorded as that name.
 - **Accounts**: your GitHub (signed in as @login; **Disconnect GitHub** forgets its token and signs
   you out) and your Jira: **Connect Jira** goes to Atlassian and back (open tira at `localhost`:
   that's where Atlassian sends you), then a site picker if you have more than one; **Disconnect
   Jira** drops your Atlassian sign-in. Your links stay until you unlink them (Isha, 2026-10-22).
 - **Appearance**: System, Light or Dark, each a card with a small picture (`theme-switch.md`).
-- **People**: who may sign in. The admin (the first person who signed in) sees the list, adds
-  someone by GitHub username, removes someone (signed out at once and can't sign in; their GitHub
-  and Jira links stay until they unlink them),
-  and sets the name and email the sign-in page shows to anyone not on the list. Everyone else
-  sees who to ask.
+- **Removed accounts** (this tira's owner only, Isha, 2026-10-25): **Remove account** by GitHub
+  username signs them out at once, keeps them from signing in, and stops their agents; their
+  GitHub and Jira links stay until they unlink them, and their projects stay with their other
+  admins. **Let back in** undoes it. Nobody's projects show here.
 - **Setup: tira's apps** (open while one is missing): the Client ID of tira's GitHub app, and the
   Client ID and Secret of its Atlassian app. The secret is a hidden field and is never shown again.
 
 Project settings (the project's mark and name at the top):
+- **Team** (Isha, 2026-10-25): this project's admins and members, who alone can see it, and its
+  agents. Whoever made the project is its admin. Its admins **Add** someone by GitHub username (in
+  at once; "Not signed up yet" until they sign up), **Make admin**, **Make member** and **Remove**
+  (they no longer see it, and their agents here stop); a project always keeps an admin. Members
+  work on it, sync it and connect agents; renaming, linking, the team and deleting are its admins'.
+  A project made before then has whoever made it as admin (else the owner), and the people
+  everyone had then as members, until its team is first changed. At a public address each person
+  may be admin of 5 projects.
 - **General**: the project's name, as everyone sees it everywhere in tira (**Rename**). Its address,
   its colour and its history keep the name it was made with; two live projects can't share a name.
   A later link change (here or `tira link`) keeps the name.
@@ -62,7 +71,7 @@ Project settings (the project's mark and name at the top):
   **Test connection** says whether tira has heard from the agent yet (its first call); until then
   it says so calmly, as a wait, not an error, with the quickest way to make that call (for Claude
   Code, `claude mcp list`). Below, the **Connected agents** (their app, who connected them, when, last used;
-  **Revoke** for whoever connected it, or the admin). **More** folds the rest: tira's MCP address
+  **Revoke** for whoever connected it, or the project's admins). **More** folds the rest: tira's MCP address
   (`http://127.0.0.1:<port>/mcp`), each app by hand with `<your token>`, what agents can do, and
   whether Claude Desktop's agent would reach this tira's database (tira's own `.env`, compared,
   never shown), and why Claude's own Connectors settings can't add tira yet (they need a public
@@ -80,10 +89,10 @@ only. The store keeps a hash of each session (it lasts 30 days), so it can't sig
 
 ## Devtool hook
 
-- `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `people`, `contact`, `setup` in Account settings; `github`, `jira`, `sync`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
+- `[data-settings]` on both pages; `[data-int]` on each group (`account`, `accounts`, `appearance`, `setup` in Account settings; `general`, `team`, `github`, `jira`, `sync`, `agents`, `delete` in Project settings), each with that id for the nav's links; `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
 - `[data-agent-step]` on each of Connect agents' three steps (`now`, `done` or `later` in its class), `[data-agent-tile]` on each app to choose; `[data-agent-name]` on naming the agent; `[data-agent-install]` on the app's Add to button; `[data-agent-test]` on Test connection, its answer in `[data-agent-tested]`; `[data-agents]` on the connected agents; `[data-agent-more]` on More, `[data-agent-app]` on each app's setup there (`[data-copy-target]` on every Copy); `[data-agent-database]` on the database line (`ready`, `missing` or `different`); `[data-agent-connectors]` on the word about Claude's Connectors (on this computer); at a public address, `[data-agent-connector]` on Claude's way in by its Connectors, with tira's address to paste.
-- `[data-people]` on the admin's list; `[data-add-person]` on Add; `[data-admin-contact]` on how people reach the admin.
-- `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-project-id]` on the project's id (it never changes: it's in its address and its tickets' keys); `[data-team]` on Team (who can sign in, and the project's agents), `[data-team-add]` on its Add (the admin's); `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
+- `[data-email]` on your email; `[data-username]` on your username (and on a profile's, `/u/<username>`); `[data-accounts]` on the owner's removed accounts, `[data-remove-account]` on Remove account; `[data-projects]` on your projects (`/projects`), `[data-my-project]` on each.
+- `[data-link-repo-form]` on the repo picker; `[data-sync]` on Sync now; `[data-delete-project]` on Delete; `[data-rename-project]` on Rename; `[data-project-id]` on the project's id (it never changes: it's in its address and its tickets' keys); `[data-team]` on Team (the project's people and agents), `[data-team-admin]` and `[data-team-member]` on each person, `[data-team-agent]` on each agent, `[data-team-add]` on its Add (its admins'); `[data-display-name]` on your display name; `[data-disconnect-github]` on Disconnect GitHub.
 - `[data-integrations-nav]` on the profile menu's Account settings; `[data-user]` on the profile when someone is signed in with GitHub (`[data-signout]` signs them out). For a project other than the one the server started on, every link, form and redirect on these pages keeps its `?w=` (`project-switch.md`).
 
 Assertion: no token, key or secret appears on any page; a Jira sign-in that didn't start here is

@@ -53,7 +53,7 @@ test("tira serve won't start at a public address that isn't safe yet, and says w
   const err: string[] = [];
   const code = await run(["--stream", S, "serve"], { out: () => {}, err: (l) => err.push(l), env: { TIRA_PUBLIC_URL: ORIGIN, TIRA_DATABASE_URL: "postgres://db.example/tira?sslmode=require", TIRA_SECRET_KEY: SECRET }, openStore: () => { throw new Error("no store should open"); } });
   assert.equal(code, 1);
-  assert.deepEqual(err, ["tira: set TIRA_ADMIN to the GitHub login of this tira's admin (the one who adds people)"]);
+  assert.deepEqual(err, ["tira: set TIRA_ADMIN to the GitHub login of this tira's owner (the one who can remove an account)"]);
 });
 
 test("the server's settings name tira's apps and its admin: over what Account settings hold, and only until someone is admin", () => {
@@ -114,7 +114,8 @@ class FakeGitHub implements GitHubAuthApi {
     throw new Error("a public tira signs in the one-click way");
   }
   async user(token: string) {
-    return { login: token.replace(/^gho-/, "") };
+    const login = token.replace(/^gho-/, "");
+    return { login, email: `${login}@example.com` };
   }
   async repos() {
     return [];
@@ -192,11 +193,14 @@ test("at its public address: tira answers only that address (its host's check to
     t.jar.clear();
     t.jar.set("tira_next", encodeURIComponent("https://evil.example/"));
     assert.equal((await t.signIn()).done.headers.location?.toString().startsWith("/connect?r="), true);
-    // the admin is the one the server names: someone else signing in first doesn't become it
+    // the owner is the one the server names: someone else signing in first doesn't become it; they
+    // get in (anyone with GitHub does), onto their own projects, and the project here isn't theirs
     t.jar.clear();
     const stranger = (await t.signIn("mallory")).done;
-    assert.match(String(stranger.headers.location), /^\/welcome\?r=\d+$/);
-    assert.equal(stranger.headers["set-cookie"], undefined);
+    assert.match(String(stranger.headers.location), /^\/projects\?r=\d+$/);
+    assert.match(String(stranger.headers["set-cookie"]), /^tira_session=/);
+    assert.equal((await t.http("GET", "/api/tasks")).status, 404);
+    assert.doesNotMatch((await t.http("GET", "/settings")).body, /data-accounts/);
   } finally {
     await t.done();
   }
@@ -277,6 +281,38 @@ test("Claude's connector signs in: discovery, registration, the person's approva
     assert.match(settings, /<div class="agent-connector" data-agent-connector>[^]*?<pre class="agent-code" id="agent-connector-url">https:\/\/tira\.example\.com\/mcp<\/pre>/);
     assert.doesNotMatch(settings, /data-agent-tile="claude-desktop"|data-agent-database/);
     assert.match(settings, /<b>claude-2<\/b><small>Claude(?:'|&#39;)s Connectors · tira_/);
+  } finally {
+    await t.done();
+  }
+});
+
+test("at its public address: each person may be admin of 5 projects; an agent stops once the person who connected it leaves its project, or their account is removed", async () => {
+  const t = await hosted();
+  // an agent's call, by its token (as an app on this computer makes it)
+  const mcp = (token: string) => fetch(`http://127.0.0.1:${t.port}/mcp`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+  try {
+    await t.signIn("mallory");
+    for (const n of [1, 2, 3, 4, 5]) assert.equal((await t.form("/projects", { name: `m${n}`, repo: "acme/app" })).status, 303, `m${n}`);
+    const sixth = await t.form("/projects", { name: "m6", repo: "acme/app" });
+    assert.equal(sixth.status, 409);
+    assert.match(sixth.body, /data-np-problem>You(?:'|&#39;)re the admin of 5 projects already, the most each person can have here: delete one to make another\.<\/div>/);
+    // mallory's agent in m1 works while she's in it
+    const { token } = await t.tokens.create("m1", "bot", "mallory");
+    assert.equal((await mcp(token)).status, 200);
+    // she makes isha an admin too; isha removes her: her agent there stops
+    await t.form("/integrations/people?w=m1", { do: "add", login: "isha-gh" });
+    await t.form("/integrations/people?w=m1", { do: "admin", login: "isha-gh" });
+    await t.signIn("isha-gh");
+    assert.equal((await t.http("GET", "/?w=m1")).status, 200);
+    await t.form("/integrations/people?w=m1", { do: "remove", login: "mallory" });
+    const stopped = await mcp(token);
+    assert.equal(stopped.status, 403);
+    assert.match(await stopped.text(), /isn't in its project any more/);
+    // her agent in m2 works until the owner removes her account
+    const other = await t.tokens.create("m2", "bot", "mallory");
+    assert.equal((await mcp(other.token)).status, 200);
+    assert.equal(String((await t.form("/integrations/accounts", { do: "block", login: "mallory" })).status), "303");
+    assert.equal((await mcp(other.token)).status, 403);
   } finally {
     await t.done();
   }

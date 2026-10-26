@@ -246,14 +246,14 @@ if (!url) {
     }
   });
 
-  test("postgres: two people's tira serve on one database: a sign-in on one computer, the people list from the other", async () => {
+  test("postgres: two people's tira serve on one database: a sign-in on one computer, a project's team and an email from the other", async () => {
     const schema = fresh();
     class FakeGitHub implements GitHubAuthApi {
       authorizeUrl() { return "https://github.example/authorize"; }
       async exchange() { return "gho-token"; }
       async start() { return { deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 0, expiresIn: 900 }; }
       async poll() { return { token: "gho-token" }; }
-      async user() { return { login: "isha-gh", name: "Isha" }; }
+      async user() { return { login: "isha-gh", name: "Isha", email: "isha@example.com" }; }
       async repos() { return ["acme/app"]; }
     }
     const serve = async (env: Record<string, string | undefined>) => {
@@ -281,14 +281,32 @@ if (!url) {
       assert.match(cookie, /^tira_session=[0-9a-f]{64}$/);
       // the same session works on the other computer: the sign-in is in the database
       assert.equal((await b.http("GET", "/settings", undefined, cookie)).status, 200);
-      // the admin adds someone on one computer; the other shows them
+      // the project's admin adds someone on one computer; the other shows them
       await b.http("POST", "/integrations/people", "token=k&do=add&login=octo", cookie);
-      assert.match((await a.http("GET", "/settings", undefined, cookie)).body, /<span class="grp-k">octo<\/span>/);
+      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row" data-team-member><span class="grp-k">octo<\/span>/);
+      // an email changed on one shows on the other (sealed in the database)
+      await b.http("POST", "/signup/email", "token=k&back=%2Fsettings&email=isha%40work.example", cookie);
+      assert.match((await a.http("GET", "/settings", undefined, cookie)).body, /name="email" value="isha@work\.example"/);
+      const sealed = new PostgresAccounts(url, schema, KEY);
+      assert.doesNotMatch(JSON.stringify((await sealed.query(`SELECT email FROM ${schema}.account_emails`)).rows), /work\.example/);
       // a change from a computer with its own connection shows on the next page here too
-      const elsewhere = new PostgresAccounts(url, schema, KEY);
-      await elsewhere.saveAccess((x) => ({ ...x, members: [...(x.members ?? []), "zed"] }));
-      await elsewhere.close();
-      assert.match((await a.http("GET", "/settings", undefined, cookie)).body, /<span class="grp-k">zed<\/span>/);
+      await sealed.saveProject("s", (p) => (p ? { admins: p.admins, members: [...p.members, "zed"] } : undefined));
+      // two admins' changes at once don't undo each other
+      const other = new PostgresAccounts(url, schema, KEY);
+      await Promise.all([sealed.saveProject("s", (p) => p && { ...p, members: [...p.members, "ana"] }), other.saveProject("s", (p) => p && { ...p, members: [...p.members, "raj"] })]);
+      await sealed.refresh(); // the other's write may have landed after this one's
+      assert.deepEqual([...(sealed.snapshot().projects?.s?.members ?? [])].sort(), ["ana", "octo", "raj", "zed"]);
+      // an account removed, once however often, and let back in in any case
+      await sealed.block("mallory", "isha-gh");
+      await other.block("mallory", "isha-gh");
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().blocked, ["mallory"]);
+      await other.unblock("MALLORY");
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().blocked, []);
+      await other.close();
+      await sealed.close();
+      assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row" data-team-member><span class="grp-k">zed<\/span>/);
     } finally {
       await new Promise<void>((r) => a.server.close(() => r()));
       await new Promise<void>((r) => b.server.close(() => r()));
