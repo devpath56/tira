@@ -119,6 +119,7 @@ a.verify:hover{color:var(--fg);border-color:var(--line-2)}.verify .vl{font-famil
 .pl svg,.proj-links .act svg{width:15px;height:15px;flex:none}.ico-jira{color:#2684ff}.act.primary .ico-jira{color:inherit}
 .title-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:42px}
 @keyframes beat{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
+main[data-stream]{overflow-x:clip}
 .hero{position:relative;isolation:isolate}.hero::before{content:"";position:absolute;z-index:-1;left:-80px;right:-80px;top:-96px;height:280px;pointer-events:none;background:radial-gradient(560px 220px at 12% 35%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),radial-gradient(460px 200px at 88% 0%,color-mix(in srgb,#7c3aed 13%,transparent),transparent 70%)}
 .mover{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:999px;font:650 11px/1 var(--sans);color:#fff;background:var(--t)}.mover svg{width:11px;height:11px}
 .mover.agent{color:#fff;background:linear-gradient(135deg,#7c3aed,#2563eb 60%,#06b6d4);box-shadow:0 0 0 2px color-mix(in srgb,#7c3aed 22%,transparent)}
@@ -581,6 +582,7 @@ main{padding:0 16px 48px}.hero .title{grid-template-columns:minmax(0,1fr)}.proj-
 .ws-menu{position:fixed;left:16px;right:16px;top:52px;width:auto}
 .canvas-tools{left:8px;right:8px;max-width:none;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;scrollbar-width:none}.tool-group{flex:none}
 }
+@media (min-width:641px) and (max-width:899px){main[data-stream]>.top{position:relative}main[data-stream]>.top .ws{position:static}main[data-stream]>.top .ws-menu{top:auto;left:auto;right:0;margin-top:6px}}
 @media (max-width:560px){.hero h1{flex-basis:100%;font-size:28px}.big{flex-basis:100%}.stats li{margin:0 14px 0 0;padding:0 14px 0 0;border-left:0;border-right:1px solid var(--line)}.stats li:last-child{border-right:0}.lanes{grid-template-columns:1fr;overflow:visible}.lanes .lh{display:none}.lanes .who{padding-top:10px}.lane::before{content:attr(data-region);font-size:11px;color:var(--dim);min-width:52px}}
 @media (pointer:coarse){.act,.tool,.seg label,.theme label,.ws-item,.side-link,.set-link,.tabs label,.new-project,.help,.find,.proj-search,.hc-chip,.history-btn,.more-btn,details.att-group>summary,.fill,.locate,.look,.np-steps li{min-height:44px}.set-link,.fill{display:flex;align-items:center}.tool,.theme label,.drawer .close{min-width:44px;min-height:44px}.hc-send{width:44px;height:44px}.hc-compose input{height:40px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
