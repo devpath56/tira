@@ -104,8 +104,7 @@ export async function blockTask(c: AgentContext, id: string, reason: string, wai
 // add a subtask: a new task under one, planned unless the agent says it found the work while doing
 // that task (Isha, 2026-10-26: an agent breaking a task into its steps had every step marked found)
 export async function addSubtask(c: AgentContext, under: string, name: string, found = false): Promise<ToolText> {
-  const parent = (await treeNow(c)).rows.find((x) => x.id === under);
-  if (!parent) return missing(c, under);
+  if (!(await treeNow(c)).rows.some((x) => x.id === under)) return missing(c, under);
   const id = subtaskName(name);
   if (id === undefined) return { ok: false, text: "A subtask's name is 1 to 80 characters, with no control characters. Nothing was written." };
   const kind = found ? { kind: "discovered", discovered_during: under } : {};

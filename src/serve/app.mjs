@@ -235,63 +235,63 @@ const stepRow = (after) => {
   after.after(li);
   return input;
 };
+// the last row is the one that adds: once it says something it's a step, and a new last row waits
+// under it (that new row's field comes back)
+const keepAsStep = (row, field) => {
+  row.classList.remove("tk-step-new");
+  field.setAttribute("aria-label", "Step");
+  const next = stepRow(row);
+  next.closest(".tk-step")?.classList.add("tk-step-new");
+  next.placeholder = "Add a step…";
+  next.setAttribute("aria-label", "Add a step");
+  return next;
+};
+const stepEnter = (e, field, row) => {
+  e.preventDefault();
+  if (field.value.trim() === "") return;
+  (row.classList.contains("tk-step-new") ? keepAsStep(row, field) : stepRow(row)).focus();
+  field.form?.setAttribute("data-dirty", "1");
+};
+const stepBackspace = (e, field, row) => {
+  if (field.value !== "" || row.classList.contains("tk-step-new")) return;
+  e.preventDefault();
+  const back = row.previousElementSibling?.querySelector("textarea") ?? row.nextElementSibling?.querySelector("textarea");
+  row.remove();
+  back?.focus();
+  field.form?.setAttribute("data-dirty", "1");
+};
+const stepArrow = (e, field, row) => {
+  const up = e.key === "ArrowUp";
+  if (up ? field.selectionStart !== 0 : field.selectionEnd !== field.value.length) return; // inside the words: the caret moves
+  const to = (up ? row.previousElementSibling : row.nextElementSibling)?.querySelector("textarea");
+  if (!to) return;
+  e.preventDefault();
+  to.focus();
+};
+const STEP_KEYS = { Enter: stepEnter, Backspace: stepBackspace, ArrowUp: stepArrow, ArrowDown: stepArrow };
 document.addEventListener("keydown", (e) => {
   const field = e.target;
-  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-  if (field instanceof HTMLTextAreaElement && field.matches("[data-one-line]") && e.key === "Enter") {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || !(field instanceof HTMLTextAreaElement)) return;
+  if (field.matches("[data-one-line]")) {
+    if (e.key !== "Enter") return;
     e.preventDefault();
     field.form?.requestSubmit();
     return;
   }
-  if (!(field instanceof HTMLTextAreaElement) || !field.matches(".tk-step-in")) return;
-  const row = field.closest(".tk-step");
-  if (!row) return;
-  if (e.key === "Enter") {
-    e.preventDefault();
-    if (field.value.trim() === "") return;
-    // the last row is the one that adds: Enter keeps what it says as a step, and a new last row
-    // waits under it
-    if (row.classList.contains("tk-step-new")) {
-      row.classList.remove("tk-step-new");
-      field.setAttribute("aria-label", "Step");
-      const next = stepRow(row);
-      next.closest(".tk-step")?.classList.add("tk-step-new");
-      next.placeholder = "Add a step…";
-      next.setAttribute("aria-label", "Add a step");
-      next.focus();
-    } else stepRow(row).focus();
-    field.form?.setAttribute("data-dirty", "1");
-  } else if (e.key === "Backspace" && field.value === "" && !row.classList.contains("tk-step-new")) {
-    e.preventDefault();
-    const back = row.previousElementSibling?.querySelector("textarea") ?? row.nextElementSibling?.querySelector("textarea");
-    row.remove();
-    back?.focus();
-    field.form?.setAttribute("data-dirty", "1");
-  } else if ((e.key === "ArrowUp" && field.selectionStart === 0) || (e.key === "ArrowDown" && field.selectionEnd === field.value.length)) {
-    const to = (e.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling)?.querySelector("textarea");
-    if (to) {
-      e.preventDefault();
-      to.focus();
-    }
-  }
+  const row = field.matches(".tk-step-in") ? field.closest(".tk-step") : null;
+  if (row) STEP_KEYS[e.key]?.(e, field, row);
 });
+// several lines pasted: into the title, one line; into a step, that many steps, each its own row
+const linesOf = (text) => text.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "");
 document.addEventListener("input", (e) => {
   const field = e.target;
-  if (!(field instanceof HTMLTextAreaElement) || !/\n/.test(field.value)) return;
-  if (field.matches("[data-one-line]")) field.value = field.value.replaceAll(/\s*\n\s*/g, " ");
-  // several lines pasted into a step are several steps, each its own row
+  if (!(field instanceof HTMLTextAreaElement) || !field.value.includes("\n")) return;
+  if (field.matches("[data-one-line]")) field.value = linesOf(field.value).join(" ");
   else if (field.matches(".tk-step-in")) {
-    const [first = "", ...rest] = field.value.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "");
+    const [first = "", ...rest] = linesOf(field.value);
     field.value = first;
     let row = field.closest(".tk-step");
-    if (row?.classList.contains("tk-step-new") && first !== "") {
-      row.classList.remove("tk-step-new");
-      field.setAttribute("aria-label", "Step");
-      const fresh = stepRow(row);
-      fresh.closest(".tk-step")?.classList.add("tk-step-new");
-      fresh.placeholder = "Add a step…";
-      fresh.setAttribute("aria-label", "Add a step");
-    }
+    if (row?.classList.contains("tk-step-new") && first !== "") keepAsStep(row, field);
     for (const line of rest) {
       if (!row) break;
       const next = stepRow(row);

@@ -1124,7 +1124,8 @@ const shortUrl = (u: string) => {
 // under a description being edited, its links, so they open in one click (the field can't)
 const linkRowHtml = (text: string) => {
   const urls = urlsIn(text);
-  return urls.length === 0 ? "" : `<div class="tk-urls" data-ticket-links>${urls.map((u) => `<a class="tk-url" href="${esc(u)}" ${OUT} title="${esc(u)}">${ICON_LINK}<span>${esc(shortUrl(u))}</span></a>`).join("")}</div>`;
+  const link = (u: string) => `<a class="tk-url" href="${esc(u)}" ${OUT} title="${esc(u)}">${ICON_LINK}<span>${esc(shortUrl(u))}</span></a>`;
+  return urls.length === 0 ? "" : `<div class="tk-urls" data-ticket-links>${urls.map(link).join("")}</div>`;
 };
 const ICON_LINK = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.7 9.3a3 3 0 0 0 4.2 0l2.2-2.2a3 3 0 0 0-4.2-4.2l-.9.9"/><path d="M9.3 6.7a3 3 0 0 0-4.2 0L2.9 8.9a3 3 0 0 0 4.2 4.2l.9-.9"/></svg>`;
 const formOf = (n: Placed) => `tk-${n.i}`; // the ticket form's id: its fields beside belong to it
@@ -1170,7 +1171,7 @@ function ticketHtml(n: Placed, ext: Ext, back: string, q: string): string {
   const list = t?.steps ?? [];
   const stepRow = (x: string, i: number) => `<li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step ${i + 1}" autocomplete="off">${esc(x)}</textarea></li>`;
   const add = `<li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="${list.length === 0 ? "Add the first step…" : "Add a step…"}" aria-label="Add a step" autocomplete="off"></textarea></li>`;
-  const steps = `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${list.map(stepRow).join("")}${add}</ol>`;
+  const steps = `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${list.map((x, i) => stepRow(x, i)).join("")}${add}</ol>`;
   return `<form method="post" action="${esc(withQ("/tickets", q))}" class="ticket tk-form" id="${formOf(n)}" data-ticket data-ticket-form>`
     + hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])
     + `${id}${title}${sectionHtml("Description", desc, "description")}${sectionHtml("Steps", steps, "steps", countHtml(list.length))}<div class="tk-save"><button class="act primary" type="submit">Save</button></div></form>`;
@@ -1307,10 +1308,12 @@ const avatarHtml = (name: string | undefined) => {
 function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
   const list = ext.comments.get(r.id) ?? [];
   const item = (c: Comment) => `<li class="cm" data-comment>${avatarHtml(c.by)}<div class="cm-card"><div class="cm-h"><b>${esc(c.by)}</b>${agentChip(c.by)}<span class="ev-seq">${esc(when(c.at))}</span></div><div class="cm-body">${paragraphs(c.text)}</div></div></li>`;
-  const shown = list.length === 0 ? (ext.form ? "" : `<p class="tk-none">No comments yet.</p>`) : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
+  const none = ext.form ? "" : `<p class="tk-none">No comments yet.</p>`; // live, the box below says it
+  const shown = list.length === 0 ? none : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
+  const prompt = list.length === 0 ? "Start the conversation…" : "Reply…";
   const form = ext.form
     ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}${avatarHtml(ext.form.me)}`
-      + `<div class="cm-box"><textarea name="text" rows="2" maxlength="2000" required placeholder="${list.length === 0 ? "Start the conversation…" : "Reply…"}" aria-label="Add a comment"></textarea>`
+      + `<div class="cm-box"><textarea name="text" rows="2" maxlength="2000" required placeholder="${prompt}" aria-label="Add a comment"></textarea>`
       + `<div class="cm-foot"><span class="cm-hint"><kbd>@</kbd> to mention · <kbd>⌘</kbd><kbd>↵</kbd> to send</span><button class="act primary" type="submit">Comment</button></div></div></form>`
     : "";
   return `<div class="comments" data-comments>${shown}${form}</div>`;
@@ -1319,7 +1322,10 @@ function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
 // Each dialog's tabs are its own (their radios are named for it); no script needed.
 function activityHtml(n: Placed, lines: TrailEntry[], ext: Ext, back: string, q: string): string {
   const count = (ext.comments.get(n.row.id) ?? []).length;
-  const tab = (kind: string, label: string, k: number, on: boolean) => `<input class="act-radio" type="radio" name="act-${n.i}" id="act-${n.i}-${kind}" data-tab="${kind}"${on ? " checked" : ""}><label for="act-${n.i}-${kind}">${label}${k > 0 ? ` <span class="k">${k}</span>` : ""}</label>`;
+  const tab = (kind: string, label: string, k: number, on: boolean) => {
+    const many = k > 0 ? ` <span class="k">${k}</span>` : "";
+    return `<input class="act-radio" type="radio" name="act-${n.i}" id="act-${n.i}-${kind}" data-tab="${kind}"${on ? " checked" : ""}><label for="act-${n.i}-${kind}">${label}${many}</label>`;
+  };
   const history = `<div class="trail" data-history-pane><ol class="feed">${lines.map((l) => entryHtml(l)).join("")}</ol></div>`;
   return `<div class="tk-sec activity" data-sec="activity" role="region" aria-label="Activity"><div class="act-head"><h3 class="tk-label">Activity</h3><div class="act-tabs" role="group" aria-label="Show">${tab("c", "Comments", count, true)}${tab("h", "History", lines.length, false)}</div></div>`
     + `${commentsHtml(n.row, ext, back, q)}${history}</div>`;
@@ -1417,13 +1423,15 @@ function underOf(n: Placed, nodes: readonly Placed[]): Under | undefined {
   return { open, total: n.row.children.length, next };
 }
 
-type AttentionCtx = Pick<DialogContext, "indexOf" | "rowOf" | "q" | "ext">;
-function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, live: boolean, ctx: AttentionCtx, changed: ReadonlySet<string>, under?: Under): string {
+// what every needs-you row reads: where tasks are, the workspace, its words; live or the file;
+// what the last action changed
+type AttentionCtx = Pick<DialogContext, "indexOf" | "rowOf" | "q" | "ext" | "live"> & { changed: ReadonlySet<string> };
+function attentionRow(n: Placed, since: Since | undefined, path: string, verb: string, ctx: AttentionCtx, under?: Under): string {
   const verbs = (ROW_ACTIONS[n.row.state] ?? []).filter(([ev]) => under === undefined || ev !== "COMPLETE");
   const next = under?.next;
-  const startNext = next && next.row.state === "unstarted" ? actLink(next.row, "START", "Start next", ctx.q, true) : "";
+  const startNext = next?.row.state === "unstarted" ? actLink(next.row, "START", "Start next", ctx.q, true) : "";
   const links = startNext + verbs.map(([ev, label]) => actLink(n.row, ev, label, ctx.q)).join("");
-  const acts = live ? `<span class="acts">${links}</span>` : "";
+  const acts = ctx.live ? `<span class="acts">${links}</span>` : "";
   // a block on a ticket: which one, and once it's closed, that the wait looks over
   const blocker = n.row.state === "blocked" && since?.blocker !== undefined ? ctx.rowOf.get(since.blocker) : undefined;
   const ready = blocker !== undefined && CLOSED.has(blocker.state) ? `<span class="ready" data-ready>ready to unblock</span>` : "";
@@ -1431,7 +1439,7 @@ function attentionRow(n: Placed, since: Since | undefined, path: string, verb: s
   const nextName = next ? ` · next: <a href="#t${next.i}">${esc(nameOf(ctx.ext, next.row))}</a>` : "";
   const open = under === undefined ? "" : `<span class="by" data-subtasks-open>${under.open} of ${under.total} subtasks open${nextName}</span>`;
   const name = nameOf(ctx.ext, n.row);
-  return `<li class="att-row${changed.has(n.row.key) ? " changed" : ""}" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}" title="${esc(name)}">${esc(name)}</a>`
+  return `<li class="att-row${ctx.changed.has(n.row.key) ? " changed" : ""}" data-attention-key="${esc(n.row.key)}" data-state="${esc(n.row.state)}"><a class="name" href="#t${n.i}" title="${esc(name)}">${esc(name)}</a>`
     + `<span class="path">${path}</span>${waits}${open}<span class="since">${sinceText(since, verb)}</span>${acts}</li>`;
 }
 
@@ -1440,26 +1448,31 @@ function attentionRow(n: Placed, since: Since | undefined, path: string, verb: s
 // Each says why it's yours and offers the one move that answers it.
 interface ForYou { key: string; why: "mentioned" | "assigned" | "idea"; html: string }
 const clipped = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
-function forYouOf(nodes: readonly Placed[], ghosts: readonly Ghost[], viewer: string, ctx: AttentionCtx): ForYou[] {
-  const out: ForYou[] = [];
-  const row = (key: string, why: ForYou["why"], href: string, name: string, said: string, act: string) =>
-    out.push({ key, why, html: `<li class="att-row you" data-attention-key="${esc(key)}" data-for-you="${why}"><a class="name" href="${href}" title="${esc(name)}">${esc(name)}</a><span class="by">${said}</span><span class="acts">${act}</span></li>` });
-  for (const n of nodes) {
-    if (CLOSED.has(n.row.state)) continue;
-    const asked = unanswered(ctx.ext.comments.get(n.row.id) ?? [], viewer).filter((c) => mentionsIn(c.text).includes(viewer)).at(-1);
-    const name = nameOf(ctx.ext, n.row);
-    const said = asked?.text.replaceAll(/\s+/g, " ").trim() ?? "";
+const youRow = (key: string, why: ForYou["why"], href: string, name: string, said: string, act: string): ForYou =>
+  ({ key, why, html: `<li class="att-row you" data-attention-key="${esc(key)}" data-for-you="${why}"><a class="name" href="${href}" title="${esc(name)}">${esc(name)}</a><span class="by">${said}</span><span class="acts">${act}</span></li>` });
+// a question for you on an open task, or the task itself when it's yours and not started
+function taskForYou(n: Placed, viewer: string, ctx: AttentionCtx): ForYou | undefined {
+  const name = nameOf(ctx.ext, n.row);
+  const asked = unanswered(ctx.ext.comments.get(n.row.id) ?? [], viewer).reverse().find((c) => mentionsIn(c.text).includes(viewer)); // the latest
+  if (asked) {
+    const said = asked.text.replaceAll(/\s+/g, " ").trim();
     const words = said.toLowerCase().startsWith(`@${viewer}`.toLowerCase()) ? said.slice(viewer.length + 1).replace(/^[,:]?\s*/, "") : said; // "@isha yes: …" reads "yes: …"
-    if (asked) row(n.row.key, "mentioned", `#t${n.i}`, name, `<b>${esc(asked.by)}</b> asked you: “${esc(clipped(words, 110))}”`, `<a class="act primary" href="#t${n.i}">Reply</a>`);
-    else if (n.row.state === "unstarted" && ctx.ext.tickets.get(n.row.id)?.assignee === viewer) row(n.row.key, "assigned", `#t${n.i}`, name, "assigned to you", actLink(n.row, "START", "Start", ctx.q, true));
+    return youRow(n.row.key, "mentioned", `#t${n.i}`, name, `<b>${esc(asked.by)}</b> asked you: “${esc(clipped(words, 110))}”`, `<a class="act primary" href="#t${n.i}">Reply</a>`);
   }
-  for (const g of ghosts) {
-    const i = g.idea;
-    if (i.stage !== "file_pending" && i.stage !== "node_pending") continue;
-    const by = i.declaredBy ? `<b>${esc(i.declaredBy)}</b>'s idea` : "An idea";
-    row(i.key, "idea", `#i${g.i}`, i.summary ?? i.id, `${by} waits for a person to approve its ${i.stage === "file_pending" ? "file" : "place"}`, `<a class="act primary" href="#i${g.i}">Review</a>`);
-  }
-  return out;
+  if (n.row.state === "unstarted" && ctx.ext.tickets.get(n.row.id)?.assignee === viewer) return youRow(n.row.key, "assigned", `#t${n.i}`, name, "assigned to you", actLink(n.row, "START", "Start", ctx.q, true));
+  return undefined;
+}
+// an idea waiting for a person: its file, or its place
+function ideaForYou(g: Ghost): ForYou | undefined {
+  const i = g.idea;
+  if (i.stage !== "file_pending" && i.stage !== "node_pending") return undefined;
+  const by = i.declaredBy ? `<b>${esc(i.declaredBy)}</b>'s idea` : "An idea";
+  const what = i.stage === "file_pending" ? "file" : "place";
+  return youRow(i.key, "idea", `#i${g.i}`, i.summary ?? i.id, `${by} waits for a person to approve its ${what}`, `<a class="act primary" href="#i${g.i}">Review</a>`);
+}
+function forYouOf(nodes: readonly Placed[], ghosts: readonly Ghost[], viewer: string, ctx: AttentionCtx): ForYou[] {
+  const tasks = nodes.filter((n) => !CLOSED.has(n.row.state)).map((n) => taskForYou(n, viewer, ctx));
+  return [...tasks, ...ghosts.map((g) => ideaForYou(g))].filter((x): x is ForYou => x !== undefined);
 }
 
 // More than FOLD_AT tasks needing you: each blocked group folds to one line (its reason, the
@@ -1467,11 +1480,14 @@ function forYouOf(nodes: readonly Placed[], ghosts: readonly Ghost[], viewer: st
 // worked on never folds.
 const FOLD_AT = 3;
 
-// `you`: who is looking (live), for what's theirs to answer; the ideas waiting on the board.
-function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, live: boolean, skip: ReadonlySet<number>, changed: ReadonlySet<string>, q: string, you: { viewer: string | undefined; ext: Ext; ghosts: readonly Ghost[] }): string {
+// `look`: live or the file, what the last action changed, the workspace; who is looking (live),
+// for what's theirs to answer; the ideas waiting on the board.
+interface Look { live: boolean; changed: ReadonlySet<string>; q: string; viewer: string | undefined; ext: Ext; ghosts: readonly Ghost[] }
+function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: string, pathOf: (n: Placed) => string, skip: ReadonlySet<number>, look: Look): string {
   const { blocked, working } = attentionSince(events, stream, skip);
-  const ctx: AttentionCtx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])), q, ext: you.ext };
-  const mine = live && you.viewer !== undefined ? forYouOf(nodes, you.ghosts, you.viewer, ctx) : [];
+  const { live, changed, ext, viewer } = look;
+  const ctx: AttentionCtx = { indexOf: new Map(nodes.map((n) => [n.row.key, n.i])), rowOf: new Map(nodes.map((n) => [n.row.key, n.row])), q: look.q, ext, live, changed };
+  const mine = live && viewer !== undefined ? forYouOf(nodes, look.ghosts, viewer, ctx) : [];
   const stuck = nodes.filter((n) => n.row.state === "blocked");
   // A finished active parent (every child closed) is no decision for a person: tira closes it
   // when work moves on, so it stays in the tree, not in the count (ruling 2026-10-20).
@@ -1479,7 +1495,7 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
   const count = mine.length + stuck.length + busy.length;
   if (count === 0) {
     const next = nodes.find((n) => n.row.cursor);
-    const nextLine = next ? `<p>Next up: <a href="#t${next.i}">${esc(nameOf(you.ext, next.row))}</a></p>` : `<p>No open work left.</p>`;
+    const nextLine = next ? `<p>Next up: <a href="#t${next.i}">${esc(nameOf(ext, next.row))}</a></p>` : `<p>No open work left.</p>`;
     return `<section class="attention calm" data-attention-count="0" aria-label="Needs attention"><div class="att-head"><h2>Nothing needs you</h2></div>${nextLine}</section>`;
   }
   // blocked work, grouped by its reason, groups in the order they first blocked
@@ -1491,14 +1507,14 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
   }
   const folds = count > FOLD_AT;
   const blockedHtml = [...groups].map(([why, ns]) => {
-    const rows = `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", live, ctx, changed)).join("")}</ul>`;
+    const rows = `<ul class="att-list">${ns.map((n) => attentionRow(n, blocked.get(n.row.key), pathOf(n), "blocked", ctx)).join("")}</ul>`;
     if (!folds) return `<div class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"><h3>Blocked <span class="why">${esc(why)}</span><span class="k">${ns.length}</span></h3>${rows}</div>`;
     const open = ns.some((n) => changed.has(n.row.key)) ? " open" : "";
     return `<details class="att-group blocked" data-group="blocked" data-reason="${esc(why)}"${open}><summary><span class="kind">Blocked</span><span class="why">${esc(why)}</span>`
-      + `<span class="names">${ns.map((n) => esc(nameOf(you.ext, n.row))).join(", ")}</span><span class="k">${ns.length}</span></summary>${rows}</details>`;
+      + `<span class="names">${ns.map((n) => esc(nameOf(ext, n.row))).join(", ")}</span><span class="k">${ns.length}</span></summary>${rows}</details>`;
   }).join("");
   const workingHtml = busy.length === 0 ? "" : `<div class="att-group working" data-group="in_progress"><h3>In progress<span class="k">${busy.length}</span></h3>`
-    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", live, ctx, changed, underOf(n, nodes))).join("")}</ul></div>`;
+    + `<ul class="att-list">${busy.map((n) => attentionRow(n, working.get(n.row.key), pathOf(n), "started", ctx, underOf(n, nodes))).join("")}</ul></div>`;
   // what's yours comes first, and never folds
   const mineHtml = mine.length === 0 ? "" : `<div class="att-group for-you" data-group="for-you"><h3>For you<span class="k">${mine.length}</span></h3><ul class="att-list">${mine.map((m) => m.html).join("")}</ul></div>`;
   const sum = [mine.length > 0 ? `${mine.length} for you` : "", stuck.length > 0 ? `${stuck.length} blocked` : "", busy.length > 0 ? `${busy.length} in progress` : ""].filter(Boolean).join(" · ");
@@ -1517,6 +1533,33 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 // task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
 // Live, cards drag between columns (drag.mjs): the board carries what each move means under
 // today's rules (`moves`, from the server) and each status column its state.
+// One Kanban card: its key and the cursor, its parent's line (when shown), its name, then its
+// subtasks, found mark, blocks links, Jira key, who moved it last and its history's length.
+interface CardCtx { idOf: ReadonlyMap<string, string>; nameAt: ReadonlyMap<string, string>; parentsShown: boolean; trail: Map<string, TrailEntry[]>; links: Links; changed: ReadonlySet<string>; ext: Ext }
+function cardHtml(n: Placed, c: CardCtx): string {
+  const { idOf, nameAt, parentsShown, trail, links, changed, ext } = c;
+  const r = n.row;
+  const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : "", changed.has(r.key) ? "changed" : ""].filter(Boolean).join(" ");
+  const lines = (trail.get(r.key) ?? []).length;
+  const above = n.parent ? nameAt.get(n.parent.row.key) ?? n.parent.row.id : "";
+  const parent = n.parent && parentsShown ? `<div class="par" data-card-parent title="${esc(above)}">${esc(above)}</div>` : "";
+  const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((k) => CLOSED.has(k.state)).length}/${r.children.length} subtasks</span>`;
+  const during = r.discoveredDuring ? nameAt.get(r.discoveredDuring) ?? bare(r.discoveredDuring) : "";
+  const found = r.discoveredDuring ? `<span class="found" data-found title="Found while working on ${esc(during)}" aria-label="Found while working on ${esc(during)}">${ICON.found}</span>` : "";
+  const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
+  const by = links.blockedBy.get(r.key);
+  const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
+    + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
+  const last = (trail.get(r.key) ?? []).filter((x) => !x.refused).at(-1)?.actor;
+  const key = ext.keys.get(r.id);
+  const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
+  const cursorWord = r.active ? "now" : "next";
+  const pin = r.cursor ? `<span class="pin">◆ ${cursorWord}</span>` : "";
+  const title = ext.tickets.get(r.id)?.title;
+  const named = title ? `<div class="t" title="${esc(title)}">${esc(title)}</div>` : `<div class="t">${wraps(r.id)}</div>`;
+  return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}${parent}${named}`
+    + `<div class="row">${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
+}
 function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext, moves?: Record<string, string>): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
   // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
@@ -1524,6 +1567,7 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
   const leaves = nodes.filter((n) => n.row.children.length === 0 || n.row.state !== "unstarted");
   const nameAt = new Map(nodes.map((n) => [n.row.key, nameOf(ext, n.row)]));
   const parentsShown = new Set(leaves.flatMap((n) => (n.parent ? [n.parent.row.key] : []))).size > 1;
+  const board: CardCtx = { idOf, nameAt, parentsShown, trail, links, changed, ext };
   const columns: [string, string, string][] = [
     ["unstarted", "To do", "var(--dim)"], ["in_progress", "In progress", "var(--prog)"], ["blocked", "Blocked", "var(--block)"],
     ["done", "Done", "var(--done)"], ["cancelled", "Dropped", "var(--gone)"],
@@ -1531,29 +1575,7 @@ function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Lin
   const cols = columns.filter(([s]) => s !== "blocked" || leaves.some((n) => n.row.state === s)).map(([s, title, color]) => {
     const here = leaves.filter((n) => n.row.state === s);
     if (CLOSED.has(s)) here.sort((a, b) => movedAt(b) - movedAt(a) || a.i - b.i);
-    const cards = here.map((n) => {
-      const r = n.row;
-      const cls = ["card", r.cursor ? "is-next" : "", r.state === "cancelled" ? "is-gone" : "", changed.has(r.key) ? "changed" : ""].filter(Boolean).join(" ");
-      const lines = (trail.get(r.key) ?? []).length;
-      const above = n.parent ? nameAt.get(n.parent.row.key) ?? n.parent.row.id : "";
-      const parent = n.parent && parentsShown ? `<div class="par" data-card-parent title="${esc(above)}">${esc(above)}</div>` : "";
-      const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((c) => CLOSED.has(c.state)).length}/${r.children.length} subtasks</span>`;
-      const during = r.discoveredDuring ? nameAt.get(r.discoveredDuring) ?? bare(r.discoveredDuring) : "";
-      const found = r.discoveredDuring ? `<span class="found" data-found title="Found while working on ${esc(during)}" aria-label="Found while working on ${esc(during)}">${ICON.found}</span>` : "";
-      const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
-      const by = links.blockedBy.get(r.key);
-      const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
-        + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
-      const last = (trail.get(r.key) ?? []).filter((x) => !x.refused).at(-1)?.actor;
-      const key = ext.keys.get(r.id);
-      const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
-      const cursorWord = r.active ? "now" : "next";
-      const pin = r.cursor ? `<span class="pin">◆ ${cursorWord}</span>` : "";
-      const title = ext.tickets.get(r.id)?.title;
-      const named = title ? `<div class="t" title="${esc(title)}">${esc(title)}</div>` : `<div class="t">${wraps(r.id)}</div>`;
-      return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}${parent}${named}`
-        + `<div class="row">${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
-    });
+    const cards = here.map((n) => cardHtml(n, board));
     const colAttr = moves ? ` data-col="${s}"` : "";
     const shown = capped(s, cards) || `<p class="empty">Nothing here</p>`;
     return `<div class="col"${colAttr}><div class="ch"><span class="dot${s === "in_progress" && here.length > 0 ? " pulse" : ""}" style="background:${color}"></span>${title}<span class="k">${here.length}</span></div>${shown}</div>`;
@@ -1961,7 +1983,7 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
 ${navHtml(opts.live, views, home, stream, name)}
 ${flashHtml(opts.live?.flash)}
 <header class="hero"><div class="big" title="${lanesOnly ? "verified briefs, of those current" : "tasks closed, of all tasks"}">${closed}<small>/${total}</small></div><div class="who"><div class="title"><h1>${projectMark(stream, name)}<span class="h1-name">${nameHtml(name)}</span></h1>${board || ext.ws ? projectLinksHtml(ext, opts.live, q) : ""}<div class="title-acts">${historyButton(all.length)}${form ? `<a class="act primary create-btn" href="#create" data-create-open>${ICON.plus}Create <kbd>C</kbd></a>` : ""}</div></div><ul class="stats">${stats.join("")}</ul></div>${live ? `<button class="find" type="button" data-open-palette>${ICON.search}<span>Search tasks in ${esc(name)}</span><kbd>⌘K</kbd></button>` : ""}</header>
-${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, live, skip, changed, q, { viewer: opts.live?.actor, ext, ghosts }) : ""}
+${v.roots.length > 0 ? attentionHtml(nodes, events, stream, pathOf, skip, { live, changed, q, viewer: opts.live?.actor, ext, ghosts }) : ""}
 <section class="view view-board" aria-label="Board">${board ? boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves) : emptyBoard}</section>
 ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lanes}</section>`}
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
