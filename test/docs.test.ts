@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveAccess, saveAppKeys, saveSession } from "../src/sync/credentials.ts";
+import { saveAccess, saveAppKeys, saveEmail, saveSession } from "../src/sync/credentials.ts";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SqliteEventStore } from "../src/store/sqlite-store.ts";
@@ -82,7 +82,8 @@ async function pages(): Promise<string> {
   const env = { TIRA_HOME: home };
   await saveAppKeys({ github: { clientId: "Iv1.docs" }, atlassian: { clientId: "docs", secret: "docs-secret" } }, env);
   await saveSession("docs-session", "isha", env);
-  await saveAccess(() => ({ admin: "isha", contact: { name: "Isha", email: "isha@example.com" } }), env);
+  await saveEmail("isha", "isha@example.com", env);
+  await saveAccess(() => ({ admin: "isha", members: ["devansh"] }), env); // devansh: in every project from before each had its own people
   const githubAuth = { authorizeUrl: () => "https://github.example/authorize", exchange: async () => "gho-token", start: async () => ({ deviceCode: "d", userCode: "ABCD-1234", verifyAt: "https://github.com/login/device", interval: 5, expiresIn: 900 }), poll: async () => ({ wait: 0 }), user: async () => ({ login: "x" }), repos: async () => [] };
   const signInServer = tiraServer({ store, registry, stream: "t", actor: "isha", token: "k", links: { githubAuth, env } });
   const ask = async (s: typeof server, cookie?: string) => {
@@ -105,6 +106,10 @@ async function pages(): Promise<string> {
   await d.submit({ stream: "w", kind: "create", entity: { type: "workspace", id: "workspace", version: 1 }, actor: "isha", payload: { repo: "acme/app" } });
   const signedInServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env, agentTokens: new MemoryAgentTokens() } });
   const getSignedIn = await ask(signedInServer, "tira_session=docs-session");
+  // someone just signed up whose GitHub profile shows no email: the email step
+  await saveSession("docs-newcomer", "newbie", env);
+  const newcomerServer = tiraServer({ store, registry, stream: "w", token: "k", links: { githubAuth, env } });
+  const getNewcomer = await ask(newcomerServer, "tira_session=docs-newcomer");
   const firstRunServer = tiraServer({ store, registry, stream: "t", token: "k", links: { githubAuth, env: { TIRA_HOME: firstHome } } });
   const getFirstRun = await ask(firstRunServer);
   // at a public address (src/serve/public.ts): Claude's way in by its Connectors, and approving it
@@ -128,6 +133,8 @@ async function pages(): Promise<string> {
     const signedIn = (await getSignedIn("GET", "/integrations")).body + (await getSignedIn("GET", "/")).body + (await getSignedIn("GET", "/connect")).body
       + (await getSignedIn("GET", "/projects/new")).body + (await getSignedIn("POST", "/projects", "token=k&name=-bad&repo=a%2Fb")).body // + New project's page, and a name it refuses
       + (await getSignedIn("GET", "/settings")).body + (await getSignedIn("GET", "/integrations?w=t")).body // Account settings; another project's settings (it can be deleted)
+      + (await getSignedIn("GET", "/projects")).body // your projects
+      + (await getNewcomer("GET", "/signup/email")).body // the email step
       + (await getSignedIn("GET", "/integrations?app=cursor&from=agents")).body // Connect agents' step 2, then step 3 with its agent made
       + (await getSignedIn("GET", (await getSignedIn("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? "/")).body;
     const before = String((await store.readStream("t")).at(-1)?.seq);
@@ -148,6 +155,7 @@ async function pages(): Promise<string> {
     await new Promise<void>((r) => server.close(() => r()));
     await new Promise<void>((r) => signInServer.close(() => r()));
     await new Promise<void>((r) => signedInServer.close(() => r()));
+    await new Promise<void>((r) => newcomerServer.close(() => r()));
     await new Promise<void>((r) => firstRunServer.close(() => r()));
     await new Promise<void>((r) => hostedServer.close(() => r()));
     rmSync(home, { recursive: true, force: true });

@@ -20,7 +20,7 @@ export interface GitHubAuthApi {
   exchange(clientId: string, secret: string, code: string, redirectUri: string): Promise<string>; // its code, for a token
   start(clientId: string): Promise<DeviceStart>;
   poll(clientId: string, deviceCode: string): Promise<DevicePoll>;
-  user(token: string): Promise<{ login: string; name?: string }>;
+  user(token: string): Promise<{ login: string; name?: string; email?: string }>; // email: the one their profile shows, if any
   repos(token: string): Promise<string[]>; // owner/name, most recently updated first
 }
 
@@ -86,10 +86,10 @@ export class GitHubDevice implements GitHubAuthApi {
     return res.json();
   }
 
-  async user(token: string): Promise<{ login: string; name?: string }> {
-    const u = (await this.get(token, "/user")) as { login?: string; name?: string | null };
+  async user(token: string): Promise<{ login: string; name?: string; email?: string }> {
+    const u = (await this.get(token, "/user")) as { login?: string; name?: string | null; email?: string | null };
     if (typeof u.login !== "string") throw new Error("GitHub didn't say who signed in");
-    return { login: u.login, ...(u.name ? { name: u.name } : {}) };
+    return { login: u.login, ...(u.name ? { name: u.name } : {}), ...(typeof u.email === "string" && u.email ? { email: u.email } : {}) };
   }
 
   async repos(token: string): Promise<string[]> {

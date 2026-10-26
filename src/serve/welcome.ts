@@ -95,30 +95,32 @@ export interface LandingOpts {
   token: string;
   githubReady: boolean; // tira's GitHub app is set up on this machine
   port: string;
-  admin?: { login: string; contact?: { name?: string; email?: string } }; // none yet: the first to sign in becomes it
   known?: boolean; // someone has signed in on this browser: Sign in only, no Sign up
   flash?: Flash;
 }
 
-// who approves a newcomer, with a link to write to them
-function newcomer(admin: LandingOpts["admin"]): string {
-  if (!admin) return `The first person to sign in becomes the admin.`;
-  const { name, email } = admin.contact ?? {};
-  const mail = email ? `<a href="mailto:${esc(email)}" data-admin-email>${esc(email)}</a>` : "";
-  const named = name ? esc(name) : `@${esc(admin.login)}`;
-  const who = name && email ? `${esc(name)} (${mail})` : email && !name ? mail : named;
-  return `New here? Sign up, and ${who} approves you.`;
-}
-// signing in with GitHub, and (for someone new) signing up: a request the admin approves
+// signing in with GitHub, and (for someone new) signing up: in at once (Isha, 2026-10-25)
 const signInForm = (token: string, label: string) =>
   `<form method="post" action="/signin/start">${hiddenToken(token)}<button class="land-btn" type="submit" data-signin-start>${GITHUB_MARK}<span>${label}</span></button></form>`;
 const signUpForm = (token: string) =>
   `<form method="post" action="/signin/start">${hiddenToken(token)}<input type="hidden" name="signup" value="1"><button class="land-btn blue" type="submit" data-signup-start>${GITHUB_MARK}<span>Sign up with GitHub</span></button></form>`;
-// the landing's way in: Sign up and Sign in for someone new (once there's an admin to approve them);
-// Sign in only on a browser someone signed in on, or before there's an admin
+// the landing's way in: Sign up and Sign in for someone new; Sign in only on a browser someone signed in on
 function wayIn(o: LandingOpts): string {
-  if (!o.admin || o.known) return `<h1>Sign in to tira</h1>${flashHtml(o.flash)}${signInForm(o.token, "Continue with GitHub")}` + (o.admin ? "" : `<p class="land-foot" data-newcomer>${newcomer(o.admin)}</p>`);
-  return `<h1>Welcome to tira</h1>${flashHtml(o.flash)}${signUpForm(o.token)}${signInForm(o.token, "Sign in with GitHub")}<p class="land-foot" data-newcomer>${newcomer(o.admin)}</p>`;
+  if (o.known) return `<h1>Sign in to tira</h1>${flashHtml(o.flash)}${signInForm(o.token, "Continue with GitHub")}`;
+  return `<h1>Welcome to tira</h1>${flashHtml(o.flash)}${signUpForm(o.token)}${signInForm(o.token, "Sign in with GitHub")}`
+    + `<p class="land-foot" data-newcomer>New here? Sign up with GitHub: you're the admin of every project you make, and you add your team.</p>`;
+}
+
+export interface EmailOpts { token: string; login: string; flash?: Flash }
+
+// The one step after signing up, when GitHub's profile shows no email: the email tira keeps for you
+// (only you see it; you can change it in Account settings).
+export function emailPage(o: EmailOpts): string {
+  const form = `<div class="land-mark">${BRAND_MARK}</div><h1>One more thing</h1>${flashHtml(o.flash)}`
+    + `<p class="land-foot">Hi ${esc(o.login)}: which email should tira keep for you? Only you see it.</p>`
+    + `<form method="post" action="/signup/email" data-signup-email>${hiddenToken(o.token)}<label class="land-field"><span>Email</span><input type="email" name="email" required maxlength="200" autocomplete="email" autofocus></label>`
+    + `<button class="land-btn blue" type="submit">Continue</button></form>`;
+  return page("Your email · tira", `<div class="land-card" data-landing>${brandSide()}<section class="land-form">${form}</section></div>`);
 }
 
 // The landing: sign in with GitHub, or, the first time on this machine, set up tira's GitHub app.

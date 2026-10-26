@@ -3,7 +3,7 @@
 // address at $PORT, answers only that address (and this computer's), builds every sign-in's way
 // back from it, marks its cookies Secure and asks browsers to keep to https. Nothing there can be
 // set up by whoever arrives first: tira's GitHub app comes from the server's settings
-// (TIRA_GITHUB_CLIENT_ID and TIRA_GITHUB_CLIENT_SECRET), and so does its admin (TIRA_ADMIN); no one
+// (TIRA_GITHUB_CLIENT_ID and TIRA_GITHUB_CLIENT_SECRET), and so does its owner (TIRA_ADMIN); no one
 // acts without signing in; and the page token comes from TIRA_SECRET_KEY, so a deploy doesn't turn
 // pages left open stale.
 import { createHmac } from "node:crypto";
@@ -46,7 +46,7 @@ export function publicProblem(env: Env, actor: string | undefined): string | und
     actor === undefined ? "" : "at a public address everyone signs in with GitHub: don't set --actor or TIRA_ACTOR",
     db !== undefined && isPostgresUrl(db) ? "" : "set TIRA_DATABASE_URL: at a public address tira keeps everything in Postgres",
     (env.TIRA_SECRET_KEY ?? "").length >= 16 ? "" : "set TIRA_SECRET_KEY to a long random string (at least 16 characters): tira seals everyone's GitHub and Jira tokens with it",
-    GITHUB_LOGIN.test(admin) ? "" : "set TIRA_ADMIN to the GitHub login of this tira's admin (the one who adds people)",
+    GITHUB_LOGIN.test(admin) ? "" : "set TIRA_ADMIN to the GitHub login of this tira's owner (the one who can remove an account)",
     env.TIRA_GITHUB_CLIENT_ID?.trim() && env.TIRA_GITHUB_CLIENT_SECRET?.trim() ? "" : "set TIRA_GITHUB_CLIENT_ID and TIRA_GITHUB_CLIENT_SECRET to tira's GitHub app (its callback URL: <your address>/signin/github/callback)",
   ].find((x) => x !== "");
 }

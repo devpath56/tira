@@ -9,9 +9,11 @@
 //   anyone's GitHub or Jira. Everyone sharing the database uses the same key (keep it with the
 //   connection string). A seal is bound to its row (its table and login), so one can't be moved
 //   onto someone else's.
-// - Six small tables in tira's schema, apart from the log (whose tables nothing here touches):
-//   account_apps, account_access (one row each), account_github, account_atlassian, account_names
-//   (by GitHub login) and account_sessions (by a hash of the session id: the table can't sign anyone in).
+// - Small tables in tira's schema, apart from the log (whose tables nothing here touches):
+//   account_apps, account_access (one row each), account_github, account_atlassian, account_names,
+//   account_emails (sealed), account_blocked (by GitHub login), account_projects (each project's
+//   people: by project and login) and account_sessions (by a hash of the session id: the table
+//   can't sign anyone in).
 // - Links stay until their owner unlinks them; an admin removing someone only ends their sessions.
 // - A session lasts 30 days, like its cookie.
 // - What each page reads comes from a snapshot taken at the start of each request (refresh), so one
@@ -40,8 +42,12 @@ export interface AtlassianAuth {
   site?: string; // its address, e.g. https://acme.atlassian.net
   sites?: { id: string; url: string; name: string }[]; // every site the sign-in can reach
 }
-// requests: GitHub logins that signed up and wait for the admin to approve them (Isha, 2026-10-25)
+// admin: this tira's owner (its setup, and removing accounts). members, requests and contact are
+// from before each project had its own people (Isha, 2026-10-25): no longer changed, and members
+// are the people of every project made before then.
 export interface Access { admin?: string; members?: string[]; requests?: string[]; contact?: { name?: string; email?: string } }
+// a project's people (Isha, 2026-10-25): its admins and its members, by GitHub login
+export interface ProjectPeople { admins: string[]; members: string[] }
 
 // what the accounts hold, as credentials.ts reads it
 export interface Accounts {
@@ -51,6 +57,9 @@ export interface Accounts {
   atlassian?: Record<string, AtlassianAuth>;
   sessions?: Record<string, { login: string; at: string }>;
   names?: Record<string, string>;
+  emails?: Record<string, string>; // the email each person gave, by login
+  blocked?: string[]; // accounts the owner removed: they can't sign in
+  projects?: Record<string, ProjectPeople>; // each project's people, by project (none: not set yet)
 }
 
 // why the accounts can't be used, in plain words (never the key or the connection string)
@@ -91,7 +100,7 @@ export function sealer(secret: string | undefined): Sealer {
 }
 
 // ---------- the tables ----------
-const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions"];
+const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects"];
 const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
@@ -110,6 +119,12 @@ CREATE TABLE IF NOT EXISTS ${s}.account_github (login TEXT PRIMARY KEY, token TE
 CREATE TABLE IF NOT EXISTS ${s}.account_atlassian (login TEXT PRIMARY KEY, auth TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_names (login TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS ${s}.account_sessions (id_hash TEXT PRIMARY KEY, login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS ${s}.account_emails (login TEXT PRIMARY KEY, email TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS ${s}.account_blocked (login TEXT PRIMARY KEY, by_login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS ${s}.account_projects (
+  stream TEXT NOT NULL, login TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+  at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, login)
+);
 `;
 
 export class PostgresAccounts {
@@ -169,13 +184,16 @@ export class PostgresAccounts {
   async refresh(): Promise<void> {
     await this.ready();
     const s = this.schema;
-    const [apps, acc, gh, at, names, sessions] = await Promise.all([
+    const [apps, acc, gh, at, names, sessions, emails, blocked, projects] = await Promise.all([
       this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
       this.pool.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
       this.pool.query(`SELECT login, auth FROM ${s}.account_atlassian`),
       this.pool.query(`SELECT login, name FROM ${s}.account_names`),
       this.pool.query(`SELECT id_hash, login, at FROM ${s}.account_sessions WHERE at > now() - make_interval(days => ${SESSION_DAYS})`),
+      this.pool.query(`SELECT login, email FROM ${s}.account_emails`),
+      this.pool.query(`SELECT login FROM ${s}.account_blocked ORDER BY at, login`),
+      this.pool.query(`SELECT stream, login, role FROM ${s}.account_projects ORDER BY at, login`),
     ]);
     const out: Accounts = {};
     const a = apps.rows[0] as AppsRow | undefined;
@@ -186,6 +204,13 @@ export class PostgresAccounts {
     out.atlassian = Object.fromEntries((at.rows as { login: string; auth: string }[]).map((r) => [r.login, JSON.parse(this.key.open(r.auth, `atlassian:${r.login}`)) as AtlassianAuth]));
     out.names = Object.fromEntries((names.rows as { login: string; name: string }[]).map((r) => [r.login, r.name]));
     out.sessions = Object.fromEntries((sessions.rows as { id_hash: string; login: string; at: Date }[]).map((r) => [r.id_hash, { login: r.login, at: r.at.toISOString() }]));
+    out.emails = Object.fromEntries((emails.rows as { login: string; email: string }[]).map((r) => [r.login, this.key.open(r.email, `email:${r.login}`)]));
+    out.blocked = (blocked.rows as { login: string }[]).map((r) => r.login);
+    out.projects = {};
+    for (const r of projects.rows as { stream: string; login: string; role: string }[]) {
+      const p = (out.projects[r.stream] ??= { admins: [], members: [] });
+      (r.role === "admin" ? p.admins : p.members).push(r.login);
+    }
     this.now = out;
   }
 
@@ -250,6 +275,42 @@ export class PostgresAccounts {
     const s = this.schema;
     if (name === undefined) return this.write(`DELETE FROM ${s}.account_names WHERE login = $1`, [login]);
     await this.write(`INSERT INTO ${s}.account_names (login, name) VALUES ($1, $2) ON CONFLICT (login) DO UPDATE SET name = $2, updated_at = now()`, [login, name]);
+  }
+
+  // the email someone gave (sealed: the database alone doesn't say who anyone is)
+  async saveEmail(login: string, email: string): Promise<void> {
+    const s = this.schema;
+    await this.write(`INSERT INTO ${s}.account_emails (login, email) VALUES ($1, $2) ON CONFLICT (login) DO UPDATE SET email = $2, updated_at = now()`, [login, this.key.seal(email, `email:${login}`)]);
+  }
+
+  // an account the owner removed (by: the owner), or let back in
+  async block(login: string, by: string): Promise<void> {
+    await this.write(`INSERT INTO ${this.schema}.account_blocked (login, by_login) VALUES ($1, $2) ON CONFLICT (login) DO NOTHING`, [login, by]);
+  }
+  async unblock(login: string): Promise<void> {
+    await this.write(`DELETE FROM ${this.schema}.account_blocked WHERE lower(login) = lower($1)`, [login]);
+  }
+
+  // A project's people, changed as one (two admins' changes at once don't undo each other): change
+  // gets them as they are (undefined: not set yet) and returns them as they're to be, or undefined to
+  // leave them. No one at all: not set. True when they were written.
+  async saveProject(stream: string, change: (p: ProjectPeople | undefined) => ProjectPeople | undefined): Promise<boolean> {
+    await this.ready();
+    const s = this.schema;
+    const wrote = await this.transaction(async (c) => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tira-project:${s}:${stream}`]);
+      const rows = (await c.query(`SELECT login, role FROM ${s}.account_projects WHERE stream = $1 ORDER BY at, login`, [stream])).rows as { login: string; role: string }[];
+      const now = rows.length === 0 ? undefined : { admins: rows.filter((r) => r.role === "admin").map((r) => r.login), members: rows.filter((r) => r.role === "member").map((r) => r.login) };
+      const next = change(now);
+      if (next === undefined) return false;
+      const roles = new Map<string, string>([...next.members.map((l): [string, string] => [l, "member"]), ...next.admins.map((l): [string, string] => [l, "admin"])]);
+      await c.query(`DELETE FROM ${s}.account_projects WHERE stream = $1 AND NOT (login = ANY($2))`, [stream, [...roles.keys()]]);
+      // those still in keep when they joined; a new role is only a new role
+      for (const [login, role] of roles) await c.query(`INSERT INTO ${s}.account_projects (stream, login, role) VALUES ($1, $2, $3) ON CONFLICT (stream, login) DO UPDATE SET role = $3`, [stream, login, role]);
+      return true;
+    });
+    await this.refresh();
+    return wrote;
   }
 
   async addSession(idHash: string, login: string): Promise<void> {

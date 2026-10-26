@@ -20,7 +20,7 @@ import { commitsOf } from "../src/fold/tickets.ts";
 import { lookedSaid, lookForCommits, proveWith } from "../src/sync/commits.ts";
 import { JiraCloud } from "../src/sync/jira.ts";
 import { GhCli } from "../src/sync/github.ts";
-import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
+import { access, appKeys, atlassianAuth, githubAuth, jiraLogin, saveAccess, savedProjects, saveJiraLogin, saveSession, sessionLogin } from "../src/sync/credentials.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../src/auth/github.ts";
 import type { AtlassianAuthApi } from "../src/auth/atlassian.ts";
 import { carryQ, CSP, tiraServer } from "../src/serve/server.ts";
@@ -451,7 +451,9 @@ class FakeGitHubAuth implements GitHubAuthApi {
   }
   async user(token: string) {
     if (token !== "gho-token") throw new Error("bad token");
-    return this.login === "isha-gh" ? { login: "isha-gh", name: "Isha" } : { login: this.login };
+    // the email a GitHub profile shows; "quiet" shows none (tira asks for one)
+    if (this.login === "quiet") return { login: this.login };
+    return this.login === "isha-gh" ? { login: "isha-gh", name: "Isha", email: "isha@example.com" } : { login: this.login, email: `${this.login}@example.com` };
   }
   async repos() {
     return ["acme/app", "acme/web"];
@@ -601,11 +603,11 @@ test("Setup shows tira's app keys as Render shows secrets: dots, with Show and C
     await s.signInWithGitHub();
     const theirs = (await s.http("GET", "/settings")).body;
     assert.doesNotMatch(theirs, /data-env-copy|data-env-show|data-setup-form|id="setup-edit"/);
-    assert.match(theirs, /<div class="grp-foot">Only this tira's admin can see or change these\.<\/div>/);
+    assert.match(theirs, /<div class="grp-foot">Only this tira's owner can see or change these\.<\/div>/);
     const refused = await s.post("/integrations/setup/reveal", { key: "atlassian_secret" });
     assert.equal(refused.status, 403);
     assert.doesNotMatch(refused.body, /SECRET/);
-    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Only this tira's admin can change its apps.");
+    assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.other" })), "Only this tira's owner can change its apps.");
     assert.equal(appKeys(s.env).github?.clientId, "Iv1.gh");
     // signed out: no one changes them
     s.signOut();
@@ -642,7 +644,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.deepEqual([unsigned.status, JSON.parse(unsigned.body)], [401, { ok: false, text: "Sign in with GitHub first." }]); // no one to check GitHub as
     assert.equal(await s.flash(await s.post("/integrations/link", { what: "repo", repo: "acme/app" })), "Sign in with GitHub first.");
     assert.equal(workspaceOf(await s.state(), S), undefined);
-    assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Continue with GitHub<\/span><\/button>/);
+    assert.match((await s.http("GET", "/welcome")).body, /data-signin-start><svg[^]*?<\/svg><span>Sign in with GitHub<\/span><\/button>/);
     // the code, and the page that waits for it, at its own address: Back from GitHub (when it
     // opened in the same tab) or a reload comes back to the code, never to a blank page
     const started = await s.post("/signin/start", {});
@@ -665,7 +667,7 @@ test("Sign in with GitHub: a code to approve on github.com; until then nothing i
     assert.match(done.body, /^<div data-go="\/connect\?r=\d+"><\/div>$/); // no repo yet: connect one next
     const session = setCookie.split(";")[0] ?? "";
     s.signIn(session);
-    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
+    assert.equal(await s.flash(done), "Signed in as isha-gh: you're this tira's owner (its setup, and removing an account if you ever need to).");
     // the store keeps a hash of the session, and the GitHub token, never on a page
     const file = readFileSync(join(home, "credentials.json"), "utf8");
     assert.doesNotMatch(file, new RegExp(session.split("=")[1] ?? "x"));
@@ -745,7 +747,7 @@ test("Sign in with GitHub in one click, once tira's app has its secret: straight
     const setCookie = String(back.headers["set-cookie"]);
     assert.match(setCookie, /^tira_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
     s.signIn(setCookie.split(";")[0] ?? "");
-    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
+    assert.equal(await s.flash(back), "Signed in as isha-gh: you're this tira's owner (its setup, and removing an account if you ever need to).");
     // the same way back again: refused (a state works once)
     const session = s.cookie();
     s.signIn(`tira_signin=${state}`);
@@ -797,8 +799,8 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
     // set up, then Continue with GitHub
     assert.equal(await s.flash(await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" })), "Saved. Now sign in.");
     landing = (await s.http("GET", "/welcome")).body;
-    assert.match(landing, /<h1>Sign in to tira<\/h1>/);
-    assert.match(landing, /<p class="land-foot" data-newcomer>The first person to sign in becomes the admin\.<\/p>/);
+    assert.match(landing, /<h1>Welcome to tira<\/h1>/);
+    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up with GitHub: you're the admin of every project you make, and you add your team\.<\/p>/);
     const done = await s.signInWithGitHub();
     assert.match(done.body, /data-go="\/connect\?r=\d+"/);
     // signed in, no repo yet: connect one before the board
@@ -869,108 +871,136 @@ test("the way in, without a fixed name: the landing, sign in with GitHub, connec
   }
 });
 
-test("access: the first person to sign in is the admin; after that only people the admin adds get in, and others are told who to ask", async () => {
+test("access: anyone with GitHub signs up, with an email, and is in at once; each project is seen only by its own people, whose admins add them by username; the owner can remove an account", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home, null);
+  const as = async (login: string) => {
+    s.githubAuthApi.login = login;
+    return s.signInWithGitHub();
+  };
+  const signUp = async (login: string) => {
+    s.githubAuthApi.login = login;
+    s.githubAuthApi.approveAfter = 0;
+    const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", { signup: "1" })).headers.location))?.[1] ?? "";
+    const done = await s.post("/signin/poll", { id, fragment: "1" });
+    s.signIn(String(done.headers["set-cookie"]).split(";")[0] ?? "");
+    return done;
+  };
+  const to = async (path: string) => (await s.http("GET", path)).headers.location;
   try {
     await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" });
-    // the first in becomes the admin, and sets how people reach them
-    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as isha-gh: you're this tira's admin. Add the people who may sign in in Account settings.");
+    // the first in is this tira's owner; the project tira opened on (made before projects had
+    // their own people, by someone who never signed in here) is theirs
+    assert.equal(await s.flash(await as("isha-gh")), "Signed in as isha-gh: you're this tira's owner (its setup, and removing an account if you ever need to).");
     assert.equal(access(s.env).admin, "isha-gh");
+    const connect = await s.http("GET", "/connect");
+    assert.equal(connect.status, 200);
+    assert.match(String(connect.headers["set-cookie"]), /^tira_known=1; HttpOnly; SameSite=Lax; Path=\/; Max-Age=31536000$/); // this browser's landing offers Sign in only from now on
+    // Account settings: the email GitHub's profile shows, the username people add you by, and
+    // (for the owner) removed accounts; no list of who may sign in
     let page = (await s.http("GET", "/settings")).body;
-    assert.match(page, /<div class="grp-list" data-people><div class="grp-row"><span class="grp-k">isha-gh<\/span><span class="pill">Admin<\/span><\/div><form [^>]*data-add-person>/);
-    assert.match(page, /<input type="text" name="name" value="Isha"/); // GitHub's name, to start with
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "contact", name: "Isha", email: "isha@example.com" })), "Saved: the sign-in page shows how to reach you.");
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "contact", name: "Isha", email: "not an email" })), "That isn't a name and an email people can use.");
+    assert.match(page, /<form method="post" action="\/signup\/email" class="grp-row" data-email><input type="hidden" name="token" value="k"><input type="hidden" name="back" value="\/settings"><span class="grp-k">Email<\/span><input type="email" name="email" value="isha@example\.com"/);
+    assert.match(page, /<div class="grp-row" data-username><span class="grp-k">Username<\/span><code class="grp-v" id="my-username">isha-gh<\/code><button type="button" class="env-btn" data-copy-target="my-username"[^>]*>[^]*?<\/button><a class="how" href="\/u\/isha-gh">Profile<\/a><\/div>/);
+    assert.match(page, /<span class="pf-who"><b>Isha<\/b><span>@isha-gh · signed in with GitHub<\/span><\/span><span class="pill">Owner<\/span>/);
+    assert.match(page, /<section class="grp" id="accounts" data-int="accounts"><h2 class="grp-h">Removed accounts<\/h2>/);
+    assert.doesNotMatch(page, /data-people|data-add-person|data-admin-contact/);
+    assert.equal(await s.flash(await s.post("/signup/email", { email: "isha@work.example", back: "/settings" })), "Your email is isha@work.example now.");
+    assert.equal(await s.flash(await s.post("/signup/email", { email: "not an email", back: "/settings" })), "That isn't an email address.");
     s.signOut();
-    // a browser no one has signed in on: Sign up (a request Isha approves) and Sign in
+    // a browser no one has signed in on: Sign up and Sign in, and no one to ask
     const landing = (await s.http("GET", "/welcome")).body;
     assert.match(landing, /<h1>Welcome to tira<\/h1><form method="post" action="\/signin\/start"><input type="hidden" name="token" value="k"><input type="hidden" name="signup" value="1"><button class="land-btn blue" type="submit" data-signup-start>[^]*?<span>Sign up with GitHub<\/span><\/button><\/form><form method="post" action="\/signin\/start">[^]*?data-signin-start>[^]*?<span>Sign in with GitHub<\/span>/);
-    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up, and Isha \(<a href="mailto:isha@example\.com" data-admin-email>isha@example\.com<\/a>\) approves you\.<\/p>/);
-    // one someone signed in on: Sign in only
+    assert.match(landing, /<p class="land-foot" data-newcomer>New here\? Sign up with GitHub: you(?:'|&#39;)re the admin of every project you make, and you add your team\.<\/p>/);
     const known = (await s.http("GET", "/welcome", undefined, undefined, "tira_known=1")).body;
     assert.match(known, /<h1>Sign in to tira<\/h1><form method="post" action="\/signin\/start">[^]*?<span>Continue with GitHub<\/span>/);
     assert.doesNotMatch(known, /data-signup-start|data-newcomer/);
-    // someone else: refused, told who to ask, and nothing of theirs is kept
-    s.githubAuthApi.login = "octo";
-    const refused = await s.signInWithGitHub();
+    // someone new signs up: in at once, with their email, onto their own (empty) project list
+    const joined = await signUp("octo");
+    assert.match(joined.body, /^<div data-go="\/projects\?r=\d+"><\/div>$/);
+    assert.equal(await s.flash(joined), "Welcome to tira, octo: make your first project, or open one someone added you to.");
+    assert.match((await s.http("GET", "/projects")).body, /<div class="grp-row" data-no-projects><span class="grp-k">You(?:'|&#39;)re not in any project yet<\/span><a class="act primary" href="\/projects\/new">Make your first project<\/a><\/div>/);
+    // isha's project isn't theirs: it doesn't exist, as far as they can tell
+    assert.match(String(await to("/")), /^\/projects/);
+    assert.equal((await s.http("GET", "/integrations")).status, 404);
+    assert.equal((await s.http("GET", "/api/tasks")).status, 404);
+    assert.deepEqual(JSON.parse((await s.http("GET", "/api/workspaces")).body), []);
+    const seen = String((await s.store.readStream(S)).at(-1)?.seq);
+    assert.equal((await s.post("/act", { type: "node", id: "table", event: "START", seen })).status, 404);
+    // they make a project: theirs alone, as its admin (not the people every project had before),
+    // and isha doesn't see it
+    await saveAccess((a) => ({ ...a, members: ["devansh"] }), s.env);
+    const made = await s.post("/projects", { name: "octo-app", repo: "acme/app" });
+    assert.match(String(made.headers.location), /^\/\?r=\d+&w=octo-app$/);
+    assert.deepEqual(savedProjects(s.env)["octo-app"], { admins: ["octo"], members: [] });
+    assert.match((await s.http("GET", "/projects")).body, /<a class="grp-row" href="\/\?w=octo-app" data-my-project="octo-app">[^]*?octo-app<\/span><span class="grp-v">No tasks yet<\/span><span class="pill">Admin<\/span><\/a>/);
+    const octo = s.cookie();
+    await as("isha-gh");
+    assert.equal((await s.http("GET", "/?w=octo-app")).status, 404);
+    assert.equal((JSON.parse((await s.http("GET", "/api/workspaces")).body) as { stream: string }[]).some((w) => w.stream === "octo-app"), false);
+    // its admin adds isha by username (any case, with or without @): she sees it at once
+    s.signIn(octo);
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "@ISHA-GH" })), "Added isha-gh: they see this project now.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "isha-gh" })), "isha-gh is already in this project.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "not a login!" })), "That isn't a GitHub username.");
+    // and makes her admin; then steps down; the last admin can't leave
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "admin", login: "isha-gh" })), "isha-gh is an admin now: they can add and remove people too.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "member", login: "octo" })), "octo is a member now.");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "add", login: "raj" })), "Only this project's admins can change its team.");
+    // a member works on it but doesn't run it
+    const settings = (await s.http("GET", "/integrations?w=octo-app")).body;
+    assert.match(settings, /<span class="grp-v">Only this project(?:'|&#39;)s admins can delete it<\/span>/);
+    assert.match(settings, /Only this project(?:'|&#39;)s admins add people: ask isha-gh\./);
+    assert.doesNotMatch(settings, /data-team-add/);
+    assert.equal(await s.flash(await s.post("/projects/rename?w=octo-app", { title: "Octo" })), "Only this project's admins can rename it.");
+    assert.equal(await s.flash(await s.post("/projects/delete?w=octo-app", { confirm: "octo-app" })), "Only this project's admins can delete it. Nothing was deleted.");
+    assert.equal(await s.flash(await s.post("/integrations/link?w=octo-app", { what: "repo", repo: "acme/web" })), "Only this project's admins can change that.");
+    await as("isha-gh");
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "remove", login: "isha-gh" })), "isha-gh is this project's only admin: make someone else admin first.");
+    // she removes octo: the project is gone for them
+    assert.equal(await s.flash(await s.post("/integrations/people?w=octo-app", { do: "remove", login: "octo" })), "Removed octo: they no longer see this project, and their agents here stop.");
+    s.signIn(octo);
+    assert.equal((await s.http("GET", "/?w=octo-app")).status, 404);
+    // a GitHub profile with no email: tira asks for one before anything else
+    await signUp("quiet");
+    assert.equal(await to("/projects"), "/signup/email");
+    const ask = (await s.http("GET", "/signup/email")).body;
+    assert.match(ask, /<h1>One more thing<\/h1>[^]*?<form method="post" action="\/signup\/email" data-signup-email><input type="hidden" name="token" value="k"><label class="land-field"><span>Email<\/span><input type="email" name="email" required/);
+    assert.equal(await s.flash(await s.post("/signup/email", { email: "nope" })), "That isn't an email address.");
+    const given = await s.post("/signup/email", { email: "quiet@example.com" });
+    assert.match(String(given.headers.location), /^\/projects\?r=\d+$/);
+    assert.equal((await s.http("GET", "/projects")).status, 200);
+    // a profile, for anyone signed in: the username to copy, never the email
+    const profile = (await s.http("GET", "/u/isha-gh")).body;
+    assert.match(profile, /<code class="grp-v" id="their-username">isha-gh<\/code>/);
+    assert.doesNotMatch(profile, /example\.com/);
+    assert.equal((await s.http("GET", "/u/nobody-here")).status, 404);
+    // only the owner removes an account: signed out at once, and can't sign in again
+    const quiet = s.cookie();
+    assert.equal(await s.flash(await s.post("/integrations/accounts", { do: "block", login: "octo" })), "Only this tira's owner can remove accounts.");
+    await as("isha-gh");
+    assert.equal(await s.flash(await s.post("/integrations/accounts", { do: "block", login: "isha-gh" })), "That's you, this tira's owner: you can't remove your own account.");
+    assert.equal(await s.flash(await s.post("/integrations/accounts", { do: "block", login: "quiet" })), "Removed quiet: they're signed out, can't sign in, and their agents stop. Their projects stay with their other admins.");
+    assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/accounts" class="grp-row" data-removed-account>[^]*?<span class="grp-k">quiet<\/span><span class="grp-v">Removed<\/span><button class="how" type="submit">Let back in<\/button><\/form>/);
+    assert.equal(sessionLogin(quiet.replace(/^tira_session=/, ""), s.env), undefined);
+    assert.ok(githubAuth("quiet", s.env)); // their links stay: only they unlink them (Isha, 2026-10-22)
+    s.signIn(quiet);
+    assert.equal(await to("/"), "/welcome");
+    const refused = await as("quiet");
     assert.equal(refused.headers["set-cookie"], undefined);
-    assert.match(refused.body, /^<div data-go="\/welcome\?r=\d+"><\/div>$/);
-    assert.equal(await s.flash(refused), "octo doesn't have access to this tira yet: Sign up to ask Isha.");
-    assert.equal(githubAuth("octo", s.env), undefined);
-    // they sign up: a request, kept as their GitHub login and nothing else; signing in says it's still waiting
-    const signUp = async () => {
-      s.githubAuthApi.approveAfter = 0;
-      const id = /[?&]id=([0-9a-f]+)/.exec(String((await s.post("/signin/start", { signup: "1" })).headers.location))?.[1] ?? "";
-      return s.post("/signin/poll", { id, fragment: "1" });
-    };
-    const asked = await signUp();
-    assert.equal(asked.headers["set-cookie"], undefined);
-    assert.equal(await s.flash(asked), "Thanks, octo: your request is with Isha. You can sign in once they approve it.");
-    assert.deepEqual(access(s.env).requests, ["octo"]);
-    await signUp(); // twice: asked once
-    assert.deepEqual(access(s.env).requests, ["octo"]);
-    assert.equal(await s.flash(await s.signInWithGitHub()), "Thanks, octo: your request is with Isha. You can sign in once they approve it.");
-    assert.equal(githubAuth("octo", s.env), undefined);
-    assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
-    // the admin adds them (any case, with or without @); then they get in
-    s.githubAuthApi.login = "isha-gh";
-    await s.signInWithGitHub();
-    const signedIn = await s.http("GET", "/connect");
-    assert.equal(signedIn.status, 200);
-    assert.match(String(signedIn.headers["set-cookie"]), /^tira_known=1; HttpOnly; SameSite=Lax; Path=\/; Max-Age=31536000$/); // this browser's landing offers Sign in only from now on
-    // the request shows in Team, with Approve and Decline; approved, they're in and no longer waiting
-    assert.match((await s.http("GET", "/integrations")).body, /<div class="grp-row" data-team-request><span class="grp-k">octo<\/span><span class="grp-v">Wants to join<\/span><form method="post" action="\/integrations\/people" class="inline"><input type="hidden" name="token" value="k"><input type="hidden" name="do" value="approve"><input type="hidden" name="login" value="octo"><input type="hidden" name="back" value="\/integrations"><button class="act primary" type="submit">Approve<\/button><\/form>/);
-    const approved = await s.post("/integrations/people", { do: "approve", login: "octo", back: "/integrations" });
-    assert.match(String(approved.headers.location), /^\/integrations\?r=\d+$/);
-    assert.equal(await s.flash(approved), "Approved octo: they can sign in with GitHub now.");
-    assert.deepEqual([access(s.env).members, access(s.env).requests], [["octo"], undefined]);
-    // another declined: no longer waiting, and nothing of theirs kept
-    s.githubAuthApi.login = "newbie";
-    s.signOut();
-    await signUp();
-    s.githubAuthApi.login = "isha-gh";
-    await s.signInWithGitHub();
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "decline", login: "newbie", back: "/integrations" })), "Declined newbie's request: tira keeps nothing of theirs.");
-    assert.equal(access(s.env).requests, undefined);
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "remove", login: "octo" })), "Removed octo: they're signed out and can't sign in. Their GitHub and Jira links stay until they unlink them.");
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "@octo" })), "Added octo: they can sign in with GitHub now.");
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "OCTO" })), "OCTO can already sign in.");
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "not a login!" })), "That isn't a GitHub username.");
-    s.githubAuthApi.login = "octo";
-    assert.equal(await s.flash(await s.signInWithGitHub()), "Signed in as octo. tira records your changes as octo.");
-    assert.equal((await s.http("GET", "/")).headers.location, "/connect");
-    // a member can't change who gets in, and sees who to ask
-    page = (await s.http("GET", "/settings")).body;
-    assert.match(page, /<span class="grp-k">Admin<\/span><span class="grp-v">Isha<\/span><\/div><\/div><div class="grp-foot">Ask the admin to add or remove people\.<\/div>/);
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "add", login: "mallory" })), "Only this tira's admin can change who may sign in.");
-    const octoSession = s.cookie();
-    // removed: signed out at once, and tira forgets their sign-ins
-    s.githubAuthApi.login = "isha-gh";
-    await s.signInWithGitHub();
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "remove", login: "octo" })), "Removed octo: they're signed out and can't sign in. Their GitHub and Jira links stay until they unlink them.");
-    assert.deepEqual(access(s.env).members, []);
-    assert.equal(githubAuth("octo", s.env)?.token !== undefined, true); // their link stays: only they unlink it (Isha, 2026-10-22)
-    assert.equal(sessionLogin(octoSession.replace(/^tira_session=/, ""), s.env), undefined); // but every session of theirs ends
-    s.signIn(octoSession);
-    assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
-    // a session kept for someone not on the list (from before there was one) doesn't get in either
-    await saveSession("old-session", "mallory", s.env);
+    assert.equal(await s.flash(refused), "quiet can't sign in to this tira: its owner removed this account.");
+    // a session kept for someone removed doesn't get in either
+    await saveSession("old-session", "quiet", s.env);
     s.signIn("tira_session=old-session");
-    assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
-    // the admin can't be removed
-    s.githubAuthApi.login = "isha-gh";
-    await s.signInWithGitHub();
+    assert.equal(await to("/"), "/welcome");
+    await as("isha-gh");
+    assert.equal(await s.flash(await s.post("/integrations/accounts", { do: "unblock", login: "quiet" })), "quiet can sign in again.");
     // only you unlink your GitHub: Account settings' Disconnect GitHub forgets the token and signs you out
     assert.match((await s.http("GET", "/settings")).body, /<form method="post" action="\/integrations\/github\/disconnect" class="grp-row" data-disconnect-github><input type="hidden" name="token" value="k"><span class="grp-k">GitHub<\/span><span class="grp-v">@isha-gh<\/span><button class="how" type="submit">Disconnect<\/button><\/form>/);
     const unlinked = await s.post("/integrations/github/disconnect", {});
     assert.match(String(unlinked.headers.location), /^\/welcome\?r=\d+$/);
     assert.match(String(unlinked.headers["set-cookie"]), /^tira_session=; /);
     assert.equal(githubAuth("isha-gh", s.env), undefined);
-    assert.equal((await s.http("GET", "/")).headers.location, "/welcome");
-    await s.signInWithGitHub();
-    assert.equal(await s.flash(await s.post("/integrations/people", { do: "remove", login: "isha-gh" })), "Nothing changed.");
-    assert.equal(access(s.env).admin, "isha-gh");
+    assert.equal(await to("/"), "/welcome");
   } finally {
     await s.done();
     rmSync(home, { recursive: true, force: true });
@@ -1253,11 +1283,12 @@ test("+ New project: its own page, name it and connect its repo (Jira optional),
     // Project settings: its id, which never changes, and its tickets' keys; the team, and the admin adds people here
     const settings = (await s.http("GET", "/integrations?w=mobile")).body;
     assert.match(settings, /<span class="grp-k">Project id<\/span><code class="grp-v" data-project-id>mobile<\/code><\/div><div class="grp-foot">The id never changes: it(?:'|&#39;)s in the project(?:'|&#39;)s address and its tickets(?:'|&#39;) keys \(<code>TIRA_MOBILE_1<\/code>, …\)\./);
-    assert.match(settings, /<section class="grp" id="team" data-int="team">[^]*?<div class="grp-row"><span class="grp-k">isha-gh<\/span><span class="pill">Admin<\/span><\/div>[^]*?<form method="post" action="\/integrations\/people\?w=mobile" class="grp-row" data-team-add>/);
-    const added = await s.post("/integrations/people?w=mobile", { do: "add", login: "devansh", back: "/integrations" });
-    assert.match(String(added.headers.location), /^\/integrations\?r=\d+&w=mobile$/); // back to Project settings, not Account settings
-    assert.equal(await s.flash(added), "Added devansh: they can sign in with GitHub now.");
-    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<div class="grp-row" data-team-member><span class="grp-k">devansh<\/span><span class="grp-v">Can sign in<\/span><\/div>/);
+    // whoever made it is its admin, and adds people here
+    assert.match(settings, /<section class="grp" id="team" data-int="team">[^]*?<div class="grp-row" data-team-admin><span class="grp-k">isha-gh \(you\)<\/span><span class="pill">Admin<\/span>[^]*?<form method="post" action="\/integrations\/people\?w=mobile" class="grp-row" data-team-add>/);
+    const added = await s.post("/integrations/people?w=mobile", { do: "add", login: "devansh" });
+    assert.match(String(added.headers.location), /^\/integrations\?r=\d+&w=mobile$/); // back to Project settings
+    assert.equal(await s.flash(added), "Added devansh: they see this project once they sign up with GitHub.");
+    assert.match((await s.http("GET", "/integrations?w=mobile")).body, /<div class="grp-row" data-team-member><span class="grp-k">devansh<\/span><span class="grp-v">Not signed up yet<\/span><form method="post" action="\/integrations\/people\?w=mobile" class="inline"><input type="hidden" name="token" value="k"><input type="hidden" name="do" value="admin"><input type="hidden" name="login" value="devansh"><button class="how" type="submit">Make admin<\/button><\/form>/);
   } finally {
     await s.done();
   }
@@ -1276,14 +1307,15 @@ test("Settings, after GitHub's: Account settings (yours) and Project settings (t
     assert.match(page, /<input class="view-radio" type="checkbox" id="side-shut" aria-label="Hide the sidebar" data-remember="tira-side-shut"><main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Account settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
     assert.match(project, /<main class="settings-page" data-settings><label class="side-toggle" for="side-shut" title="Hide or show the sidebar" data-side-toggle><svg[^]*?<\/svg><\/label><nav class="set-nav" aria-label="Project settings"><a class="brand" href="\/" title="Home: the board" data-home>/);
     const nav = (p: string) => [...p.matchAll(/<a class="set-link" href="#(\w+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    // yours: you and your accounts in one list, then Setup and People, Appearance last, on the page
-    // in that order; each page a readable column (Apple's settings), never stretched across the window
-    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["people", "People"], ["appearance", "Appearance"]]);
+    // yours: you and your accounts in one list, then Setup, Appearance last (Removed accounts, for
+    // the owner, before it), on the page in that order; each page a readable column (Apple's
+    // settings), never stretched across the window
+    assert.deepEqual(nav(page), [["account", "Account"], ["setup", "Setup"], ["appearance", "Appearance"]]);
     const at = (id: string) => page.indexOf(`data-int="${id}"`);
-    assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("people") && at("people") < at("appearance"), "Account, Setup, People, then Appearance");
+    assert.ok(at("account") > 0 && at("account") < at("setup") && at("setup") < at("appearance"), "Account, Setup, then Appearance");
     assert.match(page, /\.settings-page \.set-main>\*\{width:100%;max-width:720px;margin-inline:auto\}/);
     assert.deepEqual(nav(project), [["general", "General"], ["team", "Team"], ["github", "GitHub"], ["jira", "Jira"], ["sync", "Sync"], ["agents", "Connect agents"], ["delete", "Delete"]]);
-    for (const [p, ids] of [[page, ["account", "setup", "people", "appearance"]], [project, ["general", "team", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
+    for (const [p, ids] of [[page, ["account", "setup", "appearance"]], [project, ["general", "team", "github", "jira", "sync", "agents", "delete"]]] as const) for (const id of ids) assert.match(p, new RegExp(`id="${id}"`), id); // each link lands on its section
     assert.doesNotMatch(page + project, /← the board|How to make these apps<\/summary>/); // the mark is the way back; the how-to is in Help
     // the profile, as GitHub and Jira show one: a picture (its initial), the name, what it is
     assert.match(page, /<div class="profile" data-profile-card><span class="av av-lg">I<\/span><span class="pf-who"><b>isha<\/b><span>the name tira serve was started with<\/span><\/span><\/div>/);

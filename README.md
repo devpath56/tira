@@ -70,7 +70,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 941 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 949 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -156,8 +156,9 @@ it up, with Neon as the example: [`docs/hosted-postgres.md`](docs/hosted-postgre
   machine needs TLS: `sslmode=verify-full` (or at least `require`). tira never prints it.
 - **`$TIRA_SCHEMA`** (or `?schema=NAME` on the string) picks a schema in that database, default
   `tira`: a demo or a trial gets its own, and they never touch each other.
-- **People's accounts** live there too, beside the log (Isha, 2026-10-22): who may sign in,
-  each person's GitHub and Jira links, sessions (as hashes), display names and tira's app keys,
+- **People's accounts** live there too, beside the log (Isha, 2026-10-22): each project's
+  people, each person's GitHub and Jira links and email, sessions (as hashes), display names,
+  removed accounts and tira's app keys,
   shared by everyone who runs `tira serve` on that database. Every token and secret is sealed
   (AES-256-GCM) with **`$TIRA_SECRET_KEY`**, which is never stored there: the database alone signs
   no one in. Set it to a long random string, the **same on every computer** (keep it with the
@@ -682,10 +683,10 @@ Setting `TIRA_PUBLIC_URL` turns on public mode (`src/serve/public.ts`). tira the
 It won't start until it's safe. It needs:
 - `TIRA_DATABASE_URL` (Postgres, `?sslmode=require`);
 - `TIRA_SECRET_KEY` (Render makes it);
-- `TIRA_ADMIN` (the admin's GitHub login);
+- `TIRA_ADMIN` (the owner's GitHub login: tira's setup, and removing an account);
 - `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
 
-There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Sign up** and **Sign in**, both with GitHub: a sign-up is a request the admin approves in Project settings → Team (or declines), and a browser someone has signed in on offers Sign in only.
+There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Sign up** and **Sign in**, both with GitHub: anyone is in at once, and a browser someone has signed in on offers Sign in only. Each person may be admin of 5 projects here.
 
 Claude's Connectors (`src/mcp/oauth.ts`): tira is its own small OAuth server.
 - **Discovery:** `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. A call to `/mcp` without a token gets a 401 pointing at them.
@@ -703,7 +704,7 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
 **On the page: the way in.** Start `tira serve` without `--actor` and open
 `http://localhost:4747`. No commands to type:
 
-1. **Landing.** What tira does, and **Continue with GitHub** (the look of debugAssist's sign-in
+1. **Landing.** What tira does, and **Sign up** or **Sign in** with GitHub (the look of debugAssist's sign-in
    page, in tira's colours). The first time on a machine it asks for tira's GitHub app first: a
    GitHub OAuth app (Enable Device Flow ticked; no secret needed), whose Client ID you paste in.
 2. **Sign in with GitHub.** tira shows a short code (with Copy and Open GitHub); approve it on
@@ -716,15 +717,24 @@ project. tira leads and Jira mirrors; GitHub and Jira changes come in when someo
    `read:jira-work write:jira-work read:jira-user`), then pick the project, or "No Jira project".
 4. **Open the board**: Kanban, with Sync in the workspace bar.
 
-**Who gets in.** The first person to sign in becomes this tira's admin. After that only the
-admin and the people they add (by GitHub username, under People on Integrations) can sign in.
-Anyone else is told who to ask: the admin's name and email, which the admin types in there
-(kept in the private store, not in the code). Removing someone signs them out at once; their
-GitHub and Jira links stay until they unlink them themselves (Account settings).
+**Who gets in** (Isha, 2026-10-25). Anyone with GitHub signs up and is in at once. tira keeps
+the email their GitHub profile shows, or asks for one once (only they see it). Each project is
+seen only by its own people:
+- whoever makes a project is its admin;
+- its admins add people by GitHub username in Project settings → Team (they're in at once), make
+  others admin, and remove people (their agents in it stop); a project always keeps an admin;
+- your username is in Account settings, with your profile (`/u/<username>`), to send to an admin;
+- someone who isn't in a project finds no such project, and lands on their own list (`/projects`).
+
+The first person to sign in (or `TIRA_ADMIN`) is this tira's owner: tira's setup, and **Remove
+account** in Account settings (signed out at once, can't sign in, agents stopped; their GitHub and
+Jira links stay until they unlink them). The owner sees no one's projects for it. A project from
+before has whoever made it as its admin (else the owner), and the people everyone had then as
+members, until its team is first changed.
 
 Until someone signs in, every page leads to the landing and nothing can be changed. Later
-changes (another repo, Jira, Sync) are in **Project settings** in the sidebar (your accounts and
-who gets in, in **Account settings**), where each choice
+changes (another repo, Jira, Sync, the team) are in **Project settings** in the sidebar (your
+accounts, in **Account settings**), where each choice
 shows its `tira link` command under **Show the command**. `tira serve --actor NAME` still runs
 without sign-in, as NAME, until GitHub sign-in is set up.
 

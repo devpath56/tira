@@ -41,9 +41,10 @@ import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPay
 import { commitsOf, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { access, appKeys, atlassianAuth, displayName, importAccountsFile, postgresAccounts, refreshAccounts, sessionLogin } from "../sync/credentials.ts";
+import { appKeys, atlassianAuth, displayName, emailOf, importAccountsFile, isBlocked, postgresAccounts, refreshAccounts, saveProject, sessionLogin } from "../sync/credentials.ts";
 import { projectName } from "../sync/jira.ts";
-import { accounts, cookieOf, integrationRoutes, KNOWN_COOKIE, NEXT_COOKIE, whoIs, type Outside } from "./integrations.ts";
+import { accounts, cookieOf, integrationRoutes, KNOWN_COOKIE, NEXT_COOKIE, whoIs, type MyProject, type Outside } from "./integrations.ts";
+import { everyone, inProject, isProjectAdmin, makers, MAX_PROJECTS, projectPeople } from "./team.ts";
 import { newProjectPage, type NewProject } from "./new-project.ts";
 import { consentCsp, CSP } from "./csp.ts";
 import { consentPage } from "./welcome.ts";
@@ -675,6 +676,25 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const r = fold(events, opts.registry);
     return { events, r, hash: fingerprint(r) };
   };
+  // a project's people (src/serve/team.ts): as saved, else whoever made it and the people from before
+  const peopleNow = async (stream: string) => {
+    const [first] = await opts.store.readStream(stream, { limit: 1 });
+    return projectPeople(stream, first?.metadata.actor, linkEnv);
+  };
+  // every live project, by name as people see it (the switcher's list; home: the one tira opened on,
+  // even before anything is in it), and the ones someone is in
+  const projectsNow = async (current: string, home = true) => {
+    const all = await opts.store.readAll();
+    const list = workspaceList(fold(all, opts.registry), [...(home ? [opts.stream] : []), ...all.map((e) => e.stream)], opts.stream, current);
+    return { list, by: makers(all) };
+  };
+  const projectsOf = async (login: string, current = opts.stream, home = true): Promise<(MyProject & { entry: ReturnType<typeof workspaceList>[number] })[]> => {
+    const { list, by } = await projectsNow(current, home);
+    return list.flatMap((w) => {
+      const p = projectPeople(w.stream, by.get(w.stream), linkEnv);
+      return inProject(p, login) ? [{ stream: w.stream, ...(w.title ? { title: w.title } : {}), href: w.href, admin: isProjectAdmin(p, login), tasks: w.tasks, open: w.open, entry: w }] : [];
+    });
+  };
   // at a public address: browsers keep to https, and cookies go over https only
   const send = (res: ServerResponse, status: number, type: string, body: string, extra: Record<string, string> = {}) => {
     const cookie = extra["Set-Cookie"];
@@ -723,9 +743,12 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     send(res, 200, "application/json; charset=utf-8", JSON.stringify(taskIndex(r, ws.stream)));
   };
 
-  // GET /api/workspaces: the switcher's list, read when it opens (every stream, folded once)
-  const workspaces = async (_req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
+  // GET /api/workspaces: the switcher's list, read when it opens (every stream, folded once): the
+  // projects you're in, once people sign in
+  const workspaces = async (req: IncomingMessage, res: ServerResponse, _url: URL, _host: string, ws: Workspace) => {
     if (signedOut(res)) return;
+    const login = who(req).login;
+    if (login) return send(res, 200, "application/json; charset=utf-8", JSON.stringify((await projectsOf(login, ws.stream, false)).map((p) => p.entry)));
     const all = await opts.store.readAll();
     send(res, 200, "application/json; charset=utf-8", JSON.stringify(workspaceList(fold(all, opts.registry), all.map((e) => e.stream), opts.stream, ws.stream)));
   };
@@ -931,11 +954,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     }
   };
 
-  // Who a ticket can be assigned to: the project's people (this tira's admin and members, and
-  // whoever is acting) and its connected agents (Project settings → Connect agents).
+  // Who a ticket can be assigned to: the project's people (its admins and members, and whoever is
+  // acting) and its connected agents (Project settings → Connect agents).
   const assignees = async (stream: string, actor: string | undefined): Promise<{ people: string[]; agents: string[] }> => {
-    const a = access(linkEnv);
-    const people = [...new Set([a.admin, ...(a.members ?? []), actor].filter((x): x is string => typeof x === "string" && x !== ""))];
+    const people = [...new Set([...everyone(await peopleNow(stream)), actor].filter((x): x is string => typeof x === "string" && x !== ""))];
     const tokens = opts.links?.agentTokens ?? agentTokensFor(linkEnv);
     const agents = tokens ? (await tokens.list(stream)).map((x) => x.agent) : [];
     return { people, agents };
@@ -1080,6 +1102,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (!REPO.test(repo)) return { problem: [400, "repo", `${repo || "That"} isn't a GitHub repo as owner/name.`] };
     const site = key !== "" && login ? atlassianAuth(login, acc.env)?.site : undefined;
     if (key !== "" && (!JIRA_PROJECT.test(key) || !site)) return { problem: [400, "jira", "Pick a Jira project from your connected site, or none for now."] };
+    // at a public address, a few projects each (the free database stays small)
+    if (opts.site && login && (await projectsOf(login)).filter((p) => p.admin).length >= MAX_PROJECTS) {
+      return { problem: [409, "who", `You're the admin of ${MAX_PROJECTS} projects already, the most each person can have here: delete one to make another.`] };
+    }
     const before = await opts.store.readStream(at.stream);
     if (before.length === 0) {
       const clash = await nameTaken(name);
@@ -1116,7 +1142,12 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if ("problem" in checked) return again(...checked.problem);
     const { at, site, actor: by } = checked;
     const jiraName = site ? await projectName(acc.jiraOf(me.login, { version: 0, jira_site: site }), key) : undefined;
+    // whoever makes it is its admin (Isha, 2026-10-25): its people first, so no one else can claim it
+    // meanwhile; given back if the project isn't made after all
+    const login = me.login;
+    if (login && !(await saveProject(at.stream, (p) => (p ? undefined : { admins: [login], members: [] }), linkEnv))) return again(409, "name", `Another project is already called ${name}: name this one differently.`);
     const w = (await dispatcher.submit({ stream: at.stream, kind: "create", entity: { type: WORKSPACE, id: WORKSPACE_ID, version: 1 }, actor: by, payload: newLink(repo, site, key, jiraName) })).result;
+    if (w.status !== "appended" && login) await saveProject(at.stream, () => ({ admins: [], members: [] }), linkEnv);
     if (w.status !== "appended") return again(400, "name", `${name} wasn't created (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).`);
     const made = site ? `Created ${name}, linked to GitHub ${repo} and Jira ${jiraName ?? key}. Sync from here.` : `Created ${name}, linked to GitHub ${repo}. Add its Jira project, or sync, from here.`;
     const k = flashKey();
@@ -1140,6 +1171,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const stay = (why: string) => go({ ok: false, text: why }, (k) => withQ(`/integrations?r=${k}`, ws.q));
     const actor = actorNow();
     if (actor === undefined) return stay("Sign in with GitHub first, so tira knows who deletes it. Nothing was deleted.");
+    const login = who(req).login;
+    if (login && !isProjectAdmin(await peopleNow(ws.stream), login)) return stay("Only this project's admins can delete it. Nothing was deleted.");
     if (ws.stream === opts.stream) return stay("This is the project tira serve was started with: it can't be deleted here. Nothing was deleted.");
     const { r } = await now(ws.stream);
     const link = workspaceOf(r, ws.stream);
@@ -1165,6 +1198,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     };
     const actor = actorNow();
     if (actor === undefined) return done({ ok: false, text: "Sign in with GitHub first, so tira knows who renames it." });
+    const login = who(req).login;
+    if (login && !isProjectAdmin(await peopleNow(ws.stream), login)) return done({ ok: false, text: "Only this project's admins can rename it." });
     const title = (form.get("title") ?? "").trim().replace(/\s+/g, " ");
     if (!TITLE.test(title)) return done({ ok: false, text: "A project's name is 1 to 80 characters, with no control characters." });
     const all = await opts.store.readAll();
@@ -1185,7 +1220,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const wsNow = (): Workspace => current.getStore()?.ws ?? { stream: opts.stream, q: "" };
   const integrations = integrationRoutes({
     store: opts.store, registry: opts.registry, get stream() { return wsNow().stream; }, home: opts.stream, token, ...(opts.actor !== undefined ? { fallbackActor: opts.actor } : {}), dispatcher, outside: opts.links, ...(opts.site ? { site: opts.site } : {}),
-    now: async () => ({ r: (await now(wsNow().stream)).r }), formOf,
+    now: async () => ({ r: (await now(wsNow().stream)).r }), formOf, people: peopleNow, projectsOf: (login) => projectsOf(login),
     send: (res, status, type, body, extra = {}) => {
       const q = wsNow().q;
       const at = extra.Location;
@@ -1252,14 +1287,12 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (answer) await answer();
     return answer !== undefined;
   };
-  // the person's side: approving Claude's connection, signed in with GitHub
-  const projectsNow = async (current: string) => {
-    const all = await opts.store.readAll();
-    return workspaceList(fold(all, opts.registry), [opts.stream, ...all.map((e) => e.stream)], opts.stream, current).map((w) => ({ stream: w.stream, ...(w.title ? { title: w.title } : {}) }));
-  };
+  // the person's side: approving Claude's connection, signed in with GitHub, to one of their projects
+  const connectable = async (login: string, current: string) => (await projectsOf(login, current)).map((p) => ({ stream: p.stream, ...(p.title ? { title: p.title } : {}) }));
   const consent = async (res: ServerResponse, login: string, asking: Asking, current: string, status = 200, flash?: { ok: boolean; text: string }) => {
     const fields = { client_id: asking.client_id, redirect_uri: asking.redirect_uri, ...(asking.state ? { state: asking.state } : {}), code_challenge: asking.challenge };
-    const body = consentPage({ token, login, fields, projects: await projectsNow(current), project: current, agent: "claude", ...(flash ? { flash } : {}) });
+    const projects = await connectable(login, current);
+    const body = consentPage({ token, login, fields, projects, project: projects.some((p) => p.stream === current) ? current : projects[0]?.stream ?? current, agent: "claude", ...(flash ? { flash } : {}) });
     send(res, status, html, body, { "Content-Security-Policy": consentCsp(asking.redirect_uri), "Set-Cookie": `${NEXT_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0` });
   };
   const authorizeGet = async (req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
@@ -1289,8 +1322,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (form.get("decision") !== "allow") return send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { error: "access_denied", error_description: "the person didn't allow it", ...state }) });
     const project = form.get("project") ?? "";
     const agent = (form.get("agent") ?? "").trim();
-    const known = (await projectsNow(ws.stream)).some((p) => p.stream === project);
-    const why = known ? agentNameProblem(agent) : "Pick one of this tira's projects.";
+    const known = (await connectable(login, ws.stream)).some((p) => p.stream === project);
+    const why = known ? agentNameProblem(agent) : "Pick one of your projects.";
     if (why) return consent(res, login, asking, ws.stream, 422, { ok: false, text: why });
     const code = codes.issue(asking, { project, agent, login });
     send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { code, ...state, iss: opts.site.origin }) });
@@ -1298,7 +1331,23 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
 
   const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
-  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref) });
+  // an agent works while the person who connected it is still in its project and not removed (once
+  // people sign in: before that, there's no one to check)
+  const stillIn = async (agent: { project: string; createdBy: string }) => {
+    if (!appKeys(linkEnv).github) return true;
+    await accountsNow();
+    return !isBlocked(agent.createdBy, linkEnv) && inProject(await peopleNow(agent.project), agent.createdBy);
+  };
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), stillIn, commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref) });
+  // The pages that are yours, not a project's: signing in, your settings and profile, your project
+  // list and making a project, approving Claude. Every other page is its project's, and only its
+  // people get it (src/serve/team.ts); anyone else finds no such project.
+  const YOURS = new Set(["GET /welcome", "GET /settings", "GET /u", "GET /projects", "GET /projects/new", "POST /projects", "GET /oauth/authorize", "POST /oauth/authorize", "GET /api/workspaces",
+    "GET /signup/email", "POST /signup/email", "POST /integrations/setup", "POST /integrations/setup/reveal", "POST /integrations/profile", "POST /integrations/accounts", "POST /integrations/github/disconnect",
+    "GET /integrations/jira/connect", "GET /integrations/jira/callback", "POST /integrations/jira/site", "POST /integrations/jira/disconnect",
+    "POST /signin/start", "GET /signin/start", "GET /signin/code", "GET /signin/github/callback", "POST /signin/poll", "POST /signout"]);
+  // pages someone with no email yet may still open (else they give one first)
+  const BEFORE_EMAIL = new Set(["GET /welcome", "GET /signup/email", "GET /signin/start", "GET /signin/code", "GET /signin/github/callback"]);
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? "";
     if (req.method === "GET" && req.url === "/healthz") return send(res, 200, text, "ok\n"); // the host's check that tira is up: says nothing else
@@ -1308,7 +1357,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (await oauthMachine(req, res, url)) return; // Claude's servers, signing a connector in
     const asset = req.method === "GET" ? ASSETS[url.pathname] : undefined;
     if (asset !== undefined) return send(res, 200, "text/javascript; charset=utf-8", asset);
-    const route = routes[`${req.method} ${url.pathname}`];
+    const key = `${req.method} ${/^\/u\/[^/]+$/.test(url.pathname) ? "/u" : url.pathname}`; // a profile: /u/<username>
+    const route = routes[key];
     if (!route) return send(res, 404, text, "not found\n");
     if (route !== liveSeq) await accountsNow(); // the live check reads no one's account
     const ws = workspaceIn(url, opts.stream);
@@ -1316,6 +1366,11 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const me = who(req);
     // someone signed in on this browser: from now on its landing offers Sign in only
     if (me.login && !cookieOf(req, KNOWN_COOKIE)) res.setHeader("Set-Cookie", `${KNOWN_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${opts.site ? "; Secure" : ""}`);
+    if (me.login && req.method === "GET" && !BEFORE_EMAIL.has(key) && !key.startsWith("GET /api/") && !emailOf(me.login, linkEnv)) return send(res, 303, text, "", { Location: "/signup/email" });
+    if (me.login && !YOURS.has(key) && !inProject(await peopleNow(ws.stream), me.login)) {
+      if (key === "GET /" && ws.q === "") return send(res, 303, text, "", { Location: withQ("/projects", url.searchParams.has("r") ? `r=${encodeURIComponent(url.searchParams.get("r") ?? "")}` : "") }); // the project tira opened on isn't yours: yours instead
+      return req.method === "GET" && !key.startsWith("GET /api/") ? send(res, 404, html, noWorkspace(ws.stream)) : send(res, 404, text, "not found\n");
+    }
     return current.run({ ...me, ws }, () => route(req, res, url, host, ws));
   };
   const server = createServer((req, res) => {

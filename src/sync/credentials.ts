@@ -9,8 +9,11 @@
 //   sessions   who each page session is: only a hash of the session id, so the store can't sign
 //              anyone in; a session lasts 30 days, like its cookie
 //   names      the name each person chose to be shown as (Account settings), by login
-//   access     who may sign in: the admin (the first person to sign in), the people the admin
-//              added, and how people reach the admin to be added
+//   emails     the email each person gave when they signed up, by login
+//   access     this tira's owner (the first person to sign in, or TIRA_ADMIN), and, from before
+//              each project had its own people, the people every project then had
+//   blocked    the accounts the owner removed: they can't sign in
+//   projects   each project's people: its admins and members (Isha, 2026-10-25)
 // and, always in this computer's file (they belong to this computer, not to the team):
 //   jira       Jira API-token logins by site (tira connect-jira, for a terminal with no browser)
 //   pageToken  the random token tira serve's forms carry, made once, so a restart doesn't
@@ -24,9 +27,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth } from "./accounts-pg.ts";
+import { PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type ProjectPeople } from "./accounts-pg.ts";
 
-export type { Access, AppKeys, AtlassianAuth, GitHubAuth } from "./accounts-pg.ts";
+export type { Access, AppKeys, AtlassianAuth, GitHubAuth, ProjectPeople } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
 export interface JiraLogin { email: string; token: string }
 
@@ -36,7 +39,9 @@ interface Stored extends Accounts {
 }
 
 type Env = Record<string, string | undefined>;
-export const tiraHome = (env: Env = process.env): string => env.TIRA_HOME ?? join(homedir(), ".config", "tira");
+// settings that name no home take the process's (in tests, a throwaway one: test/hermetic.ts)
+// before this machine's own
+export const tiraHome = (env: Env = process.env): string => env.TIRA_HOME ?? process.env.TIRA_HOME ?? join(homedir(), ".config", "tira");
 const file = (env: Env) => join(tiraHome(env), "credentials.json");
 
 function readFile(env: Env): Stored {
@@ -137,6 +142,8 @@ export async function saveAppKeys(keys: AppKeys, env: Env = process.env): Promis
 }
 
 export const githubAuth = (login: string, env: Env = process.env): GitHubAuth | undefined => read(env).github?.[login];
+// someone's login as GitHub spells it, once they've signed in here (asked in any case)
+export const knownLogin = (login: string, env: Env = process.env): string | undefined => Object.keys(read(env).github ?? {}).find((k) => k.toLowerCase() === login.toLowerCase());
 export async function saveGithubAuth(login: string, auth: GitHubAuth, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.saveGithub(login, auth);
@@ -155,7 +162,8 @@ export async function saveAtlassianAuth(login: string, auth: AtlassianAuth | und
   });
 }
 
-// who may sign in; with no admin yet, the one the server's settings name (TIRA_ADMIN), if any
+// this tira's owner and the people from before projects had their own; with no owner yet, the one
+// the server's settings name (TIRA_ADMIN), if any
 export const access = (env: Env = process.env): Access => {
   const a = read(env).access ?? {};
   const named = env.TIRA_ADMIN?.trim();
@@ -170,15 +178,55 @@ export async function saveAccess(change: (a: Access) => Access, env: Env = proce
     s.access = next;
   });
 }
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-export const isAdmin = (a: Access, login: string): boolean => a.admin !== undefined && same(a.admin, login);
-// someone who signed up and waits for the admin to approve them
-export const hasAsked = (a: Access, login: string): boolean => (a.requests ?? []).some((r) => same(r, login));
-// anyone, until there is an admin (the first to sign in becomes it); then the admin and the people they added
-export const mayEnter = (a: Access, login: string): boolean => a.admin === undefined || isAdmin(a, login) || (a.members ?? []).some((m) => same(m, login));
+export const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+// this tira's owner: its setup (tira's own apps), and removing accounts; never anyone's projects
+export const isOwner = (a: Access, login: string): boolean => a.admin !== undefined && same(a.admin, login);
 
-// someone the admin removed: signed out everywhere, at once. Their GitHub and Jira links stay until
-// they unlink them themselves (Isha, 2026-10-22); they can't sign in meanwhile (mayEnter).
+// Anyone with GitHub signs in (Isha, 2026-10-25), but for an account the owner removed.
+export const isBlocked = (login: string, env: Env = process.env): boolean => (read(env).blocked ?? []).some((b) => same(b, login));
+export const blockedNow = (env: Env = process.env): string[] => read(env).blocked ?? [];
+export async function block(login: string, by: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.block(login, by);
+  update(env, (s) => { if (!(s.blocked ?? []).some((b) => same(b, login))) s.blocked = [...(s.blocked ?? []), login]; });
+}
+export async function unblock(login: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.unblock(login);
+  update(env, (s) => { s.blocked = (s.blocked ?? []).filter((b) => !same(b, login)); });
+}
+
+// the email someone gave
+export const emailOf = (login: string, env: Env = process.env): string | undefined => read(env).emails?.[login];
+export async function saveEmail(login: string, email: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.saveEmail(login, email);
+  update(env, (s) => { s.emails = { ...(s.emails ?? {}), [login]: email }; });
+}
+
+// Each project's people, as saved (a project made before projects had their own has none saved:
+// src/serve/team.ts works them out), and a change to one project's, made as one: change gets them
+// as they are (undefined: none saved) and returns them as they're to be, or undefined to leave them.
+// No one at all: none saved. True when they were written.
+export const savedProjects = (env: Env = process.env): Record<string, ProjectPeople> => read(env).projects ?? {};
+export async function saveProject(stream: string, change: (p: ProjectPeople | undefined) => ProjectPeople | undefined, env: Env = process.env): Promise<boolean> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.saveProject(stream, change);
+  let wrote = false;
+  update(env, (s) => {
+    const all = { ...(s.projects ?? {}) };
+    const next = change(all[stream]);
+    if (next === undefined) return;
+    wrote = true;
+    if (next.admins.length === 0 && next.members.length === 0) delete all[stream];
+    else all[stream] = { admins: [...next.admins], members: [...next.members] };
+    s.projects = all;
+  });
+  return wrote;
+}
+
+// someone the owner removed: signed out everywhere, at once. Their GitHub and Jira links stay until
+// they unlink them themselves (Isha, 2026-10-22); they can't sign in meanwhile (isBlocked).
 export async function signOutEverywhere(login: string, env: Env = process.env): Promise<void> {
   const pg = postgresAccounts(env);
   if (pg) return pg.signOutEverywhere(login);

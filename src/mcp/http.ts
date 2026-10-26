@@ -26,6 +26,7 @@ const MAX_BODY = 1024 * 1024; // a tool call is a few hundred bytes
 
 export const NO_TOKEN = "tira needs this agent's token: send Authorization: Bearer <token>, made in Project settings → Connect agents.";
 export const NOT_CONNECTED = "This token isn't connected: it was revoked, or wasn't made by this tira. Connect the agent again in Project settings → Connect agents.";
+export const NOT_IN_PROJECT = "The person who connected this agent isn't in its project any more (or their account was removed), so it stops here. Someone in the project can connect it again in Project settings → Connect agents.";
 
 // A refusal an MCP client can show: a JSON-RPC error that answers no request in particular.
 function refuse(res: ServerResponse, status: number, message: string, extra: Record<string, string> = {}) {
@@ -45,8 +46,10 @@ function webRequest(req: IncomingMessage, url: URL): Request {
 // proofFor: check a commit or pull request named as proof, and keep it for the task. Both as the
 // agent's own (on GitHub, as the person who connected it).
 // site: tira's public address, where Claude's connectors sign in (src/mcp/oauth.ts)
+// stillIn: whether the person who connected an agent is still in its project (src/serve/team.ts)
 export interface McpHttp {
   store: EventStore; registry: Registry; tokens: () => AgentTokens | undefined; site?: PublicSite
+  stillIn?: (agent: AgentToken) => Promise<boolean>
   commitsFor?: (agent: AgentToken, task: string) => Promise<string | undefined>
   proofFor?: (agent: AgentToken, task: string, ref: string) => Promise<{ ref: string } | { why: string }>
 }
@@ -73,6 +76,7 @@ export function mcpRoute(o: McpHttp): McpRoute {
     // at a public address, the way to sign in: where tira's OAuth metadata is
     const challenge = o.site ? `Bearer resource_metadata="${resourceMetadataUrl(o.site.origin)}"` : 'Bearer realm="tira"';
     if (token === undefined || !agent) return refuse(res, 401, token === undefined ? NO_TOKEN : NOT_CONNECTED, { "WWW-Authenticate": challenge });
+    if (o.stillIn && !(await o.stillIn(agent))) return refuse(res, 403, NOT_IN_PROJECT);
     await tokens.used(agent.id);
     const answer = await handler.fetch(webRequest(req, url), { authInfo: { token, clientId: agent.agent, scopes: [], extra: { agent } } });
     res.writeHead(answer.status, { ...Object.fromEntries(answer.headers), "X-Content-Type-Options": "nosniff" });
