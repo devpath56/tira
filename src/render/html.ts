@@ -1524,15 +1524,19 @@ function attentionHtml(nodes: Placed[], events: readonly StoredEvent[], stream: 
 
 // ---------- board ----------
 
-// Kanban: every ticket in its status column, named by its ticket's title (else its id). A card
-// names its parent only when the board's cards sit under more than one: under a single parent the
-// line would say the same thing on every card (Isha, 2026-10-26). Work found while working on
-// another task carries a small branch mark, its words in the tooltip. A parent no one has
-// acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
-// started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
-// task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
-// Live, cards drag between columns (drag.mjs): the board carries what each move means under
-// today's rules (`moves`, from the server) and each status column its state.
+// a card's blocks links: what it blocks, and what blocks it
+function cardLinksHtml(r: TreeRow, idOf: ReadonlyMap<string, string>, links: Links): string {
+  const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
+  const by = links.blockedBy.get(r.key);
+  const blocking = blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "";
+  return blocking + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
+}
+// work found while working on another task: a small branch mark, the task's name in its tooltip
+function foundMark(r: TreeRow, nameAt: ReadonlyMap<string, string>): string {
+  if (!r.discoveredDuring) return "";
+  const during = esc(nameAt.get(r.discoveredDuring) ?? bare(r.discoveredDuring));
+  return `<span class="found" data-found title="Found while working on ${during}" aria-label="Found while working on ${during}">${ICON.found}</span>`;
+}
 // One Kanban card: its key and the cursor, its parent's line (when shown), its name, then its
 // subtasks, found mark, blocks links, Jira key, who moved it last and its history's length.
 interface CardCtx { idOf: ReadonlyMap<string, string>; nameAt: ReadonlyMap<string, string>; parentsShown: boolean; trail: Map<string, TrailEntry[]>; links: Links; changed: ReadonlySet<string>; ext: Ext }
@@ -1544,12 +1548,8 @@ function cardHtml(n: Placed, c: CardCtx): string {
   const above = n.parent ? nameAt.get(n.parent.row.key) ?? n.parent.row.id : "";
   const parent = n.parent && parentsShown ? `<div class="par" data-card-parent title="${esc(above)}">${esc(above)}</div>` : "";
   const kids = r.children.length === 0 ? "" : `<span class="chip" data-subtasks>${r.children.filter((k) => CLOSED.has(k.state)).length}/${r.children.length} subtasks</span>`;
-  const during = r.discoveredDuring ? nameAt.get(r.discoveredDuring) ?? bare(r.discoveredDuring) : "";
-  const found = r.discoveredDuring ? `<span class="found" data-found title="Found while working on ${esc(during)}" aria-label="Found while working on ${esc(during)}">${ICON.found}</span>` : "";
-  const blocks = (links.blocks.get(r.key) ?? []).map((k) => idOf.get(k) ?? bare(k));
-  const by = links.blockedBy.get(r.key);
-  const link = (blocks.length > 0 ? `<span class="chip blocks" data-blocks>${ICON.ban}blocks ${esc(blocks.join(", "))}</span>` : "")
-    + (by === undefined ? "" : `<span class="chip blocks">blocked by ${esc(idOf.get(by) ?? bare(by))}</span>`);
+  const found = foundMark(r, nameAt);
+  const link = cardLinksHtml(r, idOf, links);
   const last = (trail.get(r.key) ?? []).filter((x) => !x.refused).at(-1)?.actor;
   const key = ext.keys.get(r.id);
   const keyMark = key ? `<span class="tkey" data-ticket-key>${esc(key)}</span>` : "";
@@ -1560,6 +1560,15 @@ function cardHtml(n: Placed, c: CardCtx): string {
   return `<a class="${cls}" href="#t${n.i}" data-card-key="${esc(r.key)}" data-state="${esc(r.state)}">${keyMark}${pin}${parent}${named}`
     + `<div class="row">${kids}${found}${link}${jiraChip(ext, r.id)}${last ? whoBadge(last) : ""}<span class="hist" title="history">${ICON.history}${lines}</span></div></a>`;
 }
+// Kanban: every ticket in its status column, named by its ticket's title (else its id). A card
+// names its parent only when the board's cards sit under more than one: under a single parent the
+// line would say the same thing on every card (Isha, 2026-10-26). Work found while working on
+// another task carries a small branch mark, its words in the tooltip. A parent no one has
+// acted on (to do, with subtasks: a grouping, like an epic) stays on the Graph; once it is
+// started, blocked or closed it is a card too, saying how many of its subtasks are closed. So a
+// task blocked on a new ticket keeps its card (in Blocked), beside the ticket's.
+// Live, cards drag between columns (drag.mjs): the board carries what each move means under
+// today's rules (`moves`, from the server) and each status column its state.
 function boardHtml(nodes: Placed[], trail: Map<string, TrailEntry[]>, links: Links, ghosts: Ghost[], changed: ReadonlySet<string>, ext: Ext, moves?: Record<string, string>): string {
   const idOf = new Map(nodes.map((n) => [n.row.key, n.row.id]));
   // when a closed task last moved (its newest entry that wasn't refused): Done and Dropped are newest first
