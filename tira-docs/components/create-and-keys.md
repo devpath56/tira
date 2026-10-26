@@ -11,7 +11,7 @@ bragging the keys as it goes.
 - **+ Create** beside History (with its key, C): a composer, after Linear's New issue (Isha,
   2026-10-26: "modern, impressive and elegant"). On top the project and "New task"; the task's
   name large; a description under it; then its properties as pills: To do (where every task
-  starts), Assignee (people, then agents), Estimate (30m to 1w) and Parent (only when it belongs
+  starts), Assignee (people, then agents), Effort (a number, and h or d: no preset sizes) and Parent (only when it belongs
   under an open task; nothing to read first). Each pill opens a menu of its own (as Linear's, not the
   browser's): "No assignee" and the like first, a tick on what's picked, arrows, Enter and Esc; the
   pill shows its name until something's picked, and never offers its name as a choice. **Keep open for the next one** keeps it open for the next one (Linear's Create more, Jira's Create another),
@@ -22,8 +22,9 @@ bragging the keys as it goes.
   first-task step.
 - **The open ticket**, in the same style: a header bar with where it sits, then its work (the title
   large, the description and steps without boxes, subtasks, comments with the button inside the
-  box, history) beside a tinted sidebar of properties as rows of label and value, the status with
-  what it allows, and the assignee and estimate as pills.
+  box, history) beside a tinted sidebar of properties as rows of label and value: the status as a
+  pill with its colour, what it allows in one row under it (the first move lit), the assignee as a
+  pill, and the effort as a number with h or d.
 - **Keys** (`keys.mjs`): C creates; / searches (as ⌘K); J and K move between tasks and Enter
   opens one; in an open task S starts it, E completes it (with proof) and B blocks it, by the same
   buttons the task has; G then S opens Project settings; ? lists them all (Help → Keyboard

@@ -893,7 +893,8 @@ test("+ Create on the board (Isha, 2026-10-26): a task by name, at the top or un
     // properties as pills (To do, Assignee, Estimate, Parent), "Keep open for the next one" and Create task (⌘↵)
     assert.match(board, /<section class="drawer create-dialog" id="create" aria-label="Create a task" role="dialog" aria-modal="true" data-create>[^]*?<form method="post" action="\/tasks" class="composer-form" data-create-form><input type="hidden" name="token" value="k"><header class="composer-top"><span class="composer-crumb">[^]*?<b>New task<\/b><\/span>[^]*?<input class="composer-title" type="text" name="name" required maxlength="80"[^>]*placeholder="Task name"[^>]*><textarea class="composer-desc" name="description"/);
     assert.match(board, /<div class="composer-props"><span class="prop-pill is-fixed" title="Every task starts in To do"><i class="prop-dot" aria-hidden="true"><\/i>To do<\/span><label class="prop-pill" data-pill="Assignee"><svg[^]*?<\/svg><span class="prop-said">Assignee<\/span><select name="assignee" aria-label="Assignee"><option value="">No assignee<\/option><optgroup label="People">/);
-    assert.match(board, /<select name="estimate" aria-label="Estimate"><option value="">No estimate<\/option><option value="30m">30m<\/option>/);
+    // effort, not a preset: a number, in hours or days (Isha, 2026-10-26)
+    assert.match(board, /<span class="prop-pill effort-pill"><svg[^]*?<\/svg><span class="effort" data-effort><input type="number" name="estimate_n"[^>]*placeholder="Effort"[^>]*><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="create-effort-h" checked><label for="create-effort-h" title="Hours">h<\/label><input type="radio" name="estimate_u" value="d" id="create-effort-d"><label for="create-effort-d" title="Days">d<\/label>/);
     assert.doesNotMatch(board, /<option[^>]*>(?:Assignee|Estimate|Parent)<\/option>/); // a pill's name is never one of its choices
     assert.match(board, /<label class="composer-more"><input type="checkbox" name="more" value="1"><span>Keep open for the next one<\/span><\/label>[^]*?<button class="act primary composer-go" type="submit">Create task <kbd>⌘<\/kbd><kbd>↵<\/kbd><\/button>/);
     assert.match(board, /<script type="module" src="\/create\.mjs"><\/script>/);
@@ -924,7 +925,12 @@ test("+ Create on the board (Isha, 2026-10-26): a task by name, at the top or un
     assert.match(board, /<select name="parent" aria-label="Parent"><option value="">No parent<\/option>(?:<option value="[^"]+">[^<]+<\/option>)*<option value="contact_form">contact_form<\/option><option value="form_fields">form_fields<\/option><\/select>/);
     // its ticket with it: a description, an estimate; checked first, so nothing is half made
     assert.equal(await s.flash(await s.post("/tasks", { name: "contact_page", description: "Name, email, message.", estimate: "2h" })), "Created contact_page.");
-    assert.match((await s.http("GET", "/")).body, /aria-label="contact_page"[^]*?Name, email, message\.[^]*?name="estimate"[^>]*value="2h"/);
+    assert.match((await s.http("GET", "/")).body, /aria-label="contact_page"[^]*?Name, email, message\.[^]*?name="estimate_n"[^>]*value="2"[^]*?value="h"[^>]*checked/);
+    // as the page sends it: a number and its unit; 0 or nothing is no estimate
+    assert.equal(await s.flash(await s.post("/tasks", { name: "two_days", estimate_n: "2", estimate_u: "d" })), "Created two_days.");
+    assert.match((await s.http("GET", "/")).body, /aria-label="two_days"[^]*?name="estimate_n"[^>]*value="2"[^]*?value="d"[^>]*checked/);
+    assert.equal(await s.flash(await s.post("/tasks", { name: "no_size", estimate_n: "0", estimate_u: "h", description: "x" })), "Created no_size.");
+    assert.doesNotMatch((await s.http("GET", "/")).body, /aria-label="no_size"[^]*?name="estimate_n"[^>]*value="\d/);
     assert.equal(await inCreate(await s.post("/tasks", { name: "x_task", estimate: "soon" })), "x_task wasn't created: A time estimate is a number and a unit: 30m, 2h, 1d or 1w.");
     assert.ok(!flatten(streamView(fold(await s.store.readStream(S), s.registry), S).roots).some((x) => x.id === "x_task"), "nothing half made");
     // the page's script gets the answer alone; kept open, it opens again, ticked, with what happened

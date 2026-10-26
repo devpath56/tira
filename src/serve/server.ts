@@ -1022,9 +1022,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     title: (form.get("title") ?? "").trim().replaceAll(/\s+/g, " "),
     description: (form.get("description") ?? "").replaceAll("\r\n", "\n").trim(),
     steps: (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n").map((x) => x.trim()).filter((x) => x !== ""),
-    estimate: (form.get("estimate") ?? "").trim(),
+    estimate: effortAsked(form),
     assignee: (form.get("assignee") ?? "").trim(),
   });
+  // the effort as typed (Isha, 2026-10-26): a number and h or d, joined ("3h", "2d"; none or 0 clears
+  // it), else an estimate given whole, as an older page or a script sends it
+  const effortAsked = (form: URLSearchParams): string => {
+    const n = form.get("estimate_n");
+    if (n === null) return (form.get("estimate") ?? "").trim();
+    const v = n.trim();
+    return v === "" || Number(v) === 0 ? "" : `${v}${form.get("estimate_u") === "d" ? "d" : "h"}`;
+  };
   // what a ticket can't say, if anything: `allowed`, who it can be assigned to
   const assigneeProblem = (assignee: string, allowed: (string | undefined)[]) =>
     assignee !== "" && (!ASSIGNEE.test(assignee) || !allowed.includes(assignee)) ? `${assignee} isn't on this project's team or one of its agents.` : undefined;
