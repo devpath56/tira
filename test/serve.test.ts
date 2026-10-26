@@ -658,6 +658,9 @@ test("to block, the dialog asks what it waits on: a new ticket, or an open task 
     const combo = readFileSync(new URL("../src/serve/combo.mjs", import.meta.url), "utf8");
     assert.match(combo, /const hit = q === "" \|\| \(o\.dataset\.value \?\? ""\)\.toLowerCase\(\)\.includes\(q\);/);
     assert.match(combo, /\} else if \(e\.key === "Escape" && !list\.hidden\) \{\n    e\.preventDefault\(\);\n    e\.stopPropagation\(\);/);
+    // shut until asked for (Isha: "by default the drop down should not be open"): not on focus, as the dialog opens; a click on the field opens it or shuts it
+    assert.doesNotMatch(combo, /addEventListener\("focusin"/);
+    assert.match(combo, /if \(field\) \{\n    if \(listOf\(field\)\?\.hidden\) open\(field\);\n    else close\(field\);/);
     // the confirm page (no script) lists them as text
     assert.match((await s.http("GET", "/confirm?type=node&id=table&event=BLOCK")).body, /<p class="cmd-help">Open tasks it could wait on: metrics_card · fetch_metrics · improve_visual · colors · loading_state · font · filters<\/p>/);
     await s.send("loading_state", "COMPLETE", { evidenceRef: "spinner.mp4" }); // one task at a time

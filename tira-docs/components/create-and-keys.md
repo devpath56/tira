@@ -26,8 +26,9 @@ bragging the keys as it goes.
   pill with its colour, what it allows in one row under it (the first move lit), the assignee as a
   pill, and the effort as a number with h or d.
 - **Blocking a task** (B, or Block): "Blocked by" is one field with a dropdown under it
-  (`combo.mjs`): clicking or typing opens the open tasks, filtered by what's typed; the arrow keys
-  move, Enter picks, Esc closes the list but not the dialog. Typing a name that isn't there makes a
+  (`combo.mjs`), shut when the dialog opens: clicking the field, typing or the down arrow opens the
+  open tasks, filtered by what's typed; the arrow keys move, Enter picks, Esc or a second click
+  closes the list but not the dialog. A chevron in the field says there's a list. Typing a name that isn't there makes a
   new ticket, as before. Without the script it's the plain field and the list of open tasks.
 - **Keys** (`keys.mjs`): C creates; / searches (as ⌘K); J and K move between tasks and Enter
   opens one; in an open task S starts it, E completes it (with proof) and B blocks it, by the same

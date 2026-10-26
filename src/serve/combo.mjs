@@ -1,8 +1,10 @@
 // A field with a list to pick from (Isha, 2026-10-26: the Block dialog's "Blocked by", a dropdown
-// rather than a wall of chips): the list opens as the field is used, narrows to what's typed, and
-// says nothing when nothing matches (what's typed is then a new ticket's name). Arrows move, Enter
-// picks, Esc closes the list (not the dialog); a click picks too (app.mjs fills the field, as it did
-// for the chips). The dialogs come in later, so this listens on the page.
+// rather than a wall of chips): the list stays shut until it's asked for, by a click on the field,
+// typing or the down arrow (not when the dialog opens and the field has focus: Isha, "by default the
+// drop down should not be open"). It narrows to what's typed, and says nothing when nothing matches
+// (what's typed is then a new ticket's name). Arrows move, Enter picks, Esc closes the list (not the
+// dialog); a click picks too (app.mjs fills the field, as it did for the chips). The dialogs come in
+// later, so this listens on the page.
 const listOf = (input) => document.getElementById(input.getAttribute("aria-controls") ?? "");
 const comboInput = (el) => (el instanceof HTMLInputElement && el.closest("[data-combo]") ? el : null);
 const visible = (list) => [...list.querySelectorAll(".combo-opt")].filter((o) => !o.hidden);
@@ -35,10 +37,6 @@ const mark = (input, opts, i) => {
   o.scrollIntoView({ block: "nearest" });
 };
 
-document.addEventListener("focusin", (e) => {
-  const input = comboInput(e.target);
-  if (input) open(input);
-});
 document.addEventListener("input", (e) => {
   const input = comboInput(e.target);
   if (input) open(input);
@@ -70,11 +68,18 @@ document.addEventListener("keydown", (e) => {
     close(input);
   }
 }, true);
-// a click picks (app.mjs fills the field); the list then closes, and the field keeps its focus
+// a click on the field opens the list, or shuts it; a click on a task picks it (app.mjs fills the
+// field), the list then closes and the field keeps its focus
 document.addEventListener("mousedown", (e) => {
   if (e.target instanceof Element && e.target.closest(".combo-opt")) e.preventDefault();
 });
 document.addEventListener("click", (e) => {
+  const field = comboInput(e.target);
+  if (field) {
+    if (listOf(field)?.hidden) open(field);
+    else close(field);
+    return;
+  }
   const o = e.target instanceof Element ? e.target.closest(".combo-opt") : null;
   const input = o?.closest("[data-combo]")?.querySelector("input");
   if (input instanceof HTMLInputElement) close(input);
