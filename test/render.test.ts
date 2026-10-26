@@ -926,6 +926,18 @@ test("after Linear: a sidebar; the project's mark and name in the header (no 'st
   assert.match(CSS, /\.stats li\{[^}]*border-left:1px solid var\(--line\)\}/); // dividers, not boxes
 });
 
+test("the board is never wider than the screen: a phone lays it out at its own width, and the menus open inside it", () => {
+  // the glow behind the header reaches 80px past it on each side, so a 375px phone laid the page out
+  // 439px wide (and a wide screen scrolled 40px sideways); the board's main, always as wide as the
+  // screen, clips it there
+  assert.match(CSS, /\.hero::before\{[^}]*left:-80px;right:-80px;/);
+  assert.match(CSS, /\nmain\[data-stream\]\{overflow-x:clip\}\n/);
+  // between a phone (a sheet under the top bar) and the sidebar, Projects and you open under their
+  // row, lined up with the top bar's right edge: a menu hung from a button at that end ran off the screen
+  assert.match(CSS, /@media \(min-width:641px\) and \(max-width:899px\)\{main\[data-stream\]>\.top\{position:relative\}main\[data-stream\]>\.top \.ws\{position:static\}main\[data-stream\]>\.top \.ws-menu\{top:auto;left:auto;right:0;[^}]*\}\}/);
+  assert.match(CSS, /@media \(max-width:640px\)\{[^@]*\.ws-menu\{position:fixed;left:16px;right:16px;top:52px;width:auto\}/);
+});
+
 test("who moved each card, an agent told from a person; a card in progress has a turning edge; no Latest strip, no Live pill", async () => {
   const { r, events } = await scenario();
   const html = renderHtml(r, S, "h", events);
