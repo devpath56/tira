@@ -486,7 +486,16 @@ button.how{background:none;border:0;padding:0;font:inherit;font-size:13px;color:
 .confirm-dialog{width:min(1000px,calc(100vw - 32px));max-height:min(90vh,860px);padding:0;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--fg);box-shadow:var(--shadow-raised)}
 .confirm-dialog::backdrop{background:rgba(9,30,66,.54)}
 .confirm-dialog .packet{padding:20px 24px 6px}.confirm-dialog .packet h1{margin-top:0}
-.guide p{margin:0 0 12px;color:var(--fg);font-size:14px;line-height:1.6}.guide code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.guide h2{margin-bottom:6px}.guide code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.guide-intro{margin:0 0 6px;font-size:14px;line-height:1.5;color:var(--mut)}
+.guide-h{margin:16px 0 6px;font-size:13px;font-weight:600;color:var(--fg)}
+.guide-list{list-style:none;margin:0;padding:0;border-radius:12px;background:var(--panel-2)}
+.guide-list li{display:flex;align-items:flex-start;gap:12px;padding:9px 12px;font-size:14px;line-height:1.45;color:var(--mut)}
+.guide-list li+li{border-top:1px solid var(--line)}
+.guide-list li>span:last-child{display:grid;gap:1px}.guide-list li b{color:var(--fg);font-weight:600}
+.gi{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--accent-bg);color:var(--accent-text)}.gi svg{width:15px;height:15px}
+.gi .gi-next{color:var(--accent-text);font-size:13px}.gi:has(.gi-idea){width:auto;padding:0 6px}.gi .gi-idea{font-size:11px;letter-spacing:.02em;color:var(--done)}
+.guide-acts{position:sticky;bottom:-24px;display:flex;justify-content:flex-end;margin:16px -24px -24px;padding:12px 24px;background:var(--panel);border-top:1px solid var(--line)}
 .palette{position:fixed;inset:0;background:rgba(5,12,31,.36);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;z-index:50}
 .palette[hidden]{display:none}
 .pal-box{width:min(600px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-raised);overflow:hidden}
@@ -1424,11 +1433,25 @@ function logHtml(all: TrailEntry[], anomalies: FoldResult["anomalies"], others: 
 
 // How to read the page: one time and on demand (the brief), never on the worksurface.
 // Three short paragraphs, opened from the nav and from the hash chip.
-function guideHtml(dumpHash: string): string {
-  return `<section class="drawer guide" id="guide" aria-label="How to read this page" role="dialog" aria-modal="true" data-guide>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>How to read this page</h2>`
-    + `<p><b>The board.</b> Kanban puts each task in its status column. Graph shows the whole tree instead: a parent above its children, each coloured by state, and a line turns green once that child is closed; a dotted line joins a task to the one it was found while working on. ◆ marks the next task ("now" once started). "Needs attention" at the top lists what is blocked, and why, and what is being worked on. A card tagged IDEA is an idea, not a task yet: it waits in the Ideas column and, on the Graph, under the task tira proposes for it; approve its file, then where it goes, and it becomes a task.</p>`
-    + `<p><b>By tira.</b> A bolt on a parent means tira closed it: every child was done or cancelled, you moved on, and tira recorded the close under its own name, citing your move. A dashed ring means tira will close it when you move on. Click any task for its full history.</p>`
-    + `<p><b>The fingerprint.</b> The chip at the top of History is a fingerprint of everything on this page: the sha256 of the replayed log. Run <code>tira dump --hash</code> on the same log; the same value means this page shows exactly what the log says. Full value: <code>${esc(dumpHash)}</code></p></div></section>`;
+function guideHtml(tour = false): string {
+  // as Jira writes its help (Isha, 2026-10-26): to you, plainly; what each thing is in a line, and
+  // how to do something as "To …, …"
+  const row = (icon: string, term: string, line: string) => `<li><span class="gi" aria-hidden="true">${icon}</span><span><b>${term}</b>${line}</span></li>`;
+  return `<section class="drawer guide" id="guide" aria-label="Help" role="dialog" aria-modal="true" data-guide>${SCRIM}<div class="modal-box"><a class="close" href="#_" aria-label="Close">×</a><h2>Help</h2>`
+    + `<p class="guide-intro">Your board shows your project's work as tasks. Each task moves across as the work gets done.</p>`
+    + `<h3 class="guide-h">Find your way</h3><ul class="guide-list">`
+    + row(ICON.kanban, "Kanban", "Shows each task in its status column. To move a task, drag it to another column.")
+    + row(ICON.graph, "Graph", "Shows the whole tree: each task under the one it belongs to.")
+    + row(ICON.search, "Search", "To find any task, press ⌘K.")
+    + row(ICON.history, "Task details", "To see a task's details, comments and history, select it.")
+    + `</ul><h3 class="guide-h">What the marks mean</h3><ul class="guide-list">`
+    + row(`<b class="gi-next">◆</b>`, "Next", "The task to work on next.")
+    + row(ICON.alert, "Need you", "The bar at the top: tasks that are blocked, or being worked on now.")
+    + row(ICON.auto, "Closed by tira", "tira closed this task because all its subtasks are done.")
+    + row(`<b class="gi-idea">IDEA</b>`, "Idea", "A suggestion, often from an agent. To make it a task, approve it.")
+    + `</ul>`
+    + (tour ? `<div class="guide-acts"><button type="button" class="act primary" data-tour-open>Take the tour</button></div>` : "")
+    + `</div></section>`;
 }
 
 // The product mark, on every page's top bar (the confirm page's too): a link home, to the
@@ -1534,15 +1557,16 @@ function navHtml(live: RenderOptions["live"], views: [string, string][], home: s
   const search = live ? `<label class="proj-search">${ICON.search}<input type="search" placeholder="Search projects" aria-label="Search projects by name" autocomplete="off" spellcheck="false" data-project-search></label>` : "";
   const settings = live ? `<a class="side-link" href="${esc(withQ("/integrations", q))}" data-project-settings>${ICON.sliders}Project settings</a>` : "";
   const me = live?.user ?? live?.actor; // who is signed in with GitHub, else who the page acts as
-  return `${SIDE_TOGGLE}<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}`
-    + `<div class="side-foot"><a class="help" href="#guide" title="How to read this page">${ICON.help}<span>Help</span></a>${live ? "" : THEME_SWITCH}${live && me !== undefined ? profileHtml(me, live, q) : ""}</div></nav>`;
+  const welcome = live?.onboarding;
+  return `${SIDE_TOGGLE}<nav class="top" aria-label="tira">${brand(home)}${search}<div class="tabs">${tabs}</div>${settings}${live ? projectsHtml(stream, home, q, name) : ""}${welcome?.side ?? ""}`
+    + `<div class="side-foot"><a class="help" href="#guide" title="Help">${ICON.help}<span>Help</span></a>${live ? "" : THEME_SWITCH}${live && me !== undefined ? profileHtml(me, live, q) : ""}</div></nav>`;
 }
 
 // The History view's fingerprint: the sha256 of the replayed log, for whoever checks the page
 // against tira dump --hash (an audit, not a daily read).
 function fingerprintHtml(dumpHash: string, lastSeq: number): string {
   const shortHash = dumpHash.length > 16 ? `${dumpHash.slice(0, 8)}…${dumpHash.slice(-6)}` : dumpHash;
-  return `<a class="verify" href="#guide" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</a>`;
+  return `<span class="verify" title="sha256:${esc(dumpHash)}: a fingerprint of this page (compare with tira dump --hash)"><span class="vl">fingerprint</span> seq ${lastSeq} · ${esc(shortHash)}</span>`;
 }
 
 // The last action's result, under tira serve.
@@ -1560,7 +1584,9 @@ export interface RenderOptions {
   // `token`: the page's own, for its forms. `moves`: what a drag between the Kanban's columns
   // means ("node:unstarted>in_progress" → START), from today's rules (command.ts dragMoves).
   // `people` and `agents`: who a ticket can be assigned to (the project's people, its connected agents).
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string>; people?: string[]; agents?: string[] };
+  // `onboarding`: a first-time person's welcome (src/serve/onboarding.ts): the Get started checklist
+  // in the sidebar, and the tour (Help's Take the tour plays it again).
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string>; people?: string[]; agents?: string[]; onboarding?: { side: string; tour: string } };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -1652,7 +1678,7 @@ ${lanes === "" ? "" : `<section class="view view-lanes" aria-label="Lanes">${lan
 ${nodes.map((n) => drawerHtml(n, trail.get(n.row.key) ?? [], { indexOf, proof: proofs.get(n.row.key), live, q, links, rowOf, ext })).join("")}
 ${ghosts.map((g) => ideaDrawerHtml(g, trail.get(g.idea.key) ?? [], live, q)).join("")}
 ${historyHtml(`${opts.divergence !== undefined ? divergenceHtml(opts.divergence) : ""}${logHtml(all, anomalies, v.others, rejections, dumpHash, fingerprintHtml(dumpHash, v.lastSeq))}`)}
-${guideHtml(dumpHash)}
-</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}</body></html>
+${guideHtml(opts.live?.onboarding !== undefined)}
+${opts.live?.onboarding?.tour ?? ""}</main>${live ? `<script type="module" src="/app.mjs"></script>` : ""}${opts.live?.onboarding ? `<script type="module" src="/tour.mjs"></script>` : ""}</body></html>
 `;
 }

@@ -1032,6 +1032,58 @@ test("access: anyone with GitHub signs up, with an email, and is in at once; eac
   }
 });
 
+test("a first-time person's welcome on the board: an animated tour that opens by itself once per person, Take the tour to see it again, and a Get started checklist that ticks itself off; the old guide no longer pops up", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tira-home-"));
+  const s = await serving(home, null);
+  try {
+    await s.post("/integrations/setup", { github_client_id: "Iv1.gh", back: "/welcome" });
+    await s.signInWithGitHub();
+    await s.post("/connect", { repo: "acme/app" });
+    let board = (await s.http("GET", "/")).body;
+    // the tour: five scenes, greeting by GitHub's name, played by tour.mjs; it opens by itself this once
+    assert.match(board, /<div class="tour" data-tour data-auto="1" data-action="\/onboarding" hidden role="dialog" aria-modal="true" aria-labelledby="tour-t1">/);
+    assert.match(board, /<h2 id="tour-t1">Welcome to tira, Isha<\/h2>/);
+    assert.equal((board.match(/data-tour-scene/g) ?? []).length, 5);
+    for (const t of ["Your board, and the whole tree", "Done means proven", "Agents work beside you", "Bring your team"]) assert.match(board, new RegExp(`<h2 id="tour-t\\d">${t}</h2>`));
+    assert.match(board, /<script type="module" src="\/tour\.mjs"><\/script>/);
+    // Take the tour: a button in Help, as help menus have it, not another link in the sidebar
+    assert.match(board, /<div class="guide-acts"><button type="button" class="act primary" data-tour-open>Take the tour<\/button><\/div><\/div><\/section>/);
+    assert.doesNotMatch(/<nav class="top"[^]*?<\/nav>/.exec(board)?.[0] ?? "", /data-tour-open/);
+    // the checklist: the linked repo is ticked; the rest link to where they're done
+    assert.match(board, /<section class="gs" aria-label="Get started" data-get-started><div class="gs-head"><b>Get started<\/b><span class="gs-count">\d of 5<\/span>/);
+    assert.match(board, /<li class="done"><i aria-hidden="true"><\/i><span>Link your GitHub repo<\/span>/);
+    assert.match(board, /<li><i aria-hidden="true"><\/i><a href="\/integrations#agents">Connect an agent<\/a>/);
+    assert.match(board, /<li><i aria-hidden="true"><\/i><a href="\/integrations#team">Add a teammate<\/a>/);
+    // closing it, either way, is remembered on the account: not again, in this browser or another
+    assert.equal((await s.post("/onboarding", { do: "tour-seen", fragment: "1" })).status, 204);
+    board = (await s.http("GET", "/")).body;
+    assert.match(board, /<div class="tour" data-tour data-action="\/onboarding" hidden/); // still there, for Take the tour
+    await s.signInWithGitHub(); // a new session, as on another browser
+    assert.doesNotMatch((await s.http("GET", "/")).body, /data-auto="1"/);
+    // the checklist hides; finishing the tour brings it back
+    const hid = await s.post("/onboarding", { do: "hide-checklist" });
+    assert.equal(hid.headers.location, "/");
+    assert.doesNotMatch((await s.http("GET", "/")).body, /data-get-started/);
+    await s.post("/onboarding", { do: "tour-finished", fragment: "1" });
+    assert.match((await s.http("GET", "/")).body, /data-get-started/);
+    // no one signed in: nothing saved
+    s.signOut();
+    await s.post("/onboarding", { do: "hide-checklist" });
+    // the old guide opens on demand only
+    assert.doesNotMatch(readFileSync(new URL("../src/serve/app.mjs", import.meta.url), "utf8"), /tira-guide-seen|location\.hash = "#guide"/);
+  } finally {
+    await s.done();
+    rmSync(home, { recursive: true, force: true });
+  }
+  // a tira serve started with a name and no sign-in: one person, no welcome
+  const named = await serving(mkdtempSync(join(tmpdir(), "tira-home-")));
+  try {
+    assert.doesNotMatch((await named.http("GET", "/")).body, /data-tour|data-get-started/);
+  } finally {
+    await named.done();
+  }
+});
+
 test("Connect Jira through Atlassian, pick a repo and a project from lists (in Project settings, or right away for a new project), and sync: tasks and pull requests show on the board", async () => {
   const home = mkdtempSync(join(tmpdir(), "tira-home-"));
   const s = await serving(home);

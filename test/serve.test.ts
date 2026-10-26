@@ -786,7 +786,7 @@ test("attribute-escaping-total: [&<>\"'] never reaches an HTML surface raw: one 
   // browser scripts never build markup from data
   const src = srcCode();
   assert.deepEqual(filesMatching(src, /\bconst esc\b|\bfunction esc\b|\.replace\(\/\[[^\]]*[&<>"']/), ["src/render/escape.ts"]);
-  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/new-project.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
+  assert.deepEqual(filesMatching(src, /import \{ esc \} from "[./]*(?:render\/)?escape\.ts";/), ["src/render/html.ts", "src/serve/integrations.ts", "src/serve/new-project.ts", "src/serve/onboarding.ts", "src/serve/server.ts", "src/serve/welcome.ts"]);
   assert.deepEqual(filesMatching(src, /&(?:amp|quot|lt|gt|apos|#3[489]|#6[02]);/), []);
   assert.deepEqual(filesMatching(src, /innerHTML\s*\+?=\s*`[^`]*\$\{/), []);
   // total over the class, and nothing else changes
