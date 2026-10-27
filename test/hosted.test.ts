@@ -288,10 +288,17 @@ test("Claude's connector signs in: discovery, registration, the person's approva
     const settings = (await t.http("GET", "/integrations")).body;
     assert.match(settings, /<p class="grp-desc">[^<]*<\/p><\/div><\/div><div class="agent-claude" data-agent-code data-agent-connector><h3><span class="agent-icon" aria-hidden="true"><svg[^]*?<\/svg><\/span>Claude Code <span class="pill">Recommended<\/span><\/h3>[^]*?<pre class="agent-code" id="agent-connector-url">https:\/\/tira\.example\.com\/mcp<\/pre>[^]*?Customize → Connectors[^]*?<form method="post" action="\/integrations\/agents\/heard" class="agent-watch" data-agent-watch>[^]*?<input type="hidden" name="since" value="\d+">/);
     // the connector's steps, played (cplay.mjs): five, each beside a small moving picture
-    assert.deepEqual([...settings.matchAll(/<span class="cplay-t"><b>([^<]+)<\/b>/g)].map((m) => m[1]), ["Copy tira(?:'|&#39;)s address", "Open Claude → Connectors", "Add custom connector", "Connect, then approve", "Run /mcp in Claude Code"].map((x) => x.replace("(?:'|&#39;)", "&#39;")));
-    assert.equal((settings.match(/data-cplay-scene/g) ?? []).length, 5);
+    const claudeCard = /<div class="agent-claude"[^]*?<div class="agent-wake-card"/.exec(settings)?.[0] ?? "";
+    assert.deepEqual([...claudeCard.matchAll(/<span class="cplay-t"><b>([^<]+)<\/b>/g)].map((m) => m[1]), ["Copy tira(?:'|&#39;)s address", "Open Claude → Connectors", "Add custom connector", "Connect, then approve", "Run /mcp in Claude Code"].map((x) => x.replace("(?:'|&#39;)", "&#39;")));
+    // then, right under it, starting it on an @mention: its own five steps, played once you choose to set it up (Isha, 2026-10-26)
+    const wakeCard = /<div class="agent-wake-card" data-agent-wake-card>[^]*?<\/details><\/div>/.exec(settings)?.[0] ?? "";
+    assert.match(wakeCard, /Let it start when you @mention it <span class="pill">Optional<\/span>[^]*?<details class="wake-setup" data-wake-setup><summary class="act">Set it up<\/summary>/);
+    assert.deepEqual([...wakeCard.matchAll(/<span class="cplay-t"><b>([^<]+)<\/b>/g)].map((m) => m[1]), ["Open claude.ai/code/routines", "Pick your repo and tira", "Paste the prompt", "Add an API trigger", "Paste both here"]);
+    assert.doesNotMatch(wakeCard, /needs tira at a public address/); // it's at one
+    assert.equal((claudeCard.match(/data-cplay-scene/g) ?? []).length, 5);
+    assert.equal((wakeCard.match(/data-cplay-scene/g) ?? []).length, 5);
     assert.match(settings, /<script type="module" src="\/cplay\.mjs"><\/script>/);
-    assert.match(settings, /Run \/mcp in Claude Code[^]*?<summary>Claude Code with an API key, or rather the terminal\?<\/summary>[^]*?data-agent-tile="claude-code" data-agent-go>Set up by command<\/a>[^]*?<\/div><h3 class="agent-list-h">Or Cursor, VS Code<\/h3>/);
+    assert.match(settings, /Run \/mcp in Claude Code[^]*?<summary>Claude Code with an API key, or rather the terminal\?<\/summary>[^]*?data-agent-tile="claude-code" data-agent-go>Set up by command<\/a>[^]*?<\/div><div class="agent-wake-card" data-agent-wake-card>[^]*?<h3 class="agent-list-h">Or Cursor, VS Code<\/h3>/);
     // the watch: nothing to say until an agent connected since then has called; then green
     const since = Date.now();
     assert.equal((await t.form("/integrations/agents/heard", { since: String(since), fragment: "1" })).body, "");

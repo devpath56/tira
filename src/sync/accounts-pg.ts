@@ -56,6 +56,11 @@ export interface Invite { stream: string; login: string; by: string; at: string 
 // a note to whoever invited someone (Isha, 2026-10-26): they accepted or declined; to: the one who
 // invited them; who: the one invited; at: when (ISO). One per invite: a later answer replaces it.
 export interface Note { to: string; stream: string; who: string; did: "accepted" | "declined"; at: string }
+// an agent that starts when it's @mentioned (Isha, 2026-10-26): its Claude Code routine's address
+// and token (sealed here), for one project and agent; by: who set it up
+export interface Wake { stream: string; agent: string; url: string; token: string; by: string; at: string }
+// the last time an agent was started on a task: its session, to watch (one per task and agent)
+export interface WakeRun { stream: string; task: string; agent: string; session: string; by: string; at: string }
 
 // what the accounts hold, as credentials.ts reads it
 export interface Accounts {
@@ -71,6 +76,8 @@ export interface Accounts {
   seen?: Record<string, string[]>; // what each person has seen or put away, by login ("tour", "checklist-hidden")
   invites?: Invite[]; // invites not answered yet, oldest first
   notes?: Note[]; // notes not put away yet, oldest first
+  wakes?: Wake[]; // agents that start when they're @mentioned
+  wakeRuns?: WakeRun[]; // the last start of each agent on each task
 }
 
 // why the accounts can't be used, in plain words (never the key or the connection string)
@@ -112,7 +119,7 @@ export function sealer(secret: string | undefined): Sealer {
 }
 
 // ---------- the tables ----------
-const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen", "account_invites", "account_notes"];
+const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen", "account_invites", "account_notes", "account_wakes", "account_wake_runs"];
 const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
@@ -142,6 +149,14 @@ CREATE TABLE IF NOT EXISTS ${s}.account_projects (
 CREATE TABLE IF NOT EXISTS ${s}.account_invites (
   stream TEXT NOT NULL, login TEXT NOT NULL, by_login TEXT NOT NULL,
   at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, login)
+);
+CREATE TABLE IF NOT EXISTS ${s}.account_wakes (
+  stream TEXT NOT NULL, agent TEXT NOT NULL, url TEXT NOT NULL, token TEXT NOT NULL, by_login TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, agent)
+);
+CREATE TABLE IF NOT EXISTS ${s}.account_wake_runs (
+  stream TEXT NOT NULL, task TEXT NOT NULL, agent TEXT NOT NULL, session TEXT NOT NULL, by_login TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, task, agent)
 );
 CREATE TABLE IF NOT EXISTS ${s}.account_notes (
   to_login TEXT NOT NULL, stream TEXT NOT NULL, who TEXT NOT NULL, did TEXT NOT NULL CHECK (did IN ('accepted', 'declined')),
@@ -207,7 +222,7 @@ export class PostgresAccounts {
   async refresh(): Promise<void> {
     await this.ready();
     const s = this.schema;
-    const [apps, acc, gh, at, names, sessions, emails, blocked, projects, seen, invites, notes] = await Promise.all([
+    const [apps, acc, gh, at, names, sessions, emails, blocked, projects, seen, invites, notes, wakes, runs] = await Promise.all([
       this.pool.query(`SELECT github_client_id, github_secret, atlassian_client_id, atlassian_secret FROM ${s}.account_apps`),
       this.pool.query(`SELECT admin, members, requests, contact_name, contact_email FROM ${s}.account_access`),
       this.pool.query(`SELECT login, token, name FROM ${s}.account_github`),
@@ -220,6 +235,8 @@ export class PostgresAccounts {
       this.pool.query(`SELECT login, what FROM ${s}.account_seen ORDER BY login, what`),
       this.pool.query(`SELECT stream, login, by_login, at FROM ${s}.account_invites ORDER BY at, stream, login`),
       this.pool.query(`SELECT to_login, stream, who, did, at FROM ${s}.account_notes ORDER BY at, to_login, stream, who`),
+      this.pool.query(`SELECT stream, agent, url, token, by_login, at FROM ${s}.account_wakes ORDER BY stream, agent`),
+      this.pool.query(`SELECT stream, task, agent, session, by_login, at FROM ${s}.account_wake_runs ORDER BY at, stream, task, agent`),
     ]);
     const out: Accounts = {};
     const a = apps.rows[0] as AppsRow | undefined;
@@ -240,6 +257,8 @@ export class PostgresAccounts {
     out.seen = {};
     for (const r of seen.rows as { login: string; what: string }[]) out.seen[r.login] = [...(out.seen[r.login] ?? []), r.what];
     out.invites = (invites.rows as { stream: string; login: string; by_login: string; at: Date }[]).map((r) => ({ stream: r.stream, login: r.login, by: r.by_login, at: r.at.toISOString() }));
+    out.wakes = (wakes.rows as { stream: string; agent: string; url: string; token: string; by_login: string; at: Date }[]).map((r) => ({ stream: r.stream, agent: r.agent, url: r.url, token: this.key.open(r.token, `wake:${r.stream}:${r.agent}`), by: r.by_login, at: r.at.toISOString() }));
+    out.wakeRuns = (runs.rows as { stream: string; task: string; agent: string; session: string; by_login: string; at: Date }[]).map((r) => ({ stream: r.stream, task: r.task, agent: r.agent, session: r.session, by: r.by_login, at: r.at.toISOString() }));
     out.notes = (notes.rows as { to_login: string; stream: string; who: string; did: Note["did"]; at: Date }[]).map((r) => ({ to: r.to_login, stream: r.stream, who: r.who, did: r.did, at: r.at.toISOString() }));
     this.now = out;
   }
@@ -370,6 +389,21 @@ export class PostgresAccounts {
   async dropInvite(stream: string, login: string): Promise<void> {
     await this.write(`DELETE FROM ${this.schema}.account_invites WHERE stream = $1 AND lower(login) = lower($2)`, [stream, login]);
   }
+  // an agent's routine, its token sealed; or none any more
+  async saveWake(w: Omit<Wake, "at">): Promise<void> {
+    const s = this.schema;
+    await this.write(`INSERT INTO ${s}.account_wakes (stream, agent, url, token, by_login) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (stream, agent) DO UPDATE SET url = $3, token = $4, by_login = $5, at = now()`, [w.stream, w.agent, w.url, this.key.seal(w.token, `wake:${w.stream}:${w.agent}`), w.by]);
+  }
+  async dropWake(stream: string, agent: string): Promise<void> {
+    await this.write(`DELETE FROM ${this.schema}.account_wakes WHERE stream = $1 AND agent = $2`, [stream, agent]);
+  }
+  async saveWakeRun(r: Omit<WakeRun, "at">): Promise<void> {
+    const s = this.schema;
+    await this.write(`INSERT INTO ${s}.account_wake_runs (stream, task, agent, session, by_login) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (stream, task, agent) DO UPDATE SET session = $4, by_login = $5, at = now()`, [r.stream, r.task, r.agent, r.session, r.by]);
+  }
+
   // logins in any case are one person: the note before (in whatever case) goes, the new one comes in
   async addNote(n: Omit<Note, "at">): Promise<void> {
     await this.ready();

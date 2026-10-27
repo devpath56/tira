@@ -43,7 +43,8 @@ one click out, since a field can't open them; read, they are links in the words)
 many: each its own numbered row, and a last row to add the next), **Subtasks**, and **Activity**:
 the comments and the history as two tabs over one place, Comments first (as Jira's). The comments
 read as a thread: each writer's round mark (an agent's spark, a person's initials) on a line that
-joins them, then who, when and what; under them, the box to reply, with your mark beside it, its
+joins them, then who, when and what (and, above them, each agent tira started on the task when
+someone @mentioned it, with **Watch its session** one click away); under them, the box to reply, with your mark beside it, its
 **Comment** button inside it, and how to mention and send.
 
 Under `tira serve` the ticket is edited where it shows (no Edit fold): its title, description and

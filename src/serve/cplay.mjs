@@ -40,6 +40,12 @@ const start = (root) => {
   steps.forEach((b, k) => b.addEventListener("click", () => { show(k); tick(); }));
   root.addEventListener("mouseenter", () => { held = true; root.classList.remove("ticking"); clearTimeout(timer); });
   root.addEventListener("mouseleave", () => { held = false; show(at); tick(); });
+  // a play folded away (Set it up) starts from its first step when it's opened
+  root.closest("details")?.addEventListener("toggle", (e) => {
+    if (!(e.target instanceof HTMLDetailsElement) || !e.target.open) return;
+    show(0);
+    tick();
+  });
   show(0);
   tick();
 };

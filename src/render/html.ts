@@ -389,6 +389,7 @@ details.grp>summary{cursor:pointer;list-style:none}details.grp>summary::-webkit-
 @media (prefers-reduced-motion:reduce){.cplay *{animation:none!important;transition:none!important}}
 .code-way{margin:14px 0 0;padding:14px 0 0;border-top:1px solid var(--line)}.code-way h4{display:flex;align-items:center;gap:8px;margin:0;font-size:14px}.code-way p{margin:6px 0 0;font-size:13px;color:var(--mut)}.code-way .agent-later{margin:8px 0 0}.agent-watch{margin:0}.agent-later{margin:16px 0 0;font-size:12px;color:var(--mut)}
 .agent-term{margin:12px 0 0;font-size:13px}.agent-term>summary{cursor:pointer;color:var(--accent-text)}.agent-term>.agent-tiles{margin:10px 0 0}
+.agent-wake-card{margin:0 0 18px;padding:16px 18px;background:var(--panel);border:1px solid var(--line-2);border-radius:12px}.agent-wake-card h3{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:15px}.agent-wake-card>p{margin:0 0 10px;font-size:13.5px;color:var(--mut)}.wake-setup>summary{list-style:none;display:inline-flex;cursor:pointer}.wake-setup>summary::-webkit-details-marker{display:none}.wake-setup[open]>summary{display:none}.wake-setup .cplay{margin:4px 0 8px}.wake-now{margin:0 0 10px;font-size:13px;color:var(--fg)}.wake-on{color:var(--done);margin-right:4px}.agent-acts{display:flex;align-items:center;gap:8px;flex:none}.wake-body{display:grid;gap:10px;padding-top:10px;font-size:13px;color:var(--mut)}.wake-body p{margin:0}.wake-steps{margin:0;padding-left:20px;display:grid;gap:8px}.wake-form{display:grid;gap:8px;max-width:560px}.wake-form .act{justify-self:start}.wake-body a{color:var(--accent-text);font-weight:600}.wake-body a:hover{text-decoration:underline}.wake-runs{display:grid;gap:8px;margin:0 0 14px}.wake-run{display:flex;align-items:center;gap:10px;margin:0;padding:8px 12px;border:1px dashed var(--line-2);border-radius:12px;font-size:13px;color:var(--mut)}.wake-run b{color:var(--fg)}.wake-run a{color:var(--accent-text);font-weight:600}.wake-run .cm-av{width:26px;height:26px;box-shadow:none}
 .agent-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin:0 0 6px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel-2)}.agent-row form{margin:0}.agent-who{display:grid;gap:2px;min-width:0}.agent-who small{font:12px var(--mono);color:var(--mut);overflow-wrap:anywhere}
 .agent-app{margin:12px 0 0;padding:12px 0 0;border-top:1px solid var(--line)}.agent-app>b{display:block;margin:0 0 6px;font-size:13px}.agent-app-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 6px}.agent-steps{margin:0 0 8px;padding-left:20px;font-size:13px;color:var(--mut)}
 .agent-code-wrap{position:relative}.agent-code-wrap .env-btn{position:absolute;top:6px;right:6px}.agent-code{margin:0;padding:10px 40px 12px 12px;font:12px/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r)}
@@ -1037,7 +1038,10 @@ const locate = (key: string, live: boolean) => (live ? `<button type="button" cl
 // form: under tira serve, what the ticket's own forms need (the page's token, who it can be
 // assigned to: the project's people and its connected agents)
 // keys: each task's TIRA_<PROJECT>_<n> (src/fold/tickets.ts)
+// an agent started on a task by an @mention (src/serve/wake.ts): its session, to watch
+export interface WakeRunShown { task: string; agent: string; session: string; by: string; at: string }
 interface Ext {
+  runs?: ReadonlyMap<string, WakeRunShown[]>; // by task
   links: ReadonlyMap<string, TaskLinks>; ws: WorkspaceLink | undefined
   tickets: ReadonlyMap<string, Ticket>; comments: ReadonlyMap<string, Comment[]>; commits: ReadonlyMap<string, Commit[]>; keys: ReadonlyMap<string, string>
   form?: { token: string; people: string[]; agents: string[]; me?: string | undefined }
@@ -1342,7 +1346,14 @@ function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
       + `<div class="cm-box"><textarea name="text" rows="2" maxlength="2000" required placeholder="${prompt}" aria-label="Add a comment"></textarea>`
       + `<div class="cm-foot"><span class="cm-hint"><kbd>@</kbd> to mention · <kbd>⌘</kbd><kbd>↵</kbd> to send</span><button class="act primary" type="submit">Comment</button></div></div></form>`
     : "";
-  return `<div class="comments" data-comments>${shown}${form}</div>`;
+  return `<div class="comments" data-comments>${runsHtml(r, ext)}${shown}${form}</div>`;
+}
+// who tira started on it when someone @mentioned them, with their session one click away
+function runsHtml(r: TreeRow, ext: Ext): string {
+  const list = ext.runs?.get(r.id) ?? [];
+  if (list.length === 0) return "";
+  const line = (x: WakeRunShown) => `<p class="wake-run" data-wake-run="${esc(x.agent)}">${avatarHtml(x.agent)}<span><b>${esc(x.agent)}</b> started on this when ${esc(x.by)} asked · <a href="${esc(x.session)}" ${OUT}>Watch its session ↗</a> <span class="ev-seq">${esc(when(x.at))}</span></span></p>`;
+  return `<div class="wake-runs">${list.map(line).join("")}</div>`;
 }
 // Activity: the comments and the history, as two tabs over one place (as Jira's), Comments first.
 // Each dialog's tabs are its own (their radios are named for it); no script needed.
@@ -1931,7 +1942,7 @@ export interface RenderOptions {
   // `people` and `agents`: who a ticket can be assigned to (the project's people, its connected agents).
   // `onboarding`: a first-time person's welcome (src/serve/onboarding.ts): the Get started checklist
   // in the sidebar, and the tour (Help's Take the tour plays it again).
-  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string>; people?: string[]; agents?: string[]; onboarding?: { side: string; tour: string }; inbox?: { count: number; letter?: string }; create?: CreateOf };
+  live?: { flash?: { ok: boolean; text: string; changed?: string[] }; query?: string; actor?: string; user?: string; name?: string; token?: string; moves?: Record<string, string>; people?: string[]; agents?: string[]; onboarding?: { side: string; tour: string }; inbox?: { count: number; letter?: string }; create?: CreateOf; runs?: WakeRunShown[] };
   // The divergence report the caller just computed (or why it could not), shown as a section.
   divergence?: DivergencePanel;
 }
@@ -2006,7 +2017,9 @@ export function renderHtml(r: FoldResult, stream: string, dumpHash: string, even
   const form = opts.live?.token ? { token: opts.live.token, people: opts.live.people ?? [], agents: opts.live.agents ?? [], me: opts.live.actor } : undefined;
   // who an @ can name, for the page's script (app.mjs): the project's people and its agents
   const mentionable = form ? ` data-people="${esc(form.people.join(" "))}" data-agents="${esc(form.agents.join(" "))}"` : "";
-  const ext: Ext = { links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
+  const runs = new Map<string, WakeRunShown[]>();
+  for (const x of opts.live?.runs ?? []) runs.set(x.task, [...(runs.get(x.task) ?? []), x]);
+  const ext: Ext = { runs, links: taskLinksOf(r, stream), ws: workspaceOf(r, stream), tickets: ticketsOf(r, stream), comments: commentsOf(r, stream), commits: commitsOf(r, stream), keys: ticketKeys(r, stream), ...(form ? { form } : {}) };
   const name = ext.ws?.title ?? stream; // as people see it (renamed in Project settings)
   const first = !board && lanesFirst ? "lanes" : "board";
   const firstTask = form ? `<a href="#create">Create the first</a> (or press <kbd>C</kbd>)` : "Add the first with <code>tira create</code>";

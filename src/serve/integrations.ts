@@ -31,9 +31,10 @@ import { JIRA_PROJECT, REPO, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts"
 import { reportLines, sync } from "../sync/sync.ts";
 import { GhCli, type GitHubClient } from "../sync/github.ts";
 import { JiraCloud, projectName, type JiraClient } from "../sync/jira.ts";
-import { access, appKeys, hasSeen, dropInvite, invite, invitesNow, addNote, dropNote, notesFor, same, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, markSeen, saveDisplayName, unmarkSeen, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
+import { access, appKeys, hasSeen, dropInvite, invite, invitesNow, addNote, dropNote, notesFor, saveWake, dropWake, wakesOf, same, atlassianAuth, block, blockedNow, displayName, dropSession, emailOf, forgetGithub, githubAuth, isBlocked, isOwner, knownLogin, markSeen, saveDisplayName, unmarkSeen, saveEmail, saveProject, signOutEverywhere, jiraLogin, saveAccess, saveAppKeys, saveAtlassianAuth, saveGithubAuth, saveSession, unblock, type AtlassianAuth, type JiraLogin, type ProjectPeople } from "../sync/credentials.ts";
 import { changeTeam, inProject, isProjectAdmin, type TeamMove } from "./team.ts";
 import { INBOX_ICON, letterHtml, noteHtml } from "./invites.ts";
+import { routineProblem, WAKE_PROMPT, type Fire } from "./wake.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
 import type { Dispatcher } from "../write/dispatcher.ts";
@@ -109,6 +110,7 @@ export interface Outside {
   env?: Env;
   envFile?: string; // tira's own .env, which tira mcp reads (Project settings → Connect agents checks it); default: this tira's
   agentTokens?: AgentTokens; // agents' tokens; default: tira's Postgres database's
+  fireRoutine?: Fire; // starts an agent's Claude Code routine (wake.ts); default: the real call
 }
 
 export interface IntegrationsContext {
@@ -920,9 +922,34 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     const app = APPS.find((a) => a === row.app);
     const used = row.lastUsedAt ? "last used " + day(row.lastUsedAt) : "not used yet";
     const label = row.app === CONNECTOR_APP ? "Claude's Connectors" : "";
-    const about = [app ? APP_NAME[app] : label, `tira_${esc(row.id)}…`, `connected by ${esc(row.createdBy)} on ${day(row.createdAt)}`, used].filter(Boolean).join(" · ");
-    const revoke = mayRevoke(me, row, admin) ? `<form method="post" action="/integrations/agents/revoke" data-agent-go>${t}<input type="hidden" name="id" value="${esc(row.id)}"><button class="how" type="submit">Revoke</button></form>` : "";
-    return `<div class="agent-row" data-agent="${esc(row.agent)}"><span class="agent-who"><b>${esc(row.agent)}</b><small>${about}</small></span>${revoke}</div>`;
+    const woken = wakesOf(c.stream, env).some((w) => w.agent === row.agent);
+    const about = [app ? APP_NAME[app] : label, `tira_${esc(row.id)}…`, `connected by ${esc(row.createdBy)} on ${day(row.createdAt)}`, used, woken ? "starts when it's @mentioned" : ""].filter(Boolean).join(" · ");
+    const may = mayRevoke(me, row, admin);
+    const revoke = may ? `<form method="post" action="/integrations/agents/revoke" data-agent-go>${t}<input type="hidden" name="id" value="${esc(row.id)}"><button class="how" type="submit">Revoke</button></form>` : "";
+    const off = may && woken ? `<form method="post" action="/integrations/agents/wake" data-agent-wake-off>${t}<input type="hidden" name="agent" value="${esc(row.agent)}"><input type="hidden" name="do" value="off"><button class="how" type="submit">Stop starting on @mention</button></form>` : "";
+    return `<div class="agent-row" data-agent="${esc(row.agent)}"><span class="agent-who"><b>${esc(row.agent)}</b><small>${about}</small></span><span class="agent-acts">${off}${revoke}</span></div>`;
+  };
+  // saving an agent's routine, or turning it off: whoever connected it, or this project's admin
+  const agentWake = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string) => {
+    const form = await c.formOf(req, res, host);
+    if (form === undefined) return;
+    const said = (f: Flash) => toAgents(res, "r=" + c.flash(f));
+    const me = who(req);
+    const tokens = tokensNow();
+    const agent = form.get("agent") ?? "";
+    const row = tokens ? (await tokens.list(c.stream)).find((x) => x.agent === agent) : undefined;
+    if (!me.actor || !row) return said({ ok: false, text: "That agent isn't connected to this project." });
+    if (!mayRevoke(me, row, !!me.login && await adminHere(me.login))) return said({ ok: false, text: `Only ${row.createdBy}, who connected ${agent}, or this project's admin can change that.` });
+    if (form.get("do") === "off") {
+      await dropWake(c.stream, agent, env);
+      return said({ ok: true, text: `${agent} won't start on its own any more.` });
+    }
+    const url = (form.get("routine_url") ?? "").trim(); // its own names: "token" is the page's
+    const secret = (form.get("routine_token") ?? "").trim();
+    const why = routineProblem(url, secret);
+    if (why) return said({ ok: false, text: why });
+    await saveWake({ stream: c.stream, agent, url, token: secret, by: meAs(me) }, env);
+    said({ ok: true, text: `${agent} starts when it's @mentioned now.` });
   };
   const toolItem = ([tool, said]: [string, string]) => `<li><code>${tool}</code> ${esc(said)}</li>`;
   const manualApp = (app: App, at: Where) => {
@@ -963,19 +990,58 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     ["Connect, then approve", "On tira's page, pick this project"],
     ["Run /mcp in Claude Code", "tira shows as connected"],
   ];
+  // a play of short steps beside a small moving picture of each (cplay.mjs)
+  const stepPlayer = (steps: readonly [string, string][], scenes: readonly string[]) => {
+    const list = steps.map(([title, sub], i) => `<li><button type="button" class="cplay-step${i === 0 ? " on" : ""}" data-cplay-go="${i}"${i === 0 ? ' aria-current="step"' : ""}><span class="cplay-n">${i + 1}</span><span class="cplay-t"><b>${esc(title)}</b><small>${esc(sub)}</small></span></button></li>`).join("");
+    return `<div class="cplay" data-cplay><ol class="cplay-steps">${list}</ol><div class="cplay-stage" aria-hidden="true">`
+      + scenes.map((x, i) => `<div class="cscene s${i + 1}${i === 0 ? " on" : ""}" data-cplay-scene>${x}</div>`).join("") + `<span class="cplay-bar"><i></i></span></div></div>`;
+  };
   const connectorPlayer = (address: string | undefined) => {
     const where = esc(address ?? "https://your-tira…/mcp");
     const first = address ? "The address above" : "Your hosted tira, with /mcp";
-    const steps = CPLAY.map(([title, sub], i) => `<li><button type="button" class="cplay-step${i === 0 ? " on" : ""}" data-cplay-go="${i}"${i === 0 ? ' aria-current="step"' : ""}><span class="cplay-n">${i + 1}</span><span class="cplay-t"><b>${esc(title)}</b><small>${esc(i === 0 ? first : sub)}</small></span></button></li>`).join("");
-    const scenes = [
+    return stepPlayer(CPLAY.map(([title, sub], i) => [title, i === 0 ? first : sub]), [
       `<div class="cs-url"><span class="cs-mono">${where}</span><span class="cs-chip cs-hit">Copy</span></div><span class="cs-toast">Copied</span>`,
       `<div class="cs-win"><div class="cs-side"><span>Chats</span><span>Projects</span><span class="cs-hit">Customize</span></div><div class="cs-pane"><span>Skills</span><span class="cs-hit2">Connectors</span><span>Styles</span></div></div>`,
       `<div class="cs-modal"><b>Add custom connector</b><span class="cs-field">tira</span><span class="cs-field"><span class="cs-type cs-mono">${where}</span></span><span class="cs-btn cs-press">Add</span></div>`,
       `<div class="cs-card"><span class="cs-mark">t</span><b>Claude wants to work in tira</b><span class="cs-field">This project</span><span class="cs-btn cs-press">Approve</span><span class="cs-done">✓ Connected</span></div>`,
       `<div class="cs-term"><span class="cs-mono">› <span class="cs-type">/mcp</span></span><span class="cs-mono cs-out">tira · claude.ai · <em>✓ connected</em></span></div>`,
-    ];
-    return `<div class="cplay" data-cplay><ol class="cplay-steps">${steps}</ol><div class="cplay-stage" aria-hidden="true">`
-      + scenes.map((x, i) => `<div class="cscene s${i + 1}${i === 0 ? " on" : ""}" data-cplay-scene>${x}</div>`).join("") + `<span class="cplay-bar"><i></i></span></div></div>`;
+    ]);
+  };
+  // Let it start when you @mention it (wake.ts; Isha, 2026-10-26: "add it to the main flow, the
+  // animation if the user wants to do this, then steps"): under Claude Code, one line on what it does
+  // and Set it up, which opens five steps played, the prompt to copy, then which agent, and its
+  // routine's address and token. Which agents start this way already shows above it.
+  const WAKE_PLAY: [string, string][] = [
+    ["Open claude.ai/code/routines", "New routine"],
+    ["Pick your repo and tira", "The repository, then tira under Connectors"],
+    ["Paste the prompt", "Copy it below"],
+    ["Add an API trigger", "Select a trigger → API → Generate token"],
+    ["Paste both here", "The routine's address and its token"],
+  ];
+  const wakeCard = (rows: readonly AgentToken[], t: string) => {
+    const player = stepPlayer(WAKE_PLAY, [
+      `<div class="cs-url"><span class="cs-mono">claude.ai/code/routines</span><span class="cs-chip cs-hit">New routine</span></div>`,
+      `<div class="cs-modal"><b>New routine</b><span class="cs-field">Repository · <span class="cs-type">your-repo</span></span><span class="cs-field">Connectors · tira ✓</span><span class="cs-btn cs-press">Next</span></div>`,
+      `<div class="cs-modal"><b>Prompt</b><span class="cs-field"><span class="cs-type">You work tasks in tira, through its connector…</span></span><span class="cs-btn cs-press">Save</span></div>`,
+      `<div class="cs-card"><b>Select a trigger</b><span class="cs-field">Schedule · GitHub · <b>API</b></span><span class="cs-btn cs-press">Generate token</span><span class="cs-done">✓ Address and token</span></div>`,
+      `<div class="cs-modal"><b>tira · Start when @mentioned</b><span class="cs-field"><span class="cs-type cs-mono">api.anthropic.com/…/trig_…/fire</span></span><span class="cs-field cs-mono">sk-ant-oat01-••••••••</span><span class="cs-btn cs-press">Save</span></div>`,
+    ]);
+    const on = wakesOf(c.stream, env).map((w) => w.agent).filter((a) => rows.some((x) => x.agent === a));
+    const already = on.length === 0 ? "" : `<p class="wake-now" data-wake-on><span class="wake-on">●</span> ${on.map(esc).join(", ")} start${on.length === 1 ? "s" : ""} when @mentioned.</p>`;
+    const pick = rows.find((x) => x.app === CONNECTOR_APP) ?? rows.find((x) => x.app === "claude-code") ?? rows[0];
+    const options = rows.map((x) => `<option value="${esc(x.agent)}"${x === pick ? " selected" : ""}>${esc(x.agent)}</option>`).join("");
+    const form = rows.length === 0
+      ? `<p class="agent-later">Connect Claude above first: then it can start by itself.</p>`
+      : `<form method="post" action="/integrations/agents/wake" class="wake-form" data-agent-wake-form>${t}`
+        + `<label class="field"><span>Agent</span><select name="agent">${options}</select></label>`
+        + `<label class="field"><span>Routine address</span><input type="url" name="routine_url" required placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire" autocomplete="off"></label>`
+        + `<label class="field"><span>Token</span><input type="password" name="routine_token" required placeholder="sk-ant-oat01-…" autocomplete="off"></label>`
+        + `<button class="act primary" type="submit">Save</button></form>`;
+    const reach = c.site ? "" : `<p class="agent-later">The routine reaches tira over the internet, so this needs tira at a public address, like your hosted tira.</p>`;
+    return `<div class="agent-wake-card" data-agent-wake-card><h3><span class="agent-icon" aria-hidden="true">${SET_ICON.agents}</span>Let it start when you @mention it <span class="pill">Optional</span></h3>`
+      + `<p>@mention it on a task, or give it one, and it starts by itself in Anthropic's cloud, on your Claude plan. No need to go and tell it.</p>${already}`
+      + `<details class="wake-setup" data-wake-setup><summary class="act">Set it up</summary><div class="wake-body">${player}`
+      + `<p>The prompt for step 3:</p>${codeBlock("wake-prompt", WAKE_PROMPT, "the prompt")}${form}${reach}</div></details></div>`;
   };
   const codeCard = (at: Where, t: string) => (c.site
     ? `<div class="agent-claude" data-agent-code data-agent-connector><h3><span class="agent-icon" aria-hidden="true">${APP_ICON["claude-code"]}</span>Claude Code <span class="pill">Recommended</span></h3>`
@@ -991,7 +1057,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       + `<div class="code-way"><h4>2. From a terminal</h4><p>One command: name its agent, then copy the command. It checks the connection when it's done, and this page turns green.</p><p>${byCommand("Set up Claude Code", true)}</p></div></div>`);
   // no app picked yet: Claude Code first, then Cursor and VS Code; on this computer, Claude Desktop
   // (the chat app, by its config entry) folded under them
-  const chooser = (at: Where, t: string) => codeCard(at, t)
+  const chooser = (at: Where, t: string, rows: readonly AgentToken[]) => codeCard(at, t) + wakeCard(rows, t)
     + `<h3 class="agent-list-h">Or Cursor, VS Code</h3><div class="agent-tiles">${(["cursor", "vscode"] as const).map(tile).join("")}</div>`
     + (c.site ? "" : `<details class="agent-term" data-agent-desktop><summary>Claude Desktop, the chat app?</summary><div class="agent-tiles">${tile("claude-desktop")}</div></details>`);
   const agentsGroup = async (url: URL, me: { login?: string; actor?: string }, t: string, host: string) => {
@@ -1011,7 +1077,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     let flow: string;
     if (made) flow = madeFlow(made, rows, said, key ?? "", at, db, envFile, t);
     else if (app) flow = namingFlow(app, rows, said, t);
-    else flow = chooser(at, t);
+    else flow = chooser(at, t, rows);
     const top = made || app ? gone : said + gone; // a step's own result shows in that step
     const admin = !!me.login && await adminHere(me.login);
     const list = rows.length === 0 ? '<p class="agent-none">No agents connected yet.</p>' : rows.map((x) => agentRow(x, me, t, admin)).join("");
@@ -1395,6 +1461,7 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
     "POST /integrations/setup/reveal": revealPost,
     "POST /integrations/agents/connect": agentConnect,
     "POST /integrations/agents/revoke": agentRevoke,
+    "POST /integrations/agents/wake": agentWake,
     "POST /integrations/agents/test": agentTest,
     "POST /integrations/agents/heard": agentHeard,
     "POST /integrations/link": linkPost,

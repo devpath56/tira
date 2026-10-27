@@ -29,9 +29,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type Note, type ProjectPeople } from "./accounts-pg.ts";
+import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type Note, type ProjectPeople, type Wake, type WakeRun } from "./accounts-pg.ts";
 
-export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, Note, ProjectPeople } from "./accounts-pg.ts";
+export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, Note, ProjectPeople, Wake, WakeRun } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
 export interface JiraLogin { email: string; token: string }
 
@@ -217,6 +217,28 @@ export async function dropInvite(stream: string, login: string, env: Env = proce
   const pg = postgresAccounts(env);
   if (pg) return pg.dropInvite(stream, login);
   update(env, (s) => { s.invites = (s.invites ?? []).filter((x) => !(x.stream === stream && same(x.login, login))); });
+}
+
+// Agents that start when they're @mentioned (Isha, 2026-10-26): each one's Claude Code routine, by
+// project and agent (its token sealed on Postgres; in the private file as other tokens are), and
+// the last start of each agent on each task (its session, to watch).
+export const wakesOf = (stream: string, env: Env = process.env): Wake[] => (read(env).wakes ?? []).filter((w) => w.stream === stream);
+export async function saveWake(w: Omit<Wake, "at">, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.saveWake(w);
+  update(env, (s) => { s.wakes = [...(s.wakes ?? []).filter((x) => !(x.stream === w.stream && x.agent === w.agent)), { ...w, at: new Date().toISOString() }]; });
+}
+export async function dropWake(stream: string, agent: string, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.dropWake(stream, agent);
+  update(env, (s) => { s.wakes = (s.wakes ?? []).filter((x) => !(x.stream === stream && x.agent === agent)); });
+}
+export const wakeRunsOf = (stream: string, env: Env = process.env): WakeRun[] => (read(env).wakeRuns ?? []).filter((r) => r.stream === stream);
+export async function saveWakeRun(r: Omit<WakeRun, "at">, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.saveWakeRun(r);
+  const same3 = (x: WakeRun) => x.stream === r.stream && x.task === r.task && x.agent === r.agent;
+  update(env, (s) => { s.wakeRuns = [...(s.wakeRuns ?? []).filter((x) => !same3(x)), { ...r, at: new Date().toISOString() }]; });
 }
 
 // Notes to whoever invited someone (Isha, 2026-10-26): "devansh accepted your invite to X", or
