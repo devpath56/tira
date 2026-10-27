@@ -56,7 +56,7 @@ export function reviewInput(a: ReviewAsk): string {
   return [
     `Task ${a.key}: ${a.title}`, `Work type: ${a.kind}. Proof for it should be ${a.proofFor}.`,
     `Description:\n${a.description || "(none written)"}`, `Steps:\n${steps}`,
-    `Proof given: ${a.proof}${a.proofDetail ? `\n${a.proofDetail}` : ""}`, `Latest comments:\n${said}`,
+    `Proof given: ${a.proof}${a.proofDetail ? "\n" + a.proofDetail : ""}`, `Latest comments:\n${said}`,
   ].join("\n\n");
 }
 
@@ -111,6 +111,8 @@ export function museReviewer(key: string, model = MUSE_MODEL): Reviewer {
 export const PASSED = "Review: passed.";
 export const CHANGES = "Review: changes asked.";
 export const passedText = (v: { summary: string; tokens: number }) => `${PASSED} ${v.summary} (${v.tokens.toLocaleString("en")} tokens)`.trim();
-export const changesText = (v: { summary: string; findings: Finding[]; tokens: number }) =>
-  `${CHANGES} ${v.summary}\n\n${v.findings.map((f, i) => `${i + 1}. ${f.title}: ${f.why}`).join("\n")}\n\nEach is a fix subtask under this task. (${v.tokens.toLocaleString("en")} tokens)`;
+export function changesText(v: { summary: string; findings: Finding[]; tokens: number }): string {
+  const list = v.findings.map((f, i) => `${i + 1}. ${f.title}: ${f.why}`).join("\n");
+  return `${CHANGES} ${v.summary}\n\n${list}\n\nEach is a fix subtask under this task. (${v.tokens.toLocaleString("en")} tokens)`;
+}
 export const roundsOf = (comments: readonly { by: string; text: string }[]) => comments.filter((c) => c.by === REVIEWER && c.text.startsWith(CHANGES)).length;

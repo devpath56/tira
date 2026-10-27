@@ -39,7 +39,7 @@ import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
 import { commentsOf, commitsOf, mentionsIn, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
-import { KIND_WORD, kindOf, PROOF_FOR, type Kind } from "../fold/kinds.ts";
+import { kindOf, PROOF_FOR, type Kind } from "../fold/kinds.ts";
 import { cleanName, FILE_REF, fileTypeOf, MAX_FILE, MAX_FILES, showsInline, sizeSaid, type FileMeta } from "../fold/files.ts";
 import { MAX_ROUNDS, museReviewer, passedText, changesText, REVIEWER, reviewKey, roundsOf, type Finding, type Reviewer, type ReviewAsk } from "./review.ts";
 import { fireRoutine, WakeGate, wakeText, type Asked as WakeAsked } from "./wake.ts";
@@ -450,8 +450,10 @@ function proofFieldHtml(opts: ConfirmOpts): string {
   const code = (opts.kind ?? "code") === "code";
   const check = code ? ` data-proof-check="${esc(withQ("/proof", opts.q ?? ""))}"` : "";
   const hint = code ? "Commit or pull request: id or link…" : "A link to the work, or attach a file…";
-  const what = code ? "" : `<div class="proof-attach" data-proof-attach="${esc(withQ(`/files?task=${encodeURIComponent(opts.id)}`, opts.q ?? ""))}"><label class="act attach-btn"><input type="file" hidden data-proof-file>${ICON_CLIP} Attach a file</label><span class="proof-file" data-proof-file-said role="status" aria-live="polite"></span></div>`;
-  const skip = opts.review ? `<label class="field-check" data-skip-review><input type="checkbox" name="skip_review" value="1"${opts.values?.skip_review === "1" ? " checked" : ""}> Complete it without Muse's review: your call</label>` : "";
+  const upload = esc(withQ(`/files?task=${encodeURIComponent(opts.id)}`, opts.q ?? ""));
+  const what = code ? "" : `<div class="proof-attach" data-proof-attach="${upload}"><label class="act attach-btn"><input type="file" hidden data-proof-file>${ICON_CLIP} Attach a file</label><span class="proof-file" data-proof-file-said role="status" aria-live="polite"></span></div>`;
+  const checked = opts.values?.skip_review === "1" ? " checked" : "";
+  const skip = opts.review ? `<label class="field-check" data-skip-review><input type="checkbox" name="skip_review" value="1"${checked}> Complete it without Muse's review: your call</label>` : "";
   return fieldHtml("proofRef", "Proof of work", opts.values?.proofRef ?? "", hint, check) + `<p class="proof-said" data-proof-said role="status" aria-live="polite"></p>` + what + skip;
 }
 
@@ -986,7 +988,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const fileFor = async (ref: string, stream: string, task: string): Promise<FileMeta | undefined> => {
     const id = FILE_REF.exec(ref)?.[1];
     const f = id ? await fileOf(id, linkEnv) : undefined;
-    return f && f.stream === stream && f.task === task ? { id: f.id, name: f.name, type: f.type, size: f.size } : undefined;
+    return f?.stream === stream && f.task === task ? { id: f.id, name: f.name, type: f.type, size: f.size } : undefined;
   };
 
   // a typed block on an open task: why it can't wait on that task, if it can't
@@ -1221,7 +1223,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   // downloaded, never run (no scripts, nothing it names is fetched)
   const serveFile = async (_req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
     const f = await fileOf(url.searchParams.get("id") ?? "", linkEnv);
-    if (!f || f.stream !== ws.stream) return send(res, 404, text, "There is no such file in this project.\n");
+    if (f?.stream !== ws.stream) return send(res, 404, text, "There is no such file in this project.\n");
     const how = showsInline(f.type) ? "inline" : "attachment";
     const sandbox = f.type === "application/pdf" ? "" : "; sandbox"; // a browser won't show a PDF in a sandbox
     send(res, 200, f.type, f.bytes, { "Content-Disposition": `${how}; filename*=UTF-8''${encodeURIComponent(f.name)}`, "Content-Security-Policy": `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'${sandbox}`, "Cache-Control": "private, max-age=86400" });
@@ -1231,7 +1233,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const ids = [...new Set(form.getAll("file"))];
     if (ids.length > MAX_FILES) return `Up to ${MAX_FILES} files a comment.`;
     const got = await Promise.all(ids.map((id) => fileOf(id, linkEnv)));
-    if (got.some((f) => !f || f.stream !== ws.stream || f.task !== task || f.by !== actor)) return "A file wasn't found: add it again.";
+    if (got.some((f) => f?.stream !== ws.stream || f.task !== task || f.by !== actor)) return "A file wasn't found: add it again.";
     return got.flatMap((f) => (f ? [{ id: f.id, name: f.name, type: f.type, size: f.size }] : []));
   };
 
@@ -1265,7 +1267,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (ask.event !== "COMPLETE") return { go: true, note: "", skipped: false };
     if (a.values?.skip_review === "1" && reviewsIt(stream, ask.id, (await now(stream)).r)) return { go: true, note: "", skipped: true };
     if (ask.type !== "node") return { go: true, note: "", skipped: false };
-    const reviewed = await reviewFirst(stream, ask.id, String(ask.payload.evidenceRef ?? ""), true);
+    const proof = typeof ask.payload.evidenceRef === "string" ? ask.payload.evidenceRef : "";
+    const reviewed = await reviewFirst(stream, ask.id, proof, true);
     return reviewed.go ? { ...reviewed, skipped: false } : reviewed;
   };
   // once the move is written: that the review was skipped, and the decision's comment, on the ticket
@@ -1343,10 +1346,11 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     let made = 0;
     const taken = new Set(flatten(streamView((await now(stream)).r, stream).roots).map((x) => x.id));
     for (const f of findings) {
-      const words = f.title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "_").replaceAll(/^_+|_+$/g, "").slice(0, 50);
+      const words = f.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join("_").slice(0, 50);
       const base = subtaskName(`fix_${words}`.replace(/_$/, "")) ?? "fix";
       let id = base;
-      for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
+      let n = 2;
+      while (taken.has(id)) id = `${base}_${n++}`; // a name already taken: the next free one
       const born = (await dispatcher.submit({ stream, kind: "create", entity: { type: "node", id }, actor: REVIEWER, payload: { parent_id: task, kind: "discovered", discovered_during: task } })).result;
       if (born.status !== "appended") continue;
       taken.add(id);

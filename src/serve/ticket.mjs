@@ -50,6 +50,7 @@ document.addEventListener("keydown", (e) => {
 // A mark around what's chosen (bold, italic, code), at the start of each line chosen (a list), or a
 // link; what was chosen stays chosen.
 const WRAP = { bold: "**", italic: "*", code: "`" };
+const listMark = (kind, i) => (kind === "ol" ? `${i + 1}.` : "-");
 function mark(area, kind) {
   if (!(area instanceof HTMLTextAreaElement)) return;
   const { selectionStart: a, selectionEnd: b, value } = area;
@@ -57,7 +58,7 @@ function mark(area, kind) {
   let put;
   if (WRAP[kind]) put = `${WRAP[kind]}${chosen || "text"}${WRAP[kind]}`;
   else if (kind === "link") put = /^https?:\/\//.test(chosen) ? chosen : `${chosen || "link"} https://`;
-  else put = (chosen || "").split("\n").map((line, i) => `${kind === "ol" ? `${i + 1}.` : "-"} ${line}`).join("\n");
+  else put = (chosen || "").split("\n").map((line, i) => `${listMark(kind, i)} ${line}`).join("\n");
   const lineStart = kind === "ul" || kind === "ol" ? a === 0 || value[a - 1] === "\n" : true;
   if (!lineStart) put = `\n${put}`;
   area.focus();
@@ -71,7 +72,7 @@ function mark(area, kind) {
 // starts from, the description reads as saved, and a quiet note says "Saved" (or why not, until the
 // next save). The board behind the dialog catches up when it closes (app.mjs, told by tira:saved).
 const keep = (form) => {
-  for (const f of [...form.elements]) {
+  for (const f of form.elements) {
     if (f instanceof HTMLTextAreaElement || (f instanceof HTMLInputElement && f.type !== "checkbox" && f.type !== "radio")) f.defaultValue = f.value;
     else if (f instanceof HTMLInputElement) f.defaultChecked = f.checked;
     else if (f instanceof HTMLSelectElement) for (const o of f.options) o.defaultSelected = o.selected;
@@ -172,7 +173,7 @@ document.addEventListener("submit", (e) => {
   const form = e.target;
   if (!(form instanceof HTMLFormElement) || !form.matches("[data-comment-form]")) return;
   e.preventDefault();
-  if (!form.classList.contains("sending")) commentInPlace(form);
+  if (!form.classList.contains("sending")) void commentInPlace(form); // it says what came of it itself
 });
 // what came in fresh plays once (a new comment glows a moment longer), then is ordinary again
 document.addEventListener("animationend", (e) => {

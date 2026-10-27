@@ -42,7 +42,7 @@ export function guessKind(words: string): Kind {
   let best: Kind = "code";
   let most = 0;
   for (const [kind, sign] of SIGNS) {
-    const n = new Set(text.match(sign) ?? []).size;
+    const n = new Set(Array.from(text.matchAll(sign), (m) => m[0])).size;
     if (n > most) {
       best = kind;
       most = n;

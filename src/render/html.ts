@@ -1046,7 +1046,10 @@ function proofHtml(r: TreeRow, ctx: DialogContext): string {
 // a proof that isn't a commit or pull request: a file added to the task, or a link to the work
 function proofRefHtml(ref: string, q: string): string {
   const file = FILE_REF.exec(ref)?.[1];
-  if (file) return `<a href="${esc(withQ(`/file?id=${file}`, q))}" ${OUT}>${ICON_CLIP} Attached file</a>`;
+  if (file) {
+    const href = esc(withQ(`/file?id=${file}`, q));
+    return `<a href="${href}" ${OUT}>${ICON_CLIP} Attached file</a>`;
+  }
   return /^https:\/\/\S+$/.test(ref) ? `<a href="${esc(ref)}" ${OUT}>${esc(shortUrl(ref))} ↗</a>` : esc(ref);
 }
 
@@ -1176,7 +1179,11 @@ function blockHtml(block: string): string {
     para = [];
   };
   const endList = () => {
-    if (list) out.push(`<${list.ordered ? "ol" : "ul"}>${list.items.map((x) => `<li>${wordsHtml(x)}</li>`).join("")}</${list.ordered ? "ol" : "ul"}>`);
+    if (list) {
+      const tag = list.ordered ? "ol" : "ul";
+      const items = list.items.map((x) => `<li>${wordsHtml(x)}</li>`).join("");
+      out.push(`<${tag}>${items}</${tag}>`);
+    }
     list = undefined;
   };
   for (const line of block.split("\n")) {
@@ -1257,7 +1264,8 @@ const DESC_TOOLS: [string, string, string][] = [
 function descEditorHtml(words: string): string {
   const lines = Math.max(3, words.split("\n").length + 1); // a box as tall as its words
   const view = `<div class="desc-view${words ? "" : " empty"}" data-desc-view tabindex="0" role="button" aria-label="Edit the description">${words ? richHtml(words) : "Add a description…"}</div>`;
-  const tools = `<div class="desc-tools" role="toolbar" aria-label="Format">${DESC_TOOLS.map(([k, label, icon]) => `<button type="button" class="desc-tool" data-desc-tool="${k}" title="${label}" aria-label="${label}">${icon}</button>`).join("")}</div>`;
+  const buttons = DESC_TOOLS.map(([k, label, icon]) => `<button type="button" class="desc-tool" data-desc-tool="${k}" title="${label}" aria-label="${label}">${icon}</button>`).join("");
+  const tools = `<div class="desc-tools" role="toolbar" aria-label="Format">${buttons}</div>`;
   const area = `<textarea name="description" class="tk-in tk-desc-in" rows="${lines}" maxlength="4000" placeholder="What done looks like, links, notes…" aria-label="Description" data-ticket-description>${esc(words)}</textarea>`;
   const foot = `<div class="desc-foot"><span class="desc-hint"><kbd>⌘</kbd><kbd>↵</kbd> to save · <kbd>Esc</kbd> to cancel</span><button type="button" class="act desc-cancel" data-desc-cancel>Cancel</button><button class="act primary" type="submit">Save</button></div>`;
   return `<div class="desc-box" data-desc>${view}<div class="desc-edit">${tools}${area}${foot}</div></div>${linkRowHtml(words)}`;
@@ -1270,7 +1278,8 @@ function ticketHtml(n: Placed, ext: Ext, back: string, q: string): string {
   const title = `<h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="${esc(r.id)}" aria-label="Title" autocomplete="off" data-one-line data-save-on-leave>${esc(t?.title ?? "")}</textarea></h2>`;
   const id = keyLineHtml(r, t, ext.keys.get(r.id));
   const list = t?.steps ?? [];
-  const steps = list.length === 0 ? "" : sectionHtml("Steps", `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${list.map((x) => `<li class="tk-step"><span class="tk-step-tx">${wordsHtml(x)}</span></li>`).join("")}</ol>`, "steps", countHtml(list.length));
+  const rows = list.map((x) => `<li class="tk-step"><span class="tk-step-tx">${wordsHtml(x)}</span></li>`).join("");
+  const steps = list.length === 0 ? "" : sectionHtml("Steps", `<ol class="tk-steplist" aria-label="Steps" data-ticket-steps>${rows}</ol>`, "steps", countHtml(list.length));
   return `<form method="post" action="${esc(withQ("/tickets", q))}" class="ticket tk-form" id="${formOf(n)}" data-ticket data-ticket-form>`
     + hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])
     + `${id}${title}${sectionHtml("Description", descEditorHtml(t?.description ?? ""), "description")}${steps}<div class="tk-save"><button class="act primary" type="submit">Save</button></div></form>`;
@@ -1372,10 +1381,11 @@ function estimateHtml(n: Placed, ctx: DialogContext): string {
 function kindHtml(n: Placed, ctx: DialogContext): string {
   const t = ctx.ext.tickets.get(n.row.id);
   const { kind, guessed } = kindOf(n.row.id, t);
-  if (!ctx.ext.form) return `${esc(KIND_WORD[kind])}${guessed ? ` <span class="dim">(guessed)</span>` : ""}`;
+  if (!ctx.ext.form) return `${esc(KIND_WORD[kind])}${guessed ? ' <span class="dim">(guessed)</span>' : ""}`;
   const guess = guessKind([n.row.id, t?.title ?? "", t?.description ?? ""].join(" "));
   const opt = (v: string, label: string) => `<option value="${esc(v)}"${(t?.kind ?? "") === v ? " selected" : ""}>${esc(label)}</option>`;
-  return `<select name="kind" form="${formOf(n)}" class="prop-in" aria-label="Work type" data-save-on-change><optgroup label="tira's guess">${opt("", `${KIND_WORD[guess]} (guessed)`)}</optgroup><optgroup label="Work types">${KINDS.map((k) => opt(k, KIND_WORD[k])).join("")}</optgroup></select>`;
+  const types = KINDS.map((k) => opt(k, KIND_WORD[k])).join("");
+  return `<select name="kind" form="${formOf(n)}" class="prop-in" aria-label="Work type" data-save-on-change><optgroup label="tira's guess">${opt("", KIND_WORD[guess] + " (guessed)")}</optgroup><optgroup label="Work types">${types}</optgroup></select>`;
 }
 // Whether Muse reviews it before it's done (Isha, 2026-10-26: "human can mark as REVIEW, then only
 // it needs a review"): a switch a person turns on, which saves itself; with no API key set, it says so.
@@ -1460,10 +1470,11 @@ function commentsHtml(r: TreeRow, ext: Ext, back: string, q: string): string {
   const none = ext.form ? "" : `<p class="tk-none">No comments yet.</p>`; // live, the box below says it
   const shown = list.length === 0 ? none : `<ol class="cm-list">${list.map(item).join("")}</ol>`;
   const prompt = list.length === 0 ? "Start the conversation…" : "Reply…";
+  const upload = esc(withQ(`/files?task=${encodeURIComponent(r.id)}`, q));
   const form = ext.form
     ? `<form method="post" action="${esc(withQ("/comments", q))}" class="cm-form" data-comment-form>${hiddenOf([["token", ext.form.token], ["task", r.id], ["back", back]])}${avatarHtml(ext.form.me)}`
       + `<div class="cm-box"><textarea name="text" rows="2" maxlength="2000" required placeholder="${prompt}" aria-label="Add a comment"></textarea><div class="cm-adds" data-comment-adds></div>`
-      + `<div class="cm-foot"><label class="cm-attach" title="Attach pictures, PDFs or documents (up to ${sizeSaid(MAX_FILE)} each)"><input type="file" multiple hidden data-comment-file data-upload="${esc(withQ(`/files?task=${encodeURIComponent(r.id)}`, q))}" accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.zip">${ICON_CLIP}<span class="sr">Attach a file</span></label>`
+      + `<div class="cm-foot"><label class="cm-attach" title="Attach pictures, PDFs or documents (up to ${sizeSaid(MAX_FILE)} each)"><input type="file" multiple hidden data-comment-file data-upload="${upload}" accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.zip">${ICON_CLIP}<span class="sr">Attach a file</span></label>`
       + `<span class="cm-hint"><kbd>@</kbd> to mention · <kbd>⌘</kbd><kbd>↵</kbd> to send</span><button class="act primary" type="submit">Comment</button></div></div></form>`
     : "";
   return `<div class="comments" data-comments>${runsHtml(r, ext)}${shown}${form}</div>`;
