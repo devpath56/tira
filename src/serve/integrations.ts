@@ -35,6 +35,7 @@ import { access, appKeys, hasSeen, dropInvite, invite, invitesNow, addNote, drop
 import { changeTeam, inProject, isProjectAdmin, type TeamMove } from "./team.ts";
 import { INBOX_ICON, letterHtml, noteHtml } from "./invites.ts";
 import { routineProblem, WAKE_PROMPT, type Fire } from "./wake.ts";
+import type { Reviewer } from "./review.ts";
 import { GitHubDevice, type GitHubAuthApi } from "../auth/github.ts";
 import { AtlassianOAuth, type AtlassianAuthApi } from "../auth/atlassian.ts";
 import type { Dispatcher } from "../write/dispatcher.ts";
@@ -111,6 +112,7 @@ export interface Outside {
   envFile?: string; // tira's own .env, which tira mcp reads (Project settings → Connect agents checks it); default: this tira's
   agentTokens?: AgentTokens; // agents' tokens; default: tira's Postgres database's
   fireRoutine?: Fire; // starts an agent's Claude Code routine (wake.ts); default: the real call
+  reviewer?: Reviewer; // reviews work before it's done (review.ts); default: Muse, when its key is set
 }
 
 export interface IntegrationsContext {
@@ -1027,7 +1029,8 @@ export function integrationRoutes(c: IntegrationsContext, who: (req: IncomingMes
       `<div class="cs-modal"><b>tira · Start when @mentioned</b><span class="cs-field"><span class="cs-type cs-mono">api.anthropic.com/…/trig_…/fire</span></span><span class="cs-field cs-mono">sk-ant-oat01-••••••••</span><span class="cs-btn cs-press">Save</span></div>`,
     ]);
     const on = wakesOf(c.stream, env).map((w) => w.agent).filter((a) => rows.some((x) => x.agent === a));
-    const already = on.length === 0 ? "" : `<p class="wake-now" data-wake-on><span class="wake-on">●</span> ${on.map(esc).join(", ")} start${on.length === 1 ? "s" : ""} when @mentioned.</p>`;
+    const starts = on.length === 1 ? "starts" : "start";
+    const already = on.length === 0 ? "" : `<p class="wake-now" data-wake-on><span class="wake-on">●</span> ${on.map(esc).join(", ")} ${starts} when @mentioned.</p>`;
     const pick = rows.find((x) => x.app === CONNECTOR_APP) ?? rows.find((x) => x.app === "claude-code") ?? rows[0];
     const options = rows.map((x) => `<option value="${esc(x.agent)}"${x === pick ? " selected" : ""}>${esc(x.agent)}</option>`).join("");
     const form = rows.length === 0

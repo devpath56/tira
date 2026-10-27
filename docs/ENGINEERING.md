@@ -74,7 +74,7 @@ Details in `build-plan.md`. The D2 sources in `demo/*.d2` are the acceptance sce
 
 TypeScript run directly by Node ≥ 22.18 (type stripping; no build step). Postgres via `pg`
 (the live store); SQLite via the built-in `node:sqlite` (tests, and `tira import`'s source). Tests via `node:test`. `npm run check` = verify + typecheck + tests;
-`npm run mutants` plants 1081 known bugs and fails unless the suite catches every one;
+`npm run mutants` plants 1115 known bugs and fails unless the suite catches every one;
 `npm run mutants:check` proves in under a second that each one still lands exactly once.
 Each bug stops at its first failing test (the one that caught it last time first, then
 likely test files), one bug per core, so a warm run takes minutes, not the best part of an hour.
@@ -665,7 +665,7 @@ claude mcp remove tira-factory-ui -s user 2>/dev/null; claude mcp add --scope us
 | `list_tasks` | The board's tasks in order: id, state, where each sits; open ones unless a state is asked for |
 | `get_task` | One task: its ticket (title, description, steps, estimate, assignee), state, place, subtasks, why it's blocked, its commits, comments, proof and history |
 | `start_task` | Moves a task to In progress (one at a time: tira says which to finish first) |
-| `complete_task` | Done, with a commit or pull request of the project's GitHub repo as proof (checked on GitHub) |
+| `complete_task` | Done, with its work type's proof: for code, a commit or pull request of the project's GitHub repo (checked on GitHub); for any other type, a link to the work. With a reviewer set up and the task marked for review, Muse reviews it first |
 | `block_task` | Blocked, with a reason, waiting on an open task or on a new ticket made under it |
 | `add_subtask` | A new task under one, found while working on it when that one is under way |
 | `file_idea` | An idea for later: tira drafts it and proposes where it goes; a person approves |
@@ -689,6 +689,8 @@ It won't start until it's safe. It needs:
 - `TIRA_SECRET_KEY` (Render makes it);
 - `TIRA_ADMIN` (the owner's GitHub login: tira's setup, and removing an account);
 - `TIRA_GITHUB_CLIENT_ID` and `TIRA_GITHUB_CLIENT_SECRET` (a GitHub OAuth app whose callback is `<address>/signin/github/callback`).
+- Optional, for review before done (Isha, 2026-10-26): `TIRA_MODEL_API_KEY` (or `MODEL_API_KEY`), a Meta Model API key. Then a task a person marked for review (the Review switch on its ticket) is reviewed by Muse (`muse-spark-1.3`) before it's done: problems come back as fix subtasks under it (`src/serve/review.ts`).
+- Files people attach (comments, and proof that isn't code) go to `POST /files` and come back from `GET /file?id=…`; they're kept in the accounts' Postgres (`account_files`) or under `$TIRA_HOME/files`, 5 MB each (`src/fold/files.ts`).
 - Optional, for Jira: `TIRA_ATLASSIAN_CLIENT_ID` and `TIRA_ATLASSIAN_CLIENT_SECRET` (an Atlassian OAuth 2.0 app whose callback is `<address>/integrations/jira/callback`). Then everyone connects their own Jira with one button in Account settings; no one has to set anything up in tira.
 
 There is no first-run setup for whoever arrives first, and no `--actor`. The landing offers **Welcome back! Log in** and, smaller, **New user? Sign up**, both with GitHub and always both: anyone is in at once. Sign up shows GitHub's account picker, so another GitHub account can be picked; an account tira already has is told to log in instead, and Log in with one it doesn't have, to sign up first. **Remember this browser** keeps someone logged in for 30 days; unticked, the login ends when the browser closes (12 hours at most). Each person may be admin of 5 projects here.

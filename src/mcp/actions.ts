@@ -4,6 +4,7 @@
 // proof of work are tira's own; a refusal comes back with the page's plain-words hint. A task that
 // doesn't exist, or a block that can't wait on what it names, is answered before anything is
 // written; a refusal by the rules is in the log, as from the CLI.
+import { kindOf } from "../fold/kinds.ts";
 import { fold } from "../fold/fold.ts";
 import { IDEA, ideaId, placement, whatNext } from "../fold/ideas.ts";
 import { makeView } from "../fold/view.ts";
@@ -19,6 +20,7 @@ import { COMMENT, MAX_COMMENT, saysSame, TICKET, ticketPayload, ticketWordsProbl
 import { commitsOf, firstLine, shortSha, ticketsOf, type Commit, type Ticket } from "../fold/tickets.ts";
 
 const NODE = "node";
+const LINK = /^https:\/\/[^\s]{4,2000}$/;
 const IDEA_TEXT_MAX = 500;
 
 // The project's tree as it stands, and one task in it (undefined: no such task).
@@ -66,7 +68,20 @@ export async function completeTask(c: AgentContext, id: string, proof: string, n
     commits = await commitsNow();
   }
   const found = match(commits);
-  const done = (ref: string) => write(c, event(c, id, "COMPLETE", { evidenceRef: ref, ...(note ? { note } : {}) }), id, row);
+  // Muse reviews it first, when tira has a reviewer (src/serve/review.ts): problems come back as fix
+  // subtasks, and the task stays open
+  const done = async (ref: string): Promise<ToolText> => {
+    // its subtasks still open: tira's rules refuse it, so there's nothing to review yet
+    const open = row.children.some((k) => k.state !== "done" && k.state !== "cancelled");
+    const reviewed = c.reviewFirst && !open ? await c.reviewFirst(id, ref) : { go: true as const, note: "" };
+    if (!reviewed.go) return { ok: false, text: `${reviewed.text} Nothing else was written.` };
+    const said = await write(c, event(c, id, "COMPLETE", { evidenceRef: ref, ...(note ? { note } : {}) }), id, row);
+    return said.ok && reviewed.note ? { ...said, text: `${said.text}${reviewed.note}` } : said;
+  };
+  // work that isn't code (Isha, 2026-10-26): a spec, a design, research and the rest are proven by a
+  // link to the work itself; a commit still counts for any kind
+  const { kind } = kindOf(id, ticketsOf((await treeNow(c)).r, c.stream).get(id));
+  if (kind !== "code" && found.length === 0 && LINK.test(proof.trim())) return done(proof.trim());
   if (found.length === 1) return done((found[0] as Commit).sha);
   if (c.proveWith && found.length === 0) {
     const got = await c.proveWith(id, proof).catch((err: unknown) => ({ why: `Couldn't reach GitHub (${(err as Error).message}).` }));
@@ -125,25 +140,26 @@ export async function addComment(c: AgentContext, id: string, text: string): Pro
 
 // fill in a ticket: its title, description, steps and estimate, as the agent, the whole ticket as its
 // next version (as the page's Edit saves it). What's left out stays as it is and an empty one is
-// cleared; who it's assigned to is a person's to say, so it stays as it is.
-export interface TicketFill { title?: string | undefined; description?: string | undefined; steps?: string[] | undefined; estimate?: string | undefined }
+// cleared; who it's assigned to, and whether Muse reviews it, are a person's to say, so they stay as they are.
+export interface TicketFill { title?: string | undefined; description?: string | undefined; steps?: string[] | undefined; estimate?: string | undefined; kind?: string | undefined }
 // the ticket's words once filled: each given one, else what it says now, trimmed as the page trims them
 const filledWords = (fill: TicketFill, before: Ticket | undefined): TicketWords => ({
   title: (fill.title ?? before?.title ?? "").trim().replaceAll(/\s+/g, " "),
   description: (fill.description ?? before?.description ?? "").replaceAll("\r\n", "\n").trim(),
   steps: (fill.steps ?? before?.steps ?? []).map((x) => x.trim()).filter((x) => x !== ""),
   estimate: (fill.estimate ?? before?.estimate ?? "").trim(),
+  kind: (fill.kind ?? before?.kind ?? "").trim(),
 });
 export async function fillTicket(c: AgentContext, id: string, fill: TicketFill): Promise<ToolText> {
   const { r, rows } = await treeNow(c);
   if (!rows.some((x) => x.id === id)) return missing(c, id);
-  if (Object.values(fill).every((x) => x === undefined)) return { ok: false, text: "Give at least one of title, description, steps or estimate. Nothing was written." };
+  if (Object.values(fill).every((x) => x === undefined)) return { ok: false, text: "Give at least one of title, description, steps, estimate or kind. Nothing was written." };
   const before = ticketsOf(r, c.stream).get(id);
   const words = filledWords(fill, before);
   const why = ticketWordsProblem(words);
   if (why) return { ok: false, text: `${why} Nothing was written.` };
   const assignee = before?.assignee;
-  const payload = ticketPayload(id, words, assignee);
+  const payload = ticketPayload(id, words, assignee, before?.review); // whether Muse reviews it is a person's call: as it was
   if (saysSame(before, payload)) return { ok: true, text: `Nothing changed: ${id}'s ticket already says that.` };
   const cmd: Command = { stream: c.stream, kind: "create", entity: { type: TICKET, id, version: (before?.version ?? 0) + 1 }, actor: c.actor, payload };
   const w = (await new Dispatcher(c.store, c.registry).submit(cmd)).result;

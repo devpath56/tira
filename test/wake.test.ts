@@ -37,7 +37,7 @@ test("a run starts with who asked what, on which task, and how to answer through
   const said = wakeText({ agent: "claude", by: "isha", key: "TIRA_TIRA_2", title: "Decide v1 scope", project: "LinkedIn jobs", why: "mentioned", words: "@claude can you draft it?" });
   assert.match(said, /^tira: isha mentioned you \(@claude\) on TIRA_TIRA_2, "Decide v1 scope", in the project "LinkedIn jobs"\./);
   assert.match(said, /What they wrote:\n@claude can you draft it\?/);
-  assert.match(said, /get_task TIRA_TIRA_2[^]*add_comment[^]*complete_task with a commit or pull request as proof/);
+  assert.match(said, /get_task TIRA_TIRA_2[^]*add_comment[^]*complete_task with its proof[^]*short bullet points/);
   assert.match(wakeText({ agent: "claude", by: "isha", key: "K_1", title: "t", project: "p", why: "assigned" }), /^tira: isha gave you K_1,/);
 });
 

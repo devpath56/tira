@@ -1,6 +1,6 @@
 // The pages' Content-Security-Policy: nothing from the network, scripts from tira only, and forms
 // that post to tira itself.
-export const CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+export const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 // The landing's (welcome.ts): its sign-in form posts to tira, which sends the browser straight on
 // to GitHub's sign-in page (the one-click way, integrations.ts: signinStart). A browser holds that

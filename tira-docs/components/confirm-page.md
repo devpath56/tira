@@ -17,7 +17,15 @@ views side by side (stacked on a phone):
      pasted in one field (a commit's id or link, #12 or a pull request's link). No list of ids to
      pick from. As you type (at once on a paste), tira checks it on GitHub and says what it found
      ("Found: …") or why it can't be one; nothing is written until Complete, which checks it again
-     and keeps it for the task.
+     and keeps it for the task. Work of any other type (on the ticket: a spec, a design, research and
+     the rest; Isha, 2026-10-26: "only for code a PR is a must, otherwise any link or screenshot") is
+     proven by a link to it, or a file: **Attach a file** puts it in (a screenshot, a PDF) and the field
+     names it; no GitHub check. When tira has a reviewer (Muse, src/serve/review.ts) and a person
+     marked the task for review (its Review switch), Complete asks it first: passed, the task is done ("Muse
+     reviewed it: passed"); problems, each a fix subtask under the task and the task left open; it
+     couldn't run, nothing is written and it says why. **Complete it without Muse's review: your
+     call** lets the person completing it decide, said on the task. After three reviews that asked
+     for changes, only a person can complete it.
    - **Block**: "Blocked by", a new ticket by name or an open task (live, the open tasks are
      chips), and a reason (optional: it waits on that ticket, if left empty).
    - **Add subtask**: its name; under work already under way it's marked as found, and
@@ -52,7 +60,7 @@ or the log moving after you opened it (the decision is shown again, as it is now
 - `.confirm-dialog` on the live page's dialog; `[data-close-confirm]` on its way out.
 - `[data-hint]` on what to do, when tira would refuse; `[data-error]` on why nothing was written; `[data-fills]` on the chips.
 - `[data-field]` on each field (its name), `[data-blocked-by]` on Block's "Blocked by" (the task's id), `[data-comment-field]` on the comment.
-- `[data-proof-check]` on Complete's proof field (its value, the address that checks it on GitHub as it's typed), `[data-proof-said]` on what the check found or why not.
+- `[data-proof-check]` on Complete's proof field (its value, the address that checks it on GitHub as it's typed), `[data-proof-said]` on what the check found or why not. (Work that isn't code: its Attach a file carries its upload address, and Complete without review shows when Muse would review it.)
 - `[data-flash]` on the result shown after an action.
 
 Assertion: the verdict is the write path's own decision (`WritePath.preview`: reserved

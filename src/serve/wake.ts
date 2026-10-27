@@ -30,14 +30,17 @@ export function wakeText(a: Asked): string {
   const said = a.words ? `\n\nWhat they wrote:\n${a.words}` : "";
   return (`tira: ${what}, "${a.title}", in the project "${a.project}".${said}\n\n`
     + `Through tira's connector, as ${a.agent}: get_task ${a.key} to read the ticket and its comments, do the work, `
-    + `reply on the task with add_comment, and complete_task with a commit or pull request as proof. If a person has to decide something, `
-    + `@mention them in a comment and stop there.`).slice(0, MAX_TEXT);
+    + `reply on the task with add_comment, and complete_task with its proof. If a person has to decide something, `
+    + `@mention them in a comment and stop there.\n\n${REPLY_STYLE}`).slice(0, MAX_TEXT);
 }
 
+// How an agent answers on a task (Isha, 2026-10-26: "very precise and clear, fewer words, only bullet points")
+export const REPLY_STYLE = "Reply in a few short bullet points ('- ' at the start of each line): what you did, what's left, what you need. No preamble, no restating the question, no sign-off.";
 // The prompt to give the routine, once, when it's made: what each run is for.
 export const WAKE_PROMPT = "You work tasks in tira, through its connector. Each run starts with what someone asked, and on which task. "
   + "Read the task with get_task, do the work in this repository, reply on the task with add_comment, and finish with complete_task, "
-  + "giving a commit or pull request as proof. If a person has to decide something, @mention them in a comment and stop there.";
+  + "giving its proof (for code, a commit or pull request). If a person has to decide something, @mention them in a comment and stop there. "
+  + REPLY_STYLE;
 
 export type Fired = { ok: true; session: string } | { ok: false; why: string };
 export type Fire = (url: string, token: string, text: string) => Promise<Fired>;

@@ -2,10 +2,11 @@
 // the fold (src/tables/tickets.ts). Read-only: the page, tira's MCP server and the CLI share it.
 import type { FoldResult } from "./fold.ts";
 import { COMMENT, COMMIT, TICKET } from "../tables/tickets.ts";
+import { fileMetaOk, type FileMeta } from "./files.ts";
 import { byBirth } from "./view.ts";
 
-export interface Ticket { version: number; title?: string; description?: string; steps: string[]; estimate?: string; assignee?: string; by?: string }
-export interface Comment { id: string; text: string; by: string; seq: number; at: string }
+export interface Ticket { version: number; title?: string; description?: string; steps: string[]; estimate?: string; assignee?: string; kind?: string; review?: boolean; by?: string }
+export interface Comment { id: string; text: string; by: string; seq: number; at: string; files?: FileMeta[] }
 export interface Commit { sha: string; message: string; pr?: number; branch?: string; repo: string; seq: number }
 
 // Each task's key, as people say it: TIRA_<PROJECT>_<n> (Isha, 2026-10-25), numbered in the order the
@@ -47,7 +48,7 @@ export function ticketsOf(r: FoldResult, stream: string): Map<string, Ticket> {
     const version = e.version ?? 1;
     if ((out.get(task)?.version ?? 0) > version) continue;
     const steps = Array.isArray(b.steps) ? b.steps.filter((x): x is string => typeof x === "string") : [];
-    out.set(task, { version, ...str(b, "title"), ...str(b, "description"), steps, ...str(b, "estimate"), ...str(b, "assignee"), ...(e.createdBy ? { by: e.createdBy } : {}) });
+    out.set(task, { version, ...str(b, "title"), ...str(b, "description"), steps, ...str(b, "estimate"), ...str(b, "assignee"), ...str(b, "kind"), ...(b.review === true ? { review: true } : {}), ...(e.createdBy ? { by: e.createdBy } : {}) });
   }
   return out;
 }
@@ -59,7 +60,8 @@ export function commentsOf(r: FoldResult, stream: string): Map<string, Comment[]
     if (e.stream !== stream || e.type !== COMMENT) continue;
     const b = e.born ?? {};
     if (typeof b.task !== "string" || typeof b.text !== "string") continue;
-    out.set(b.task, [...(out.get(b.task) ?? []), { id: e.id, text: b.text, by: e.createdBy ?? "", seq: e.createdSeq, at: e.lastRecordedAt }]);
+    const files = Array.isArray(b.files) ? b.files.filter(fileMetaOk) : [];
+    out.set(b.task, [...(out.get(b.task) ?? []), { id: e.id, text: b.text, by: e.createdBy ?? "", seq: e.createdSeq, at: e.lastRecordedAt, ...(files.length > 0 ? { files } : {}) }]);
   }
   for (const list of out.values()) list.sort((a, b) => a.seq - b.seq);
   return out;
