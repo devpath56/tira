@@ -26,7 +26,7 @@ import type { EventStore, StoredEvent } from "../store/types.ts";
 import type { Registry } from "../tables/registry.ts";
 import { fingerprint, fold, type FoldResult } from "../fold/fold.ts";
 import { entityKey } from "../fold/types.ts";
-import { attentionSince, brand, CSS, mentionedHtml, proofsOf, renderHtml, THEME_RADIOS, type DivergencePanel } from "../render/html.ts";
+import { attentionSince, brand, commentItemHtml, CSS, ICON_CLIP, mentionedHtml, richHtml, proofsOf, renderHtml, THEME_RADIOS, type DivergencePanel } from "../render/html.ts";
 import { flatten, streamView } from "../render/tree-view.ts";
 import { esc } from "../render/escape.ts";
 import { Dispatcher } from "../write/dispatcher.ts";
@@ -38,11 +38,14 @@ import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
-import { commitsOf, mentionsIn, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { commentsOf, commitsOf, mentionsIn, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { KIND_WORD, kindOf, PROOF_FOR, type Kind } from "../fold/kinds.ts";
+import { cleanName, FILE_REF, fileTypeOf, MAX_FILE, MAX_FILES, showsInline, sizeSaid, type FileMeta } from "../fold/files.ts";
+import { MAX_ROUNDS, museReviewer, passedText, changesText, REVIEWER, reviewKey, roundsOf, type Finding, type Reviewer, type ReviewAsk } from "./review.ts";
 import { fireRoutine, WakeGate, wakeText, type Asked as WakeAsked } from "./wake.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, notesFor, saveWakeRun, wakeRunsOf, wakesOf, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
+import { appKeys, atlassianAuth, displayName, emailOf, fileOf, githubAuth, hasSeen, importAccountsFile, invitesNow, notesFor, saveFile, saveWakeRun, wakeRunsOf, wakesOf, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
 import { letterPop } from "./invites.ts";
 import { checklistHtml, provenIn, tourHtml } from "./onboarding.ts";
 import { projectName } from "../sync/jira.ts";
@@ -89,6 +92,7 @@ const ASSETS: Record<string, string> = {
   "/sections.mjs": readFileSync(new URL("./sections.mjs", import.meta.url), "utf8"),
   "/forms.mjs": readFileSync(new URL("./forms.mjs", import.meta.url), "utf8"),
   "/autosave.mjs": readFileSync(new URL("./autosave.mjs", import.meta.url), "utf8"),
+  "/ticket.mjs": readFileSync(new URL("./ticket.mjs", import.meta.url), "utf8"),
 };
 
 export interface ServeOptions {
@@ -364,7 +368,9 @@ export function waitable(r: FoldResult, stream: string, id: string): string[] {
 }
 
 // values: what the dialog's fields held when it comes back (a value missing, a moved log)
-interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string; values?: Record<string, string> }
+// kind: the task's kind of work, which says what its proof looks like; review: whether completing it
+// asks Muse first (src/serve/review.ts), so a person may complete it without
+interface ConfirmOpts { type: string; id: string; event: string; token: string; q?: string; moved?: boolean; command?: string; error?: string; notice?: string; values?: Record<string, string>; kind?: Kind; review?: boolean }
 
 // The decision: tira recommends (read-only) beside your action (the command, editable), then
 // the button. The same body serves the confirm page and, under `tira serve`, the dialog the
@@ -394,7 +400,6 @@ function noticesHtml(opts: ConfirmOpts): string {
 
 // The ticket, beside the move: what the work is (its title, description, steps, estimate and
 // assignee), under tira's word when it would refuse, or when nothing would change, and what to do.
-const paragraph = (x: string) => `<p>${mentionedHtml(x.trim()).replaceAll("\n", "<br>")}</p>`; // @mentions marked
 const listItem = (x: string) => `<li>${mentionedHtml(x)}</li>`;
 const factHtml = ([k, v]: [string, string | undefined]) => (v ? `<span><span class="lk">${k}</span>${esc(v)}</span>` : "");
 // what a ticket says, as the dialog shows it (the task's own dialog: src/render/html.ts)
@@ -403,7 +408,7 @@ function ticketWordsHtml(t: Ticket | undefined): string {
   const facts = ([["Estimate", t.estimate], ["Assignee", t.assignee]] as [string, string | undefined][]).map(factHtml).join("");
   return [
     t.title ? `<p class="tk-title" data-ticket-title>${esc(t.title)}</p>` : "",
-    t.description ? `<div class="tk-desc">${t.description.split(/\n{2,}/).map(paragraph).join("")}</div>` : "",
+    t.description ? `<div class="tk-desc">${richHtml(t.description)}</div>` : "", // read as it's meant: lists, bold, links
     t.steps.length > 0 ? `<div class="tk-steps"><span class="lk">Steps</span><ol>${t.steps.map(listItem).join("")}</ol></div>` : "",
     facts === "" ? "" : `<div class="tk-facts">${facts}</div>`,
   ].join("");
@@ -437,9 +442,17 @@ function fieldHtml(name: string, label: string, value: string, placeholder: stri
 // To complete: the proof of work, a commit or pull request of the project's repo, typed or pasted
 // (its id or link). The page's script checks it on GitHub as it's typed (POST /proof) and says what
 // it found; Complete checks it again, and keeps it for the task.
+// Work of any other type (src/fold/kinds.ts; Isha, 2026-10-26: "only for code a PR is a must,
+// otherwise any link or screenshot") is proven by a link to it, or a file added here: Attach puts the
+// file in and names it (file:<id>; the page's script). With review on for the task, a person may
+// complete it without.
 function proofFieldHtml(opts: ConfirmOpts): string {
-  const check = ` data-proof-check="${esc(withQ("/proof", opts.q ?? ""))}"`;
-  return fieldHtml("proofRef", "Proof of work", opts.values?.proofRef ?? "", "Commit or pull request: id or link…", check) + `<p class="proof-said" data-proof-said role="status" aria-live="polite"></p>`;
+  const code = (opts.kind ?? "code") === "code";
+  const check = code ? ` data-proof-check="${esc(withQ("/proof", opts.q ?? ""))}"` : "";
+  const hint = code ? "Commit or pull request: id or link…" : "A link to the work, or attach a file…";
+  const what = code ? "" : `<div class="proof-attach" data-proof-attach="${esc(withQ(`/files?task=${encodeURIComponent(opts.id)}`, opts.q ?? ""))}"><label class="act attach-btn"><input type="file" hidden data-proof-file>${ICON_CLIP} Attach a file</label><span class="proof-file" data-proof-file-said role="status" aria-live="polite"></span></div>`;
+  const skip = opts.review ? `<label class="field-check" data-skip-review><input type="checkbox" name="skip_review" value="1"${opts.values?.skip_review === "1" ? " checked" : ""}> Complete it without Muse's review: your call</label>` : "";
+  return fieldHtml("proofRef", "Proof of work", opts.values?.proofRef ?? "", hint, check) + `<p class="proof-said" data-proof-said role="status" aria-live="polite"></p>` + what + skip;
 }
 
 // To add a subtask: its name; under work already under way it's marked as found, elsewhere a chip marks it.
@@ -559,16 +572,19 @@ const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeE
 // Over the cap: stop keeping it, drain the rest, and answer 413 (destroying the socket
 // would leave the client with a reset instead of an answer).
 function readBody(req: IncomingMessage): Promise<string> {
+  return readBytes(req, MAX_BODY).then((b) => b.toString("utf8"));
+}
+function readBytes(req: IncomingMessage, cap: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY) { chunks.length = 0; return; }
+      if (size > cap) { chunks.length = 0; return; }
       chunks.push(c);
     });
-    req.on("end", () => { if (size > MAX_BODY) reject(new Error("body too large")); });
-    req.on("end", () => { if (size <= MAX_BODY) resolve(Buffer.concat(chunks).toString("utf8")); });
+    req.on("end", () => { if (size > cap) reject(new Error("body too large")); });
+    req.on("end", () => { if (size <= cap) resolve(Buffer.concat(chunks)); });
     req.on("error", reject);
   });
 }
@@ -667,7 +683,9 @@ function blockFromDialog(form: URLSearchParams, type: string, id: string, r: Fol
 }
 
 // what a decision's fields held, to show them again when it comes back
-const DIALOG_FIELDS = ["blocker", "reason", "evidenceRef", "proofRef", "name", "discovered", "parent_id", "comment"];
+// a link to work that isn't code (src/fold/kinds.ts): its proof
+const LINK = /^https:\/\/[^\s]{4,2000}$/;
+const DIALOG_FIELDS = ["blocker", "reason", "evidenceRef", "proofRef", "name", "discovered", "parent_id", "comment", "skip_review"];
 const valuesOf = (form: URLSearchParams) => Object.fromEntries(DIALOG_FIELDS.flatMap((k) => (form.get(k) === null ? [] : [[k, form.get(k) as string]])));
 
 export function tiraServer(opts: ServeOptions): Server & { token: string } {
@@ -726,7 +744,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     });
   };
   // at a public address: browsers keep to https, and cookies go over https only
-  const send = (res: ServerResponse, status: number, type: string, body: string, extra: Record<string, string> = {}) => {
+  const send = (res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}) => {
     const cookie = extra["Set-Cookie"];
     const secure = opts.site ? { "Strict-Transport-Security": "max-age=31536000", ...(cookie ? { "Set-Cookie": `${cookie}; Secure` } : {}) } : {};
     res.writeHead(status, { ...HEADERS, "Content-Type": type, ...extra, ...secure });
@@ -752,7 +770,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { people, agents } = await assignees(ws.stream, me.actor);
     const onboarding = me.login ? welcomeFor(me.login, name ?? githubAuth(me.login, linkEnv)?.name ?? me.login, ws, r, events, { repo: !!link?.repo, agent: agents.length > 0, team: people.length > 1 }) : undefined;
     const inbox = me.login ? await inboxFor(me.login) : undefined;
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create, runs: wakeRunsOf(ws.stream, linkEnv) };
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, reviewer: reviewerNow() !== undefined, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create, runs: wakeRunsOf(ws.stream, linkEnv) };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
@@ -823,7 +841,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const p = actor === undefined
       ? { ok: false, title: `${PAGE_VERBS[at.event]?.label ?? at.event} ${at.id}?`, verdict: "Sign in with GitHub first (Integrations), so tira knows who makes this change.", seen: r.lastSeq, suggestions: [] }
       : await packetFor({ wp: previews, r, events, registry: opts.registry, stream: ws.stream, actor, ...at });
-    const co: ConfirmOpts = { ...at, token, q: ws.q, ...o };
+    const completing = at.event === "COMPLETE" && at.type === "node";
+    const co: ConfirmOpts = { ...at, token, q: ws.q, ...o, ...(completing ? completingOpts(r, ws.stream, at.id) : {}) };
     send(res, status ?? (p.ok ? 200 : 409), html, fragment ? packetBody(p, co, true) : confirmPage(p, co));
   };
 
@@ -853,11 +872,14 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const shown = (a: Asked) => a.typed !== null || a.dialog === true;
   const targetOf = (a: PageAction): Target => ({ type: a.type, id: a.id, event: a.event });
 
+  // a write from another site's page (a browser always says where a write comes from)
+  const foreign = (req: IncomingMessage, host: string) => {
+    const origin = req.headers.origin;
+    return origin !== undefined && origin !== (host === opts.site?.host ? opts.site.origin : `http://${host}`);
+  };
   // the same origin, within the size cap, with this process's token
   const formOf = async (req: IncomingMessage, res: ServerResponse, host: string): Promise<URLSearchParams | undefined> => {
-    const origin = req.headers.origin;
-    const own = host === opts.site?.host ? opts.site.origin : `http://${host}`;
-    if (origin !== undefined && origin !== own) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
+    if (foreign(req, host)) { send(res, 403, text, "cross-origin writes are refused\n"); return undefined; }
     let form: URLSearchParams;
     try {
       form = new URLSearchParams(await readBody(req));
@@ -951,10 +973,20 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const commits = commitsOf(r, a.ws.stream).get(a.ask.id) ?? [];
     const prs = linksOf(r, a.ws.stream).get(a.ask.id)?.prs ?? [];
     if (commits.some((c) => c.sha === ref) || prs.some((p) => p.url === ref)) return { kept: false };
+    // work that isn't code: a link to it, or a file added to it, is its proof (a commit still counts,
+    // checked as below)
+    if (kindOf(a.ask.id, ticketsOf(r, a.ws.stream).get(a.ask.id)).kind !== "code" && (LINK.test(ref) || (await fileFor(ref, a.ws.stream, a.ask.id)))) return { kept: false };
     const got = await proveWith(opts.store, opts.registry, a.ws.stream, a.ask.id, acc.githubOf(a.login), ref).catch((err: unknown) => ({ why: `Couldn't reach GitHub (${(err as Error).message}).` }));
     if ("why" in got) return { why: got.why, kept: false };
     a.ask.payload.evidenceRef = got.ref;
     return { kept: true };
+  };
+
+  // the file a proof names (file:<id>), if it's one added to this task
+  const fileFor = async (ref: string, stream: string, task: string): Promise<FileMeta | undefined> => {
+    const id = FILE_REF.exec(ref)?.[1];
+    const f = id ? await fileOf(id, linkEnv) : undefined;
+    return f && f.stream === stream && f.task === task ? { id: f.id, name: f.name, type: f.type, size: f.size } : undefined;
   };
 
   // a typed block on an open task: why it can't wait on that task, if it can't
@@ -1038,8 +1070,10 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     return r.entities.some((e) => e.stream === ws.stream && e.type === "node" && e.id === id) ? r : undefined;
   };
   // a ticket's Edit form, read: each field trimmed, the steps one to a row (each `step` field, in
-  // order; an older page or a script sends them one per line, as `steps`)
-  type TicketAsked = TicketWords & { assignee: string };
+  // order; a script sends them one per line, as `steps`). The page no longer edits steps (Isha,
+  // 2026-10-26: "we can remove the step option"), so a form with none keeps the ones it has; so does
+  // one without the review switch (review_set marks a form that has it).
+  type TicketAsked = TicketWords & { assignee: string; review?: boolean; keepSteps?: boolean };
   const stepsAsked = (form: URLSearchParams): string[] => (form.has("step") ? form.getAll("step") : (form.get("steps") ?? "").replaceAll("\r\n", "\n").split("\n"))
     .map((x) => x.trim().replaceAll(/\s+/g, " ")).filter((x) => x !== "");
   const ticketAsked = (form: URLSearchParams): TicketAsked => ({
@@ -1048,6 +1082,9 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     steps: stepsAsked(form),
     estimate: effortAsked(form),
     assignee: (form.get("assignee") ?? "").trim(),
+    ...(form.has("kind") ? { kind: (form.get("kind") ?? "").trim() } : {}), // left out (an older page, a script): as it was
+    ...(form.has("review_set") ? { review: form.get("review") === "1" } : {}),
+    keepSteps: !form.has("step") && !form.has("steps"),
   });
   // the effort as typed (Isha, 2026-10-26): a number and h or d, joined ("3h", "2d"; none or 0 clears
   // it), else an estimate given whole, as an older page or a script sends it
@@ -1063,11 +1100,17 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
   const ticketProblem = (asked: TicketAsked, allowed: (string | undefined)[]): string | undefined => ticketWordsProblem(asked) ?? assigneeProblem(asked.assignee, allowed);
 
   // POST /tickets: a ticket's Edit form (its title, description, steps, estimate and assignee), the
-  // whole ticket as a new version, written as the person saving it.
+  // whole ticket as a new version, written as the person saving it. The page's script saves it in
+  // place (Isha, 2026-10-26: "review toggle is refreshing the screen"): with fragment=1 the answer is
+  // JSON, what happened, the log's new position, and the description as it now reads; with no
+  // script, back to the task's dialog.
   const saveTicket = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
-    const said = (f: { ok: boolean; text: string }, task?: string) => toTicket(res, ws, form, f, task);
+    const inPlace = form.get("fragment") === "1";
+    const said = (f: { ok: boolean; text: string; seq?: number }, task?: string) => (inPlace
+      ? send(res, 200, "application/json; charset=utf-8", JSON.stringify({ ...f, desc: richHtml((form.get("description") ?? "").replaceAll("\r\n", "\n").trim()) }))
+      : toTicket(res, ws, form, f, task));
     const actor = actorNow();
     if (actor === undefined) return said({ ok: false, text: "Sign in with GitHub first, so tira knows who writes the ticket." });
     const task = form.get("task") ?? "";
@@ -1075,16 +1118,18 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (!r) return said({ ok: false, text: `There is no task ${task}.` });
     const asked = ticketAsked(form);
     const before = ticketsOf(r, ws.stream).get(task);
+    if (asked.kind === undefined && before?.kind) asked.kind = before.kind;
+    if (asked.keepSteps) asked.steps = before?.steps ?? [];
     const { people, agents } = await assignees(ws.stream, actor);
     const why = ticketProblem(asked, [...people, ...agents, before?.assignee]);
     if (why) return said({ ok: false, text: `The ticket wasn't saved: ${why}` });
-    const payload = ticketPayload(task, asked, asked.assignee);
+    const payload = ticketPayload(task, asked, asked.assignee, asked.review ?? before?.review);
     if (saysSame(before, payload)) return said({ ok: true, text: "Nothing changed." });
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
     if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
     // given to an agent that starts when it's asked: it starts on it
     const given = asked.assignee !== "" && asked.assignee !== before?.assignee ? await wake(ws.stream, task, [asked.assignee], actor, "assigned") : "";
-    said({ ok: true, text: `Saved.${given}` }, task);
+    said({ ok: true, text: `Saved.${given}`, seq: w.seq }, task);
   };
 
   // Agents that start when they're @mentioned or given a task (wake.ts; Isha, 2026-10-26): each
@@ -1099,37 +1144,95 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const title = ticketsOf(r, stream).get(task)?.title ?? task;
     const project = workspaceOf(r, stream)?.title ?? stream;
     const fire = opts.links?.fireRoutine ?? fireRoutine;
-    const said: string[] = [];
-    for (const w of routines) {
-      if (!wakeGate.open(stream, task, w.agent)) continue; // already started on it moments ago
+    // each its own run, started together (not one already started on it moments ago)
+    const said = await Promise.all(routines.filter((w) => wakeGate.open(stream, task, w.agent)).map(async (w) => {
       const got = await fire(w.url, w.token, wakeText({ agent: w.agent, by, key, title, project, why, ...(words ? { words } : {}) }));
       if (got.ok) await saveWakeRun({ stream, task, agent: w.agent, session: got.session, by }, linkEnv);
-      said.push(got.ok ? ` ${w.agent} is starting on it.` : ` ${w.agent} didn't start: ${got.why}.`);
-    }
+      return got.ok ? ` ${w.agent} is starting on it.` : ` ${w.agent} didn't start: ${got.why}.`;
+    }));
     return said.join("");
   };
 
   // POST /comments: a comment on a ticket (feedback its agent reads), written as the person commenting.
+  // The page's script adds it in place (Isha, 2026-10-26: "adding a comment shouldn't reload the
+  // page"): with fragment=1 the answer is JSON, what happened, the log's new position, and the comment
+  // as the thread shows it; with no script, back to the task's dialog.
   const addComment = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
     const form = await formOf(req, res, host);
     if (form === undefined) return;
-    const said = (f: { ok: boolean; text: string }, task?: string) => toTicket(res, ws, form, f, task);
+    const inPlace = form.get("fragment") === "1";
+    const said = (f: { ok: boolean; text: string; seq?: number; item?: string }, task?: string) => (inPlace
+      ? send(res, 200, "application/json; charset=utf-8", JSON.stringify(f))
+      : toTicket(res, ws, form, f, task));
     const actor = actorNow();
     if (actor === undefined) return said({ ok: false, text: "Sign in with GitHub first, so tira knows who comments." });
     const task = form.get("task") ?? "";
     if (!(await taskIn(ws, task))) return said({ ok: false, text: `There is no task ${task}.` });
     const words = (form.get("text") ?? "").replaceAll("\r\n", "\n").trim();
-    if (words === "" || words.length > MAX_COMMENT || !NO_CONTROL.test(words)) return said({ ok: false, text: `A comment is 1 to ${MAX_COMMENT} characters.` });
-    const w = await writeComment(ws.stream, task, words, actor);
+    const files = await filesAsked(form, ws, task, actor);
+    if (typeof files === "string") return said({ ok: false, text: files });
+    if ((words === "" && files.length === 0) || words.length > MAX_COMMENT || !NO_CONTROL.test(words)) return said({ ok: false, text: `A comment is 1 to ${MAX_COMMENT} characters, or a file.` });
+    const id = commentId();
+    const w = await writeComment(ws.stream, task, words, actor, files, id);
     if (w !== undefined) return said({ ok: false, text: `The comment wasn't added (${w}).` });
     const woke = await wake(ws.stream, task, mentionsIn(words), actor, "mentioned", words);
-    said({ ok: true, text: `Comment added.${woke}` }, task);
+    const { r } = await now(ws.stream);
+    const c = (commentsOf(r, ws.stream).get(task) ?? []).find((x) => x.id === id);
+    said({ ok: true, text: `Comment added.${woke}`, ...(c ? { seq: c.seq, item: commentItemHtml(c, ws.q) } : {}) }, task);
   };
-  // a comment on a task, as `actor`: undefined when it was written, else why not
-  const writeComment = async (stream: string, task: string, words: string, actor: string): Promise<string | undefined> => {
-    const w = (await dispatcher.submit({ stream, kind: "create", entity: { type: COMMENT, id: `c-${randomBytes(6).toString("hex")}` }, actor, payload: { task, text: words } })).result;
+  const commentId = () => `c-${randomBytes(6).toString("hex")}`;
+  // a comment on a task, as `actor`, with its files: undefined when it was written, else why not
+  const writeComment = async (stream: string, task: string, words: string, actor: string, files: readonly FileMeta[] = [], id = commentId()): Promise<string | undefined> => {
+    const payload = { task, text: words, ...(files.length > 0 ? { files } : {}) };
+    const w = (await dispatcher.submit({ stream, kind: "create", entity: { type: COMMENT, id }, actor, payload })).result;
     if (w.status === "appended") return undefined;
     return w.status === "rejected" || w.status === "refused" ? w.detail : w.status;
+  };
+
+  // POST /files?task=…: a file added to a task (src/fold/files.ts), sent whole as the body by the
+  // page's script, its name in x-file-name and the page's token in x-tira-token; kept, and what it is
+  // said back (JSON) for the comment or the proof that names it. Only a kind tira keeps, 5 MB at most.
+  const uploadFile = async (req: IncomingMessage, res: ServerResponse, url: URL, host: string, ws: Workspace) => {
+    if (foreign(req, host)) return send(res, 403, text, "cross-origin writes are refused\n");
+    if (!safeEqual(String(req.headers["x-tira-token"] ?? ""), token)) return send(res, 403, text, "This page is out of date: reload it and try again.\n");
+    const actor = actorNow();
+    if (actor === undefined) return send(res, 401, text, "Sign in first, so tira knows who adds it.\n");
+    const task = url.searchParams.get("task") ?? "";
+    if (!(await taskIn(ws, task))) return send(res, 404, text, `There is no task ${task}.\n`);
+    let name = "";
+    try {
+      name = cleanName(decodeURIComponent(String(req.headers["x-file-name"] ?? "")));
+    } catch {
+      // not a name: said below
+    }
+    const type = fileTypeOf(name);
+    if (!type) return send(res, 415, text, `${name || "That file"} isn't a kind tira keeps: a picture, a PDF, text or an office document.\n`);
+    let bytes: Buffer;
+    try {
+      bytes = await readBytes(req, MAX_FILE);
+    } catch {
+      return send(res, 413, text, `${name} is over ${sizeSaid(MAX_FILE)}.\n`);
+    }
+    const meta: FileMeta = { id: randomBytes(12).toString("hex"), name, type, size: bytes.length };
+    await saveFile({ ...meta, stream: ws.stream, task, by: actor, bytes }, linkEnv);
+    send(res, 200, "application/json; charset=utf-8", JSON.stringify(meta));
+  };
+  // GET /file?id=…: a file of this project, as itself: a picture or a PDF shown, anything else
+  // downloaded, never run (no scripts, nothing it names is fetched)
+  const serveFile = async (_req: IncomingMessage, res: ServerResponse, url: URL, _host: string, ws: Workspace) => {
+    const f = await fileOf(url.searchParams.get("id") ?? "", linkEnv);
+    if (!f || f.stream !== ws.stream) return send(res, 404, text, "There is no such file in this project.\n");
+    const how = showsInline(f.type) ? "inline" : "attachment";
+    const sandbox = f.type === "application/pdf" ? "" : "; sandbox"; // a browser won't show a PDF in a sandbox
+    send(res, 200, f.type, f.bytes, { "Content-Disposition": `${how}; filename*=UTF-8''${encodeURIComponent(f.name)}`, "Content-Security-Policy": `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'${sandbox}`, "Cache-Control": "private, max-age=86400" });
+  };
+  // the files a comment names (each `file` field): added to this task by this person; else why not
+  const filesAsked = async (form: URLSearchParams, ws: Workspace, task: string, actor: string): Promise<FileMeta[] | string> => {
+    const ids = [...new Set(form.getAll("file"))];
+    if (ids.length > MAX_FILES) return `Up to ${MAX_FILES} files a comment.`;
+    const got = await Promise.all(ids.map((id) => fileOf(id, linkEnv)));
+    if (got.some((f) => !f || f.stream !== ws.stream || f.task !== task || f.by !== actor)) return "A file wasn't found: add it again.";
+    return got.flatMap((f) => (f ? [{ id: f.id, name: f.name, type: f.type, size: f.size }] : []));
   };
 
   const act = async (req: IncomingMessage, res: ServerResponse, _url: URL, host: string, ws: Workspace) => {
@@ -1146,23 +1249,111 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const cmd = commandOf(ask, ws.stream, actor);
     const first = ticket === undefined ? undefined : commandOf(ticket, ws.stream, actor);
     if (await heldBack(res, a, cmd, first)) return;
-    let flash = await inOrder([
+    const reviewed = await pageReview(a, ws.stream);
+    if (!reviewed.go) return answered(res, a, ws, { ok: false, text: reviewed.text });
+    const flash = await inOrder([
       ...(ticket === undefined || first === undefined ? [] : [() => write(ticket, first)]),
       () => write(ask, cmd),
     ]);
-    // the decision's comment, on the ticket, once the move is written
+    if (!flash.ok) return answered(res, a, ws, flash);
+    const after = await afterMove(a, ws.stream, actor, reviewed.skipped);
+    answered(res, a, ws, { ...flash, text: `${flash.text}${reviewed.note}${after}`, changed: changedBy(ask, ticket) });
+  };
+  // completing a task on the page: Muse reviews it first, unless the person completing it decides not to
+  const pageReview = async (a: Asked, stream: string): Promise<{ go: true; note: string; skipped: boolean } | { go: false; text: string }> => {
+    const ask = a.ask;
+    if (ask.event !== "COMPLETE") return { go: true, note: "", skipped: false };
+    if (a.values?.skip_review === "1" && reviewsIt(stream, ask.id, (await now(stream)).r)) return { go: true, note: "", skipped: true };
+    if (ask.type !== "node") return { go: true, note: "", skipped: false };
+    const reviewed = await reviewFirst(stream, ask.id, String(ask.payload.evidenceRef ?? ""), true);
+    return reviewed.go ? { ...reviewed, skipped: false } : reviewed;
+  };
+  // once the move is written: that the review was skipped, and the decision's comment, on the ticket
+  // (an agent it @mentions starts on it); in words for the result
+  const afterMove = async (a: Asked, stream: string, actor: string, skipped: boolean): Promise<string> => {
+    if (skipped) await writeComment(stream, a.ask.id, `Completed without review: ${actor}'s call.`, actor);
     const comment = (a.values?.comment ?? "").replaceAll("\r\n", "\n").trim();
-    if (flash.ok && comment !== "" && ask.type !== IDEA) {
-      const why = await writeComment(ws.stream, ask.id, comment, actor);
-      const woke = why === undefined ? await wake(ws.stream, ask.id, mentionsIn(comment), actor, "mentioned", comment) : "";
-      flash = { ...flash, text: why === undefined ? `${flash.text} Comment added.${woke}` : `${flash.text} The comment wasn't added (${why}).` };
-    }
+    if (comment === "" || a.ask.type === IDEA) return "";
+    const why = await writeComment(stream, a.ask.id, comment, actor);
+    if (why !== undefined) return ` The comment wasn't added (${why}).`;
+    return ` Comment added.${await wake(stream, a.ask.id, mentionsIn(comment), actor, "mentioned", comment)}`;
+  };
+  // the result of a move, shown once on the board it was made on
+  const answered = (res: ServerResponse, a: Asked, ws: Workspace, flash: { ok: boolean; text: string; changed?: string[] }) => {
     const key = flashKey();
-    flashes.set(key, flash.ok ? { ...flash, changed: changedBy(ask, ticket) } : flash);
+    flashes.set(key, flash);
     if (flashes.size > 50) flashes.delete(flashes.keys().next().value as string);
     const back = withQ(`/?r=${key}`, ws.q); // the result, in the workspace it was written to
     if (a.fragment) return send(res, 200, html, `<div data-go="${esc(back)}"></div>`);
     send(res, 303, text, "", { Location: back });
+  };
+
+  // Review before done (src/serve/review.ts; Isha, 2026-10-26): when a task a person marked for review
+  // is completed, Muse checks the work against its ticket first ("human can mark as REVIEW, then only
+  // it needs a review"). Passed: said on the task, and the task is done. Problems: each a fix subtask
+  // under the task (found while reviewing it, itself marked for review), said on the task, and the
+  // task stays open (its subtasks close first). After MAX_ROUNDS reviews that asked for changes, a
+  // person decides. No reviewer set up, or a task not marked: no review. (A task whose subtasks are
+  // open never gets here: the page's decision refuses it first, and an agent's complete_task doesn't ask.)
+  // whether completing this task asks Muse first: a reviewer set up, and the task marked for review
+  const reviewsIt = (stream: string, task: string, r: FoldResult) => reviewerNow() !== undefined && ticketsOf(r, stream).get(task)?.review === true;
+  // the Complete dialog's: the task's work type (what its proof is), and whether Muse reviews it
+  const completingOpts = (r: FoldResult, stream: string, task: string): Partial<ConfirmOpts> => ({ kind: kindOf(task, ticketsOf(r, stream).get(task)).kind, review: reviewsIt(stream, task, r) });
+  const reviewerNow = (): Reviewer | undefined => {
+    if (opts.links?.reviewer) return opts.links.reviewer;
+    const key = reviewKey(linkEnv);
+    return key ? museReviewer(key) : undefined;
+  };
+  const reviewFirst = async (stream: string, task: string, proof: string, person: boolean): Promise<{ go: true; note: string } | { go: false; text: string }> => {
+    const reviewer = reviewerNow();
+    if (!reviewer) return { go: true, note: "" };
+    const { r } = await now(stream);
+    if (ticketsOf(r, stream).get(task)?.review !== true) return { go: true, note: "" }; // not marked for review
+    const comments = commentsOf(r, stream).get(task) ?? [];
+    if (roundsOf(comments) >= MAX_ROUNDS) return { go: false, text: `Muse has asked for changes ${MAX_ROUNDS} times: ${person ? "complete it without review if it's done" : "a person decides now"}.` };
+    const file = await fileFor(proof, stream, task);
+    const v = await reviewer(reviewAsk(r, stream, task, proof, comments, file));
+    if (!v.ok) return { go: false, text: `The review couldn't run: ${v.why}. Try again${person ? ", or complete it without review" : ""}.` };
+    if (v.pass) {
+      await writeComment(stream, task, passedText(v), REVIEWER);
+      return { go: true, note: " Muse reviewed it: passed." };
+    }
+    const made = await fixesUnder(stream, task, v.findings);
+    await writeComment(stream, task, changesText(v), REVIEWER);
+    const one = made === 1;
+    return { go: false, text: `Muse found ${made} problem${one ? "" : "s"}: ${one ? "a fix subtask is" : "fix subtasks are"} under ${task}. Complete it once ${one ? "it's" : "they're"} closed, and Muse reviews it again.` };
+  };
+  const proofDetailOf = (commit: { message: string } | undefined, file: FileMeta | undefined) => {
+    if (commit) return `The commit's message: ${commit.message}`;
+    return file ? `A file added to the task: ${file.name} (${file.type}, ${sizeSaid(file.size)})` : "";
+  };
+  // what Muse is shown: the ticket, its kind and what proof of it looks like, the proof (a commit's
+  // message, when tira knows it) and the latest comments
+  const reviewAsk = (r: FoldResult, stream: string, task: string, proof: string, comments: readonly { by: string; text: string }[], file?: FileMeta): ReviewAsk => {
+    const t = ticketsOf(r, stream).get(task);
+    const { kind } = kindOf(task, t);
+    const commit = proof.length >= 7 ? (commitsOf(r, stream).get(task) ?? []).find((c) => c.sha.startsWith(proof)) : undefined;
+    return {
+      key: ticketKeys(r, stream).get(task) ?? task, title: t?.title ?? task, kind, proofFor: PROOF_FOR[kind], description: t?.description ?? "", steps: t?.steps ?? [],
+      proof, proofDetail: proofDetailOf(commit, file), comments: comments.slice(-10).map((c) => `${c.by}: ${c.text}`),
+    };
+  };
+  // each finding, a subtask under the task, found while reviewing it, its ticket saying why and the fix
+  const fixesUnder = async (stream: string, task: string, findings: readonly Finding[]): Promise<number> => {
+    let made = 0;
+    const taken = new Set(flatten(streamView((await now(stream)).r, stream).roots).map((x) => x.id));
+    for (const f of findings) {
+      const words = f.title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "_").replaceAll(/^_+|_+$/g, "").slice(0, 50);
+      const base = subtaskName(`fix_${words}`.replace(/_$/, "")) ?? "fix";
+      let id = base;
+      for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
+      const born = (await dispatcher.submit({ stream, kind: "create", entity: { type: "node", id }, actor: REVIEWER, payload: { parent_id: task, kind: "discovered", discovered_during: task } })).result;
+      if (born.status !== "appended") continue;
+      taken.add(id);
+      made += 1;
+      await dispatcher.submit({ stream, kind: "create", entity: { type: TICKET, id, version: 1 }, actor: REVIEWER, payload: ticketPayload(id, { title: f.title.slice(0, 120), description: `${f.why}\n\nFix: ${f.fix}`, steps: [], estimate: "" }, undefined, true) }); // its fix is reviewed too
+    }
+    return made;
   };
 
   // POST /tasks: the board's + Create (Isha, 2026-10-26): a new task by name, at the top or under an
@@ -1485,7 +1676,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     send(res, 303, text, "", { Location: withQuery(asking.redirect_uri, { code, ...state, iss: opts.site.origin }) });
   };
 
-  const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "POST /tasks": createTask, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, ...integrations };
+  const routes: Record<string, Route> = { "GET /": page, "GET /oauth/authorize": authorizeGet, "POST /oauth/authorize": authorizePost, "GET /api/tasks": tasks, "GET /api/workspaces": workspaces, "GET /api/live": liveSeq, "GET /confirm": confirm, "POST /act": act, "POST /tasks": createTask, "GET /projects/new": newProjectGet, "POST /projects": newProject, "POST /projects/delete": deleteProject, "POST /projects/rename": renameProject, "POST /tickets": saveTicket, "POST /comments": addComment, "POST /proof": proofPost, "POST /files": uploadFile, "GET /file": serveFile, ...integrations };
   // tira's MCP server at /mcp (src/mcp/http.ts), with the same agents' tokens as Project settings
   // an agent works while the person who connected it is still in its project and not removed (once
   // people sign in: before that, there's no one to check)
@@ -1494,7 +1685,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     await accountsNow();
     return !isBlocked(agent.createdBy, linkEnv) && inProject(await peopleNow(agent.project), agent.createdBy);
   };
-  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), stillIn, commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref) });
+  const mcp = mcpRoute({ store: opts.store, registry: opts.registry, ...(opts.site ? { site: opts.site } : {}), tokens: () => opts.links?.agentTokens ?? agentTokensFor(opts.links?.env ?? process.env), stillIn, commitsFor: (agent, task) => commitsSaid(agent.project, task, agent.createdBy), proofFor: (agent, task, ref) => proveWith(opts.store, opts.registry, agent.project, task, acc.githubOf(agent.createdBy), ref), reviewFor: (agent, task, proof) => reviewFirst(agent.project, task, proof, false) });
   // The pages that are yours, not a project's: signing in, your settings and profile, your project
   // list and making a project, approving Claude. Every other page is its project's, and only its
   // people get it (src/serve/team.ts); anyone else finds no such project.

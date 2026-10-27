@@ -8,9 +8,11 @@
 
 **Agents work the board through MCP.** Claude Code, Cursor, VS Code, Claude Desktop and claude.ai connect, each agent with its own token. Ten tools: next task, list, get, start, complete with proof, block with a reason, add a subtask, file an idea, comment, and fill in a ticket. There is no tool to cancel, reopen, unblock or delete: those stay with people. An agent's moves go through the same rules as a person's and show on the board under the agent's name. Give an agent a Claude Code routine, and @mentioning it on a task (or giving it one) starts it in Anthropic's cloud, with no need to go and tell it.
 
+**Review when it matters.** Each task has a work type (code, spec, design, research and more), which tira guesses and you can change: code is proven by a pull request or commit, anything else by a link or a file, like a screenshot. Turn on Review for a task and Meta's Muse model checks the work against its ticket before it's done, as an adversarial checker that's never the one who did it. Each problem it finds becomes a fix subtask under the task, so it can't close until they're done, and then it's reviewed again. A person always has the final say.
+
 **GitHub and Jira stay in step.** Link a project to a repo and a Jira project, then press Sync. tira links the pull requests that name a task and offers a merged one as its proof, makes a Jira issue for every task, and brings people's Jira moves back as commands. Its rules can refuse those too: Done in Jira with no proof is refused, and the refusal is in the history.
 
-**Result:** all **1081** planted bugs caught · **532** tests pass on Postgres, 0 fail · the two times the factory lied, replayed, are both refused
+**Result:** all **1115** planted bugs caught · **542** tests pass on Postgres, 0 fail · the two times the factory lied, replayed, are both refused
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kanban-dark.png">
@@ -41,9 +43,9 @@ Twice the factory lied to him. A session that had gone quiet was assumed stood d
 
 | Check | Run it | Result |
 |---|---|---|
-| Planted bugs: each breaks one rule on purpose | `npm run mutants` | **1081 / 1081** caught (last full run 2026-10-26) |
-| The test suite, Postgres included | `TIRA_PG_URL=… npm test` | **532** pass, 0 fail, 6 to do |
-| The same, with no database | `npm test` | 465 pass, 46 skipped (they need Postgres) |
+| Planted bugs: each breaks one rule on purpose | `npm run mutants` | **1115 / 1115** caught (last full run 2026-10-26) |
+| The test suite, Postgres included | `TIRA_PG_URL=… npm test` | **542** pass, 0 fail, 6 to do |
+| The same, with no database | `npm test` | 475 pass, 46 skipped (they need Postgres) |
 | The rule tables against the XState charts they come from | `npm run verify` | 282 checks pass |
 | Incident 1: a quiet session | in the suite (`scenarios/I1-silent-session.json`) | not stood down by a timeout |
 | Incident 2: landed without checks | in the suite (`scenarios/I2-unchecked-landing.json`) | not verified without a PASS, and never by whoever filed it |

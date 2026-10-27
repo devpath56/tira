@@ -3,6 +3,7 @@
 // to the program that started it (`tira mcp`, for Claude Desktop). It speaks the 2026-07-28 spec,
 // and 2025-era clients too. Every tool reads or writes through tira's own rules, so an agent can
 // do nothing a person couldn't, and the history says which agent did it.
+import { KINDS } from "../fold/kinds.ts";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import type { EventStore } from "../store/types.ts";
@@ -20,6 +21,8 @@ export interface AgentContext {
   stillConnected?: () => Promise<boolean>
   fetchCommits?: (task: string) => Promise<string | undefined>
   proveWith?: (task: string, ref: string) => Promise<{ ref: string } | { why: string }>
+  // Muse's review before a task is done (src/serve/review.ts): go, or why not (fix subtasks made)
+  reviewFirst?: (task: string, proof: string) => Promise<{ go: true; note: string } | { go: false; text: string }>
 }
 
 export { agentNameProblem } from "./names.ts";
@@ -68,8 +71,8 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ id }) => answer(await guarded(ctx, async () => startTask(ctx, await taskIdOf(ctx, id)))));
   server.registerTool("complete_task", {
     title: "Complete a task",
-    description: "Mark a task Done. The proof of work is a commit or a pull request of the project's GitHub repo: the task's own (get_task lists them; tira looks on GitHub for its newest first) or any other, which tira checks on GitHub. tira refuses anything else, before the task is started, or while its subtasks are open.",
-    inputSchema: z.object({ id: taskId, proof: words("a commit (its id, or its first 7 or more characters) or a pull request (#12, or its link) of the project's repo"), note: words("optional: a note for the task's history").optional() }),
+    description: "Mark a task Done. Its proof follows its work type (get_task says which): for code, a commit or a pull request of the project's GitHub repo; for any other type, an https link to the work (a Claude artifact, a doc, a Figma frame). For code: the task's own (get_task lists them; tira looks on GitHub for its newest first) or any other, which tira checks on GitHub. tira refuses anything else, before the task is started, or while its subtasks are open.",
+    inputSchema: z.object({ id: taskId, proof: words("for code: a commit (its id, or its first 7 or more characters) or a pull request (#12, or its link) of the project's repo; for any other work type: an https link to it"), note: words("optional: a note for the task's history").optional() }),
     annotations: { ...WRITES, idempotentHint: true },
   }, async ({ id, proof, note }) => answer(await guarded(ctx, async () => completeTask(ctx, await taskIdOf(ctx, id), proof, note))));
   server.registerTool("block_task", {
@@ -101,8 +104,8 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
   }, async ({ summary, why, under }) => answer(await guarded(ctx, () => fileIdea(ctx, summary, why, under))));
   server.registerTool("add_comment", {
     title: "Comment on a task",
-    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. Write @name to mention a person (their GitHub login) or another agent. When you need a person to decide or answer, @mention them: it waits in their Needs you, under For you, until they reply. People see it on the ticket, under your name.",
-    inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment") }),
+    description: "Reply on a task's comments (get_task shows them): an answer to a person's feedback, a question, or a note on the work. Write @name to mention a person (their GitHub login) or another agent. When you need a person to decide or answer, @mention them: it waits in their Needs you, under For you, until they reply. People see it on the ticket, under your name. Keep it short and plain: a few bullet points ('- ' at the start of a line), no preamble, no restating the question.",
+    inputSchema: z.object({ id: taskId, text: z.string().trim().min(1).max(2000).describe("your comment: short bullet points") }),
     annotations: { ...WRITES, idempotentHint: false },
   }, async ({ id, text }) => answer(await guarded(ctx, async () => addComment(ctx, await taskIdOf(ctx, id), text))));
   server.registerTool("fill_ticket", {
@@ -114,6 +117,7 @@ export function tiraMcpServer(ctx: AgentContext): McpServer {
       description: z.string().max(MAX_DESCRIPTION).optional().describe("optional: what the work is and why, in a few sentences"),
       steps: z.array(z.string().max(MAX_STEP)).max(MAX_STEPS).optional().describe(`optional: the steps to do it, in order, up to ${MAX_STEPS} (these replace the ticket's steps)`),
       estimate: z.string().max(12).optional().describe("optional: how long it should take: a number and a unit, e.g. 30m, 2h, 1d (8 hours) or 1w"),
+      kind: z.enum(["", ...KINDS]).optional().describe("optional: the work type (it says what proof looks like: code needs a commit or pull request, the rest a link): code, spec, design, research, data, testing, ops, decision, docs or other; empty: tira guesses"),
     }),
     annotations: { ...WRITES, idempotentHint: true },
   }, async ({ id, ...fill }) => answer(await guarded(ctx, async () => fillTicket(ctx, await taskIdOf(ctx, id), fill))));

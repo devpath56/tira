@@ -1,6 +1,7 @@
 // What tira's tools for agents read: the board's own views of one project (its task index, the
 // cursor and the task being worked on, each task's ticket, comments, history and proof), in a few
 // plain lines an agent can act on.
+import { KIND_WORD, kindOf, PROOF_FOR } from "../fold/kinds.ts";
 import { fold } from "../fold/fold.ts";
 import { flatten, streamView, type TreeRow } from "../render/tree-view.ts";
 import { attentionSince, proofsOf, trails } from "../render/html.ts";
@@ -110,6 +111,11 @@ const kidsLine = (row: TreeRow) => (row.children.length === 0 ? [] : [`Subtasks:
 const bare = (key: string) => key.slice(key.indexOf(":") + 1);
 
 // what a ticket says, in lines: its title, description, steps, estimate and assignee
+// its kind of work (its ticket's, or tira's guess) and so what proof of it complete_task takes
+function kindLine(id: string, k: Ticket | undefined): string {
+  const { kind, guessed } = kindOf(id, k);
+  return `Work type: ${KIND_WORD[kind]}${guessed ? " (tira's guess: fill_ticket sets it)" : ""}. Proof for it: ${PROOF_FOR[kind]}.${k?.review ? " A person marked it for review: Muse checks the work when it's completed." : ""}`;
+}
 function ticketLines(k: Ticket | undefined): string[] {
   if (!k) return ["Ticket: no description, steps, estimate or assignee yet (fill_ticket writes all but the assignee)."];
   return [
@@ -138,7 +144,7 @@ export async function getTask(c: AgentContext, id: string): Promise<ToolText> {
   if (!row || !t) return { ok: false, text: `There is no task ${id} in ${c.stream}: list_tasks shows them.` };
   const skip = new Set(r.anomalies.map((a) => a.seq));
   const marks = [row.cursor && !row.active ? "◆ next" : "", row.discoveredDuring ? `found during ${bare(row.discoveredDuring)}` : ""].filter(Boolean);
-  const lines = [`${row.id} · ${t.ticket} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...ticketLines(tickets.get(row.id)), ...kidsLine(row)];
+  const lines = [`${row.id} · ${t.ticket} · ${stateWord(row.state)} · ${where(t.path)}${marks.map((m) => " · " + m).join("")}`, ...ticketLines(tickets.get(row.id)), kindLine(row.id, tickets.get(row.id)), ...kidsLine(row)];
   const since = row.state === "blocked" ? attentionSince(events, c.stream, skip).blocked.get(row.key) : undefined;
   if (since?.reason) lines.push(`Blocked: ${since.reason}`);
   if (since?.blocker) lines.push(`Waiting on: ${bare(since.blocker)}`);

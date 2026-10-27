@@ -81,7 +81,7 @@ test("the live page: needs attention with actions, the palette, the guide; stric
     assert.equal(page.status, 200);
     assert.equal(page.headers["content-security-policy"], CSP);
     // pinned literally: a change to the policy itself must show up here
-    assert.equal(CSP, "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    assert.equal(CSP, "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     assert.equal(page.headers["cache-control"], "no-store");
     // not no-referrer: under it, browsers send Origin: null on the page's own form posts
     assert.equal(page.headers["referrer-policy"], "same-origin");
@@ -198,7 +198,7 @@ test("every decision shows the ticket beside what the move needs, and a comment:
   }
 });
 
-test("a ticket is edited where it shows: its title, description, steps, estimate and assignee save together as a new version (Save shows once something changes); comments are feedback on it; each comes back to the task's dialog", async () => {
+test("a ticket is edited where it shows: its title saves on leaving it, its description has its own Save, the fields beside it save themselves, all as one new version; steps a script wrote still show and stay; comments are feedback on it; each comes back to the task's dialog", async () => {
   const s = await serving();
   try {
     const post = (path: string, fields: Record<string, string>) => s.http("POST", path, { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams({ token: "t0k3n", ...fields }).toString() });
@@ -208,20 +208,26 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
       return { at, page: (await s.http("GET", at)).body };
     };
     let ls = dialog((await s.http("GET", "/")).body, "loading_state");
-    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line><\/textarea><\/h2><div class="tk-sec" data-sec="description"><h3 class="tk-label">Description<\/h3><textarea name="description" class="tk-in tk-desc-in" rows="2" maxlength="4000" placeholder="Add a description…" aria-label="Description" data-ticket-description><\/textarea><\/div><div class="tk-sec" data-sec="steps"><h3 class="tk-label">Steps<\/h3><ol class="tk-steplist" aria-label="Steps" data-ticket-steps><li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="Add the first step…" aria-label="Add a step" autocomplete="off"><\/textarea><\/li><\/ol><\/div><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // key, title, then each part under its own label (Isha, 2026-10-26)
+    assert.match(ls, /<form method="post" action="\/tickets" class="ticket tk-form" id="tk-\d+" data-ticket data-ticket-form><input type="hidden" name="token" value="t0k3n"><input type="hidden" name="task" value="loading_state"><input type="hidden" name="back" value="#t\d+"><p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_\d+<\/span><\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line data-save-on-leave><\/textarea><\/h2><div class="tk-sec" data-sec="description"><h3 class="tk-label">Description<\/h3><div class="desc-box" data-desc><div class="desc-view empty" data-desc-view tabindex="0" role="button" aria-label="Edit the description">Add a description…<\/div><div class="desc-edit"><div class="desc-tools" role="toolbar" aria-label="Format"><button type="button" class="desc-tool" data-desc-tool="bold" title="Bold" aria-label="Bold"><b>B<\/b><\/button>[^]*?<\/div><textarea name="description" class="tk-in tk-desc-in" rows="3" maxlength="4000" placeholder="What done looks like, links, notes…" aria-label="Description" data-ticket-description><\/textarea><div class="desc-foot">[^]*?<button type="button" class="act desc-cancel" data-desc-cancel>Cancel<\/button><button class="act primary" type="submit">Save<\/button><\/div><\/div><\/div><\/div><div class="tk-save"><button class="act primary" type="submit">Save<\/button><\/div><\/form>/); // key, title, then the description, read until it's clicked; no steps to add (Isha, 2026-10-26)
     const form = /id="(tk-\d+)" data-ticket/.exec(ls)?.[1] ?? "";
-    assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee"><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="" placeholder="Effort" aria-label="Effort" form="${form}"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-${form}-h" form="${form}" checked>`)); // beside, in the same form: effort, a number in hours or days
+    assert.match(ls, new RegExp(`<div class="prop" data-ticket-assignee><span class="lk">Assignee</span><div><select name="assignee" form="${form}" class="prop-in" aria-label="Assignee" data-save-on-change><option value="">Nobody</option><optgroup label="Team"><option value="isha">isha</option></optgroup></select></div></div><div class="prop" data-ticket-estimate><span class="lk">Estimate</span><div><span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="" placeholder="Effort" aria-label="Effort" form="${form}" data-save-on-change><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-${form}-h" form="${form}" data-save-on-change checked>`)); // beside, in the same form, saving themselves: effort, a number in hours or days
     assert.match(ls, /<div class="subtasks tk-sec" data-subtasks><div class="sub-head"><h3 class="tk-label">Subtasks<\/h3><a class="act sub-add" href="[^"]+" data-act="ADD_SUBTASK">\+ Add subtask<\/a><\/div><\/div>/); // none yet: just the way to add one
     assert.match(ls, /<div class="tk-sec activity" data-sec="activity" role="region" aria-label="Activity"><div class="act-head"><h3 class="tk-label">Activity<\/h3><div class="act-tabs" role="group" aria-label="Show"><input class="act-radio" type="radio" name="act-(\d+)" id="act-\1-c" data-tab="c" checked><label for="act-\1-c">Comments<\/label><input class="act-radio" type="radio" name="act-\1" id="act-\1-h" data-tab="h"><label for="act-\1-h">History <span class="k">\d+<\/span><\/label><\/div><\/div><div class="comments" data-comments><form method="post" action="\/comments" class="cm-form" data-comment-form>[^]*?placeholder="Start the conversation…"/);
     assert.match(ls, /<div class="trail" data-history-pane><ol class="feed">/); // the history: the other tab, Comments open first
     assert.match((await s.http("GET", "/")).body, /\.activity:has\(\[data-tab=c\]:checked\) \[data-history-pane\],\.activity:has\(\[data-tab=h\]:checked\) \[data-comments\]\{display:none\}/);
-    // Save shows once something in the ticket changes (a field beside it too: it's in the same form)
-    assert.match((await s.http("GET", "/")).body, /\.js \.tk-form:not\(\[data-dirty\]\) \.tk-save\{display:none\}/);
+    // with the page's script, the form's own Save is gone: the description has its own, the rest saves itself
+    assert.match((await s.http("GET", "/")).body, /\.js \.modal-box:has\(\.tk-view\) \.tk-form \.tk-save\{display:none\}/);
     const app = (await s.http("GET", "/app.mjs")).body;
+    assert.match(app, /^import "\.\/ticket\.mjs";$/m);
+    const ticketJs = (await s.http("GET", "/ticket.mjs")).body;
+    assert.match(ticketJs, /f\.matches\("\[data-save-on-change\]"\)[^]*f\.form\?\.requestSubmit\(\);/);
+    assert.match(ticketJs, /f\.matches\("\[data-save-on-leave\]"\) \|\| !changed\(f\)/);
+    assert.match(ticketJs, /form\.matches\("\[data-ticket-form\]"\)\) return;\n  e\.preventDefault\(\);/); // every save stays on the page
+    assert.match(ticketJs, /body\.set\("fragment", "1"\);/);
+    assert.match(ticketJs, /form\.matches\("\[data-comment-form\]"\)\) return;\n  e\.preventDefault\(\);/); // a comment, too, is added in place
     assert.match(app, /document\.documentElement\.classList\.add\("js"\);/);
-    assert.match(app, /if \(form\?\.matches\("\[data-ticket-form\]"\)\) form\.dataset\.dirty = "1";/);
     // Refresh: while changes wait (a dialog open, a field in use), it says so; a click brings them in (Isha, 2026-10-26)
-    assert.match(app, /if \(busy\(\)\) \{\n\s+waiting = true;\n\s+flagNew\(\);\n\s+\} else reload\(\);/);
+    assert.match(app, /if \(busy\(\)\) \{\n\s+waiting = true;\n\s+if \(at > mine\) flagNew\(\);\n\s+\} else reload\(\);/); // your own saves in a dialog aren't flagged as new
     assert.match(app, /refresh\?\.addEventListener\("click", \(e\) => \{\n\s+e\.preventDefault\(\);\n\s+refresh\.classList\.add\("spin"\);\n\s+reload\(\);/);
     const back = /name="back" value="(#t\d+)"/.exec(ls)?.[1] ?? "";
     // saved: back to its dialog, which shows the work under its title
@@ -229,14 +235,16 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     assert.match(saved.at, new RegExp(`^/\\?r=\\d+${back}$`));
     assert.match(saved.page, /data-flash>Saved\.<\/div>/);
     ls = dialog(saved.page, "loading_state");
-    assert.match(ls, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line>Loading state<\/textarea><\/h2>/);
-    assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea><\/div><div class="tk-sec" data-sec="steps"><h3 class="tk-label">Steps<span class="tk-count">2<\/span><\/h3><ol class="tk-steplist" aria-label="Steps" data-ticket-steps><li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step 1" autocomplete="off">Add the spinner<\/textarea><\/li><li class="tk-step"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" aria-label="Step 2" autocomplete="off">Test on 3G<\/textarea><\/li><li class="tk-step tk-step-new"><textarea name="step" class="tk-step-in" rows="1" maxlength="300" placeholder="Add a step…" aria-label="Add a step"/); // one numbered row each, then one to add the next
-    assert.match(ls, /<span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="2" placeholder="Effort" aria-label="Effort" form="tk-\d+"><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-tk-\d+-h" form="tk-\d+" checked>/); // properties, beside: its effort, 2 in hours
+    assert.match(ls, /<p class="tk-id"><span data-ticket-key>TIRA_TASKTREE_DASH_6<\/span> · loading_state<\/p><h2 class="tk-h"><textarea name="title" class="tk-title-in" rows="1" maxlength="120" placeholder="loading_state" aria-label="Title" autocomplete="off" data-one-line data-save-on-leave>Loading state<\/textarea><\/h2>/);
+    assert.match(ls, /<div class="desc-view" data-desc-view tabindex="0" role="button" aria-label="Edit the description"><p>A spinner while metrics load\.<\/p><p>No layout shift\.<\/p><\/div>/); // read as it's meant until it's clicked
+    assert.match(ls, /aria-label="Description" data-ticket-description>A spinner while metrics load\.\n\nNo layout shift\.<\/textarea>/);
+    assert.match(ls, /<div class="tk-sec" data-sec="steps"><h3 class="tk-label">Steps<span class="tk-count">2<\/span><\/h3><ol class="tk-steplist" aria-label="Steps" data-ticket-steps><li class="tk-step"><span class="tk-step-tx">Add the spinner<\/span><\/li><li class="tk-step"><span class="tk-step-tx">Test on 3G<\/span><\/li><\/ol><\/div>/); // steps a script wrote: shown, not edited here
+    assert.match(ls, /<span class="effort" data-effort><input type="number" name="estimate_n" min="0" max="999" step="0.5" inputmode="decimal" value="2" placeholder="Effort" aria-label="Effort" form="tk-\d+" data-save-on-change><span class="effort-u" role="radiogroup" aria-label="Unit"><input type="radio" name="estimate_u" value="h" id="effort-tk-\d+-h" form="tk-\d+" data-save-on-change checked>/); // properties, beside: its effort, 2 in hours
     assert.match(ls, /<option value="isha" selected>isha<\/option>/); // the form holds what's saved
     // its parent's row for it: its title (and id), estimate and who; the parent adds the estimates up
     const parent = dialog(saved.page, "improve_visual");
     assert.match(parent, /data-subtask="node:loading_state"><span class="sub-ico s-in_progress" aria-hidden="true"><\/span><span class="sub-name">Loading state<small>loading_state<\/small><\/span><span class="sub-est">2h<\/span><span class="who" title="isha" aria-label="Assigned to isha">IS<\/span><span class="state s-in_progress">/);
-    assert.match(parent, /value="" placeholder="Effort" aria-label="Effort" form="tk-\d+"><span class="effort-u"[^]*?<\/span><\/span><small class="dim">2h in subtasks<\/small>/);
+    assert.match(parent, /value="" placeholder="Effort" aria-label="Effort" form="tk-\d+" data-save-on-change><span class="effort-u"[^]*?<\/span><\/span><small class="dim">2h in subtasks<\/small>/);
     await post("/tickets", { task: "font", back, estimate: "1.5d" }); // a day is 8 hours
     assert.match(dialog((await s.http("GET", "/")).body, "improve_visual"), /<small class="dim">1d 6h in subtasks<\/small>/);
     // what a ticket can't say, and nothing written
@@ -256,15 +264,15 @@ test("a ticket is edited where it shows: its title, description, steps, estimate
     // the page sends its steps one to a row: kept in order, an empty row (the one to add) dropped
     await s.http("POST", "/tickets", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: new URLSearchParams([["token", "t0k3n"], ["task", "font"], ["back", back], ["step", "Pick the face"], ["step", "  Check   the weights "], ["step", ""]]).toString() });
     assert.deepEqual((await import("../src/fold/tickets.ts")).ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("font")?.steps, ["Pick the face", "Check the weights"]);
-    // a second save is the whole ticket again, its next version
+    // a second save is the whole ticket again, its next version; the page sends no steps, so they stay
     await post("/tickets", { task: "loading_state", back, title: "Loading state v2" });
     const { ticketsOf } = await import("../src/fold/tickets.ts");
-    assert.deepEqual(ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("loading_state"), { version: 2, title: "Loading state v2", steps: [], by: "isha" });
+    assert.deepEqual(ticketsOf(fold(await s.store.readStream(S), s.registry), S).get("loading_state"), { version: 2, title: "Loading state v2", steps: ["Add the spinner", "Test on 3G"], by: "isha" });
     // a comment: feedback on the ticket, as the person writing it
     const commented = await flashOf(await post("/comments", { task: "loading_state", back, text: "Check the dark theme too." }));
     assert.match(commented.page, /data-flash>Comment added\./);
     assert.match(dialog(commented.page, "loading_state"), /<label for="act-\d+-c">Comments <span class="k">1<\/span><\/label>[^]*?<div class="comments" data-comments><ol class="cm-list"><li class="cm" data-comment><span class="cm-av" aria-hidden="true">IS<\/span><div class="cm-card"><div class="cm-h"><b>isha<\/b><span class="ev-seq">[^<]*<\/span><\/div><div class="cm-body"><p>Check the dark theme too\.<\/p><\/div><\/div><\/li><\/ol>/); // a thread: their mark, then who, when and what
-    assert.match((await flashOf(await post("/comments", { task: "loading_state", back, text: "   " }))).page, /data-flash>A comment is 1 to 2000 characters\./);
+    assert.match((await flashOf(await post("/comments", { task: "loading_state", back, text: "   " }))).page, /data-flash>A comment is 1 to 2000 characters, or a file\./);
     assert.equal((await s.http("POST", "/comments", { headers: { "content-type": "application/x-www-form-urlencoded", origin: `http://127.0.0.1:${s.port}` }, body: "task=loading_state&text=hi" })).status, 403); // no token
     // a comment sent with a move: on the ticket, once the move is written
     const sha = await s.commit("loading_state");
@@ -548,6 +556,7 @@ test("In progress → Done asks for the proof of work: a commit or pull request 
     const post = (ref: string) => s.form({ token: "t0k3n", type: "node", id: "loading_state", event: "COMPLETE", proofRef: ref, dialog: "1", fragment: "1" });
     const wrong = await post("spinner.mp4");
     assert.equal(wrong.status, 422);
+    assert.equal((await post("https://example.com/spinner")).status, 422); // code: a link alone isn't its proof (Isha, 2026-10-26)
     assert.match(wrong.body, /data-error>No GitHub repo linked to this project\. Nothing was written\./); // anything else is checked on GitHub: here, there's no repo to check
     const ok = await post(sha);
     assert.match(ok.body, /^<div data-go="\/\?r=\d+"><\/div>$/);

@@ -52,6 +52,7 @@ export interface McpHttp {
   stillIn?: (agent: AgentToken) => Promise<boolean>
   commitsFor?: (agent: AgentToken, task: string) => Promise<string | undefined>
   proofFor?: (agent: AgentToken, task: string, ref: string) => Promise<{ ref: string } | { why: string }>
+  reviewFor?: (agent: AgentToken, task: string, proof: string) => Promise<{ go: true; note: string } | { go: false; text: string }>
 }
 export type McpRoute = ((req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>) & { close: () => Promise<void> };
 
@@ -59,11 +60,12 @@ export function mcpRoute(o: McpHttp): McpRoute {
   const handler = createMcpHandler((ctx) => {
     const agent = ctx.authInfo?.extra?.agent as AgentToken | undefined;
     if (!agent) throw new Error("tira: an MCP request reached the server without its agent");
-    const { commitsFor, proofFor } = o;
+    const { commitsFor, proofFor, reviewFor } = o;
     return tiraMcpServer({
       store: o.store, registry: o.registry, stream: agent.project, actor: agent.agent,
       ...(commitsFor ? { fetchCommits: (task: string) => commitsFor(agent, task) } : {}),
       ...(proofFor ? { proveWith: (task: string, ref: string) => proofFor(agent, task, ref) } : {}),
+      ...(reviewFor ? { reviewFirst: (task: string, proof: string) => reviewFor(agent, task, proof) } : {}),
     });
   }, { maxRequestBodySize: MAX_BODY });
   const route = async (req: IncomingMessage, res: ServerResponse, url: URL) => {

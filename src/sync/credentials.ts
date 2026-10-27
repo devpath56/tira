@@ -29,9 +29,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isPostgresUrl, liveDatabase } from "../store/open.ts";
-import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type Note, type ProjectPeople, type Wake, type WakeRun } from "./accounts-pg.ts";
+import { BROWSER_SESSION_HOURS, PostgresAccounts, SESSION_DAYS, type Access, type Accounts, type AppKeys, type AtlassianAuth, type GitHubAuth, type Invite, type Note, type ProjectPeople, type StoredFile, type Wake, type WakeRun } from "./accounts-pg.ts";
 
-export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, Note, ProjectPeople, Wake, WakeRun } from "./accounts-pg.ts";
+export type { Access, AppKeys, AtlassianAuth, GitHubAuth, Invite, Note, ProjectPeople, StoredFile, Wake, WakeRun } from "./accounts-pg.ts";
 export { AccountsRefused } from "./accounts-pg.ts";
 export interface JiraLogin { email: string; token: string }
 
@@ -239,6 +239,30 @@ export async function saveWakeRun(r: Omit<WakeRun, "at">, env: Env = process.env
   if (pg) return pg.saveWakeRun(r);
   const same3 = (x: WakeRun) => x.stream === r.stream && x.task === r.task && x.agent === r.agent;
   update(env, (s) => { s.wakeRuns = [...(s.wakeRuns ?? []).filter((x) => !same3(x)), { ...r, at: new Date().toISOString() }]; });
+}
+
+// Files people added to tasks (src/fold/files.ts): in Postgres when the accounts are, else one file
+// each in this computer's files folder (its name the id, beside it what it is), readable by its owner only.
+const filesDir = (env: Env) => join(tiraHome(env), "files");
+export async function saveFile(f: StoredFile, env: Env = process.env): Promise<void> {
+  const pg = postgresAccounts(env);
+  if (pg) return pg.saveFile(f);
+  const dir = filesDir(env);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const { bytes, ...about } = f;
+  writeFileSync(join(dir, f.id), bytes, { mode: 0o600 });
+  writeFileSync(join(dir, `${f.id}.json`), JSON.stringify(about), { mode: 0o600 });
+}
+export async function fileOf(id: string, env: Env = process.env): Promise<StoredFile | undefined> {
+  if (!/^[0-9a-f]{24}$/.test(id)) return undefined; // only ever a name tira made
+  const pg = postgresAccounts(env);
+  if (pg) return pg.fileOf(id);
+  try {
+    const about = JSON.parse(readFileSync(join(filesDir(env), `${id}.json`), "utf8")) as Omit<StoredFile, "bytes">;
+    return { ...about, bytes: readFileSync(join(filesDir(env), id)) };
+  } catch {
+    return undefined; // no such file
+  }
 }
 
 // Notes to whoever invited someone (Isha, 2026-10-26): "devansh accepted your invite to X", or

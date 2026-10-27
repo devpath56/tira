@@ -9,6 +9,7 @@ import "./theme.mjs";
 import { graph } from "./graph.mjs";
 import { fx, tint } from "./layout.mjs";
 import { wireDrag } from "./drag.mjs";
+import "./ticket.mjs";
 
 const VERB_LABEL = { START: "Start", UNBLOCK: "Unblock", COMPLETE: "Complete", BLOCK: "Block" };
 
@@ -123,14 +124,9 @@ document.addEventListener("keydown", (e) => {
 // Running it posts from here: a value missing or a moved log comes back into the dialog;
 // otherwise the page comes back with the result. Esc or a click outside closes it. If the
 // packet can't be fetched, the confirm page opens instead.
-// A ticket is edited where it shows: its Save appears once something in it changes (a field beside it,
-// its assignee or estimate, counts too: it belongs to the same form). Cmd/Ctrl+Enter in a ticket's or
-// a comment's text sends it.
+// A ticket is edited where it shows (ticket.mjs): its description has its own Save, its title and the
+// fields beside it save themselves. Cmd/Ctrl+Enter in a ticket's or a comment's text sends it.
 document.documentElement.classList.add("js");
-document.addEventListener("input", (e) => {
-  const form = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ? e.target.form : null;
-  if (form?.matches("[data-ticket-form]")) form.dataset.dirty = "1";
-});
 // @mentions: typing @ in a ticket's words or a comment lists the project's people and agents (the
 // page's data-people and data-agents, src/render/html.ts) whose names start with what follows it.
 // Arrows move, Enter or Tab picks, Escape closes; a click picks too. The name goes in as @name.
@@ -223,82 +219,15 @@ document.addEventListener("keydown", (e) => {
   field.form?.requestSubmit();
 });
 // A ticket's title is one line that wraps: Enter saves it, and a pasted line break becomes a space.
-// Its steps are one to a row: Enter starts a new row under this one, Backspace in an empty row
-// removes it (back to the row above), arrows move between rows. The rows renumber themselves (CSS).
-const stepRow = (after) => {
-  const li = document.createElement("li");
-  li.className = "tk-step";
-  const input = document.createElement("textarea");
-  Object.assign(input, { name: "step", className: "tk-step-in", rows: 1, maxLength: 300, autocomplete: "off" });
-  input.setAttribute("aria-label", "Step");
-  li.append(input);
-  after.after(li);
-  return input;
-};
-// the last row is the one that adds: once it says something it's a step, and a new last row waits
-// under it (that new row's field comes back)
-const keepAsStep = (row, field) => {
-  row.classList.remove("tk-step-new");
-  field.setAttribute("aria-label", "Step");
-  const next = stepRow(row);
-  next.closest(".tk-step")?.classList.add("tk-step-new");
-  next.placeholder = "Add a step…";
-  next.setAttribute("aria-label", "Add a step");
-  return next;
-};
-const stepEnter = (e, field, row) => {
-  e.preventDefault();
-  if (field.value.trim() === "") return;
-  (row.classList.contains("tk-step-new") ? keepAsStep(row, field) : stepRow(row)).focus();
-  field.form?.setAttribute("data-dirty", "1");
-};
-const stepBackspace = (e, field, row) => {
-  if (field.value !== "" || row.classList.contains("tk-step-new")) return;
-  e.preventDefault();
-  const back = row.previousElementSibling?.querySelector("textarea") ?? row.nextElementSibling?.querySelector("textarea");
-  row.remove();
-  back?.focus();
-  field.form?.setAttribute("data-dirty", "1");
-};
-const stepArrow = (e, field, row) => {
-  const up = e.key === "ArrowUp";
-  if (up ? field.selectionStart !== 0 : field.selectionEnd !== field.value.length) return; // inside the words: the caret moves
-  const to = (up ? row.previousElementSibling : row.nextElementSibling)?.querySelector("textarea");
-  if (!to) return;
-  e.preventDefault();
-  to.focus();
-};
-const STEP_KEYS = { Enter: stepEnter, Backspace: stepBackspace, ArrowUp: stepArrow, ArrowDown: stepArrow };
 document.addEventListener("keydown", (e) => {
   const field = e.target;
-  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || !(field instanceof HTMLTextAreaElement)) return;
-  if (field.matches("[data-one-line]")) {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    field.form?.requestSubmit();
-    return;
-  }
-  const row = field.matches(".tk-step-in") ? field.closest(".tk-step") : null;
-  if (row) STEP_KEYS[e.key]?.(e, field, row);
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || !(field instanceof HTMLTextAreaElement) || !field.matches("[data-one-line]") || e.key !== "Enter") return;
+  e.preventDefault();
+  field.form?.requestSubmit();
 });
-// several lines pasted: into the title, one line; into a step, that many steps, each its own row
-const linesOf = (text) => text.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "");
 document.addEventListener("input", (e) => {
   const field = e.target;
-  if (!(field instanceof HTMLTextAreaElement) || !field.value.includes("\n")) return;
-  if (field.matches("[data-one-line]")) field.value = linesOf(field.value).join(" ");
-  else if (field.matches(".tk-step-in")) {
-    const [first = "", ...rest] = linesOf(field.value);
-    field.value = first;
-    let row = field.closest(".tk-step");
-    if (row?.classList.contains("tk-step-new") && first !== "") keepAsStep(row, field);
-    for (const line of rest) {
-      if (!row) break;
-      const next = stepRow(row);
-      next.value = line;
-      row = next.closest(".tk-step");
-    }
-  }
+  if (field instanceof HTMLTextAreaElement && field.matches("[data-one-line]") && field.value.includes("\n")) field.value = field.value.split(/\r?\n/).map((x) => x.trim()).filter((x) => x !== "").join(" ");
 });
 // where a browser can't grow a text box to its words by itself, it grows as you type
 if (!CSS.supports("field-sizing", "content")) {
@@ -307,12 +236,12 @@ if (!CSS.supports("field-sizing", "content")) {
     t.style.height = `${t.scrollHeight + 2}px`;
   };
   document.addEventListener("input", (e) => {
-    if (e.target instanceof HTMLTextAreaElement && e.target.matches(".tk-title-in, .tk-in, .tk-step-in")) grow(e.target);
+    if (e.target instanceof HTMLTextAreaElement && e.target.matches(".tk-title-in, .tk-in")) grow(e.target);
   });
   addEventListener("hashchange", () => {
-    for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+    for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in")) grow(t);
   });
-  for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in, .drawer:target .tk-step-in")) grow(t);
+  for (const t of document.querySelectorAll(".drawer:target .tk-title-in, .drawer:target .tk-in")) grow(t);
 }
 
 const confirmBox = document.createElement("dialog");
@@ -654,6 +583,13 @@ if (liveMain) {
       || document.querySelector("dialog[open]") !== null;
   };
   let latest = 0;
+  // your own saves in a dialog (ticket.mjs): the board catches up when it closes, and they aren't
+  // flagged as someone else's changes
+  let mine = 0;
+  addEventListener("tira:saved", (e) => {
+    mine = Math.max(mine, Number(e.detail?.seq) || 0);
+    waiting = true;
+  });
   const reload = () => {
     const states = Object.fromEntries([...document.querySelectorAll(".card[data-card-key]")].map((c) => [c.dataset.cardKey, c.dataset.state]));
     try {
@@ -674,7 +610,7 @@ if (liveMain) {
       if (at > seen && at > triedFor) {
         if (busy()) {
           waiting = true;
-          flagNew();
+          if (at > mine) flagNew();
         } else reload();
       }
     } catch {

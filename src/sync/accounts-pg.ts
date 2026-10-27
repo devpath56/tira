@@ -61,6 +61,8 @@ export interface Note { to: string; stream: string; who: string; did: "accepted"
 export interface Wake { stream: string; agent: string; url: string; token: string; by: string; at: string }
 // the last time an agent was started on a task: its session, to watch (one per task and agent)
 export interface WakeRun { stream: string; task: string; agent: string; session: string; by: string; at: string }
+// a file someone added to a task (src/fold/files.ts): kept apart from the snapshot, read one at a time
+export interface StoredFile { id: string; stream: string; task: string; name: string; type: string; size: number; by: string; bytes: Buffer }
 
 // what the accounts hold, as credentials.ts reads it
 export interface Accounts {
@@ -119,7 +121,7 @@ export function sealer(secret: string | undefined): Sealer {
 }
 
 // ---------- the tables ----------
-const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen", "account_invites", "account_notes", "account_wakes", "account_wake_runs"];
+const TABLES = ["account_apps", "account_access", "account_github", "account_atlassian", "account_names", "account_sessions", "account_emails", "account_blocked", "account_projects", "account_seen", "account_invites", "account_notes", "account_wakes", "account_wake_runs", "account_files"];
 const ddl = (s: string) => `
 CREATE SCHEMA IF NOT EXISTS ${s};
 CREATE TABLE IF NOT EXISTS ${s}.account_apps (
@@ -157,6 +159,10 @@ CREATE TABLE IF NOT EXISTS ${s}.account_wakes (
 CREATE TABLE IF NOT EXISTS ${s}.account_wake_runs (
   stream TEXT NOT NULL, task TEXT NOT NULL, agent TEXT NOT NULL, session TEXT NOT NULL, by_login TEXT NOT NULL,
   at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (stream, task, agent)
+);
+CREATE TABLE IF NOT EXISTS ${s}.account_files (
+  id TEXT PRIMARY KEY, stream TEXT NOT NULL, task TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL,
+  bytes BYTEA NOT NULL, by_login TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS ${s}.account_notes (
   to_login TEXT NOT NULL, stream TEXT NOT NULL, who TEXT NOT NULL, did TEXT NOT NULL CHECK (did IN ('accepted', 'declined')),
@@ -402,6 +408,18 @@ export class PostgresAccounts {
     const s = this.schema;
     await this.write(`INSERT INTO ${s}.account_wake_runs (stream, task, agent, session, by_login) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (stream, task, agent) DO UPDATE SET session = $4, by_login = $5, at = now()`, [r.stream, r.task, r.agent, r.session, r.by]);
+  }
+
+  // files: written and read one at a time, never in the snapshot (they're the only big rows)
+  async saveFile(f: StoredFile): Promise<void> {
+    await this.ready();
+    await this.pool.query(`INSERT INTO ${this.schema}.account_files (id, stream, task, name, type, size, bytes, by_login) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [f.id, f.stream, f.task, f.name, f.type, f.size, f.bytes, f.by]);
+  }
+  async fileOf(id: string): Promise<StoredFile | undefined> {
+    await this.ready();
+    const r = await this.pool.query<{ id: string; stream: string; task: string; name: string; type: string; size: number; by_login: string; bytes: Buffer }>(`SELECT id, stream, task, name, type, size, by_login, bytes FROM ${this.schema}.account_files WHERE id = $1`, [id]);
+    const row = r.rows[0];
+    return row ? { id: row.id, stream: row.stream, task: row.task, name: row.name, type: row.type, size: row.size, by: row.by_login, bytes: row.bytes } : undefined;
   }
 
   // logins in any case are one person: the note before (in whatever case) goes, the new one comes in
