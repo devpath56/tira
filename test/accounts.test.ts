@@ -341,6 +341,18 @@ if (!url) {
       await other.dropNote("ISHA-GH", "factory", "zed");
       await sealed.refresh();
       assert.deepEqual(sealed.snapshot().notes, []);
+      // an agent's routine (Isha, 2026-10-26): its token sealed, opened again on the other computer;
+      // and the last start of it on a task
+      await sealed.saveWake({ stream: "factory", agent: "claude", url: "https://api.anthropic.com/v1/claude_code/routines/trig_01ABCdef/fire", token: "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz", by: "isha-gh" });
+      await other.refresh();
+      assert.deepEqual(other.snapshot().wakes?.map((w) => [w.agent, w.token, w.by]), [["claude", "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz", "isha-gh"]]);
+      await other.saveWakeRun({ stream: "factory", task: "a", agent: "claude", session: "https://claude.ai/code/session_1", by: "isha-gh" });
+      await other.saveWakeRun({ stream: "factory", task: "a", agent: "claude", session: "https://claude.ai/code/session_2", by: "isha-gh" });
+      await sealed.refresh();
+      assert.deepEqual(sealed.snapshot().wakeRuns?.map((r) => r.session), ["https://claude.ai/code/session_2"]); // the last one
+      await sealed.dropWake("factory", "claude");
+      await other.refresh();
+      assert.deepEqual(other.snapshot().wakes, []);
       await other.close();
       await sealed.close();
       assert.match((await a.http("GET", "/integrations", undefined, cookie)).body, /<div class="grp-row team-row" data-team-member><span class="av t\d" aria-hidden="true">Z<\/span><span class="grp-k">zed(?:<small class="grp-sub">[^<]*<\/small>)?<\/span>/);

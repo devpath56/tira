@@ -827,7 +827,7 @@ const MUTANTS: Mutant[] = [
   { name: "drag: a move two verbs could mean picks one", file: "src/serve/command.ts", find: "event !== undefined && more.length === 0 ?", replace: "event !== undefined ?" },
   { name: "drag: the rendered file carries the moves", file: "src/render/html.ts", find: "boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves)", replace: "boardView(nodes, trail, links, ghosts, changed, ext, opts.live?.moves ?? {})" },
   { name: "drag: columns don't say their state", file: "src/render/html.ts", find: "const colAttr = moves ? ` data-col=\"${s}\"` : \"\";", replace: "const colAttr = \"\";" },
-  { name: "drag: the live board gets no moves", file: "src/serve/server.ts", find: "...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create };", replace: "...(name ? { name } : {}), token, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create };" },
+  { name: "drag: the live board gets no moves", file: "src/serve/server.ts", find: "...(name ? { name } : {}), token, moves, people, agents,", replace: "...(name ? { name } : {}), token, people, agents," },
   { name: "drag: the script isn't served", file: "src/serve/server.ts", find: "  \"/drag.mjs\": readFileSync(new URL(\"./drag.mjs\", import.meta.url), \"utf8\"),\n", replace: "" },
   { name: "drag: every drop opens a dialog", file: "src/serve/app.mjs", find: "void (now ? runNow(href) : openConfirm(href));", replace: "void openConfirm(href);" },
   { name: "drag: a Start tira would refuse is posted anyway", file: "src/serve/app.mjs", find: "    if (packet.dataset.ok !== \"true\") return show(packet);\n", replace: "" },
@@ -1005,6 +1005,14 @@ const MUTANTS: Mutant[] = [
   { name: "dialog: the empty Parent row comes back", file: "src/render/html.ts", find: "(n.parent ? propHtml(\"Parent\", parentHtml(n, ctx), \" data-parent\") : \"\")", replace: "propHtml(\"Parent\", parentHtml(n, ctx), \" data-parent\")" },
   { name: "dialog: estimates to the tenth of an hour", file: "src/render/html.ts", find: "const rest = Math.round((h - days * 8) * 2) / 2; // to the half hour", replace: "const rest = Math.round((h - days * 8) * 10) / 10;" },
   { name: "dialog: Block alone looks like the main move", file: "src/render/html.ts", find: "actLink(r, ev, label, ctx.q, MAIN_MOVES.has(ev))", replace: "actLink(r, ev, label, ctx.q, true)" },
+  { name: "wake: an address that isn't Anthropic's is called", file: "src/serve/wake.ts", find: "  if (!ROUTINE_URL.test(url)) return { ok: false, why: \"its address isn't a routine's\" };\n", replace: "" },
+  { name: "wake: started again moments later", file: "src/serve/wake.ts", find: "    if (was !== undefined && t - was < AGAIN_AFTER_MS) return false;\n", replace: "" },
+  { name: "wake: any address is kept as a routine", file: "src/serve/wake.ts", find: "  if (!ROUTINE_URL.test(url)) return \"That isn't a routine's API address", replace: "  if (false) return \"That isn't a routine's API address" },
+  { name: "wake: the session isn't kept on the task", file: "src/serve/server.ts", find: "      if (got.ok) await saveWakeRun({ stream, task, agent: w.agent, session: got.session, by }, linkEnv);\n", replace: "" },
+  { name: "wake: an @mention starts nothing", file: "src/serve/server.ts", find: "    const woke = await wake(ws.stream, task, mentionsIn(words), actor, \"mentioned\", words);", replace: "    const woke = \"\";" },
+  { name: "wake: giving a task starts nothing", file: "src/serve/server.ts", find: "? await wake(ws.stream, task, [asked.assignee], actor, \"assigned\") : \"\";", replace: ": \"\";" },
+  { name: "wake: turned off, it still starts", file: "src/serve/integrations.ts", find: "      await dropWake(c.stream, agent, env);\n", replace: "" },
+  { name: "wake: the run doesn't say who asked", file: "src/serve/wake.ts", find: "const what = a.why === \"mentioned\" ? `${a.by} mentioned you", replace: "const what = a.why === \"mentioned\" ? `someone mentioned you" },
   { name: "keys: C on a Graph task opens Create with no parent", file: "src/serve/keys.mjs", find: "    if (under instanceof HTMLElement && under.matches(\"[data-create-under]\")) under.click();\n    else location.hash = \"create\";", replace: "    location.hash = \"create\";" },
   { name: "create: a Graph task's + doesn't fill in the parent", file: "src/serve/create.mjs", find: "      parentIs(add.dataset.createUnder ?? \"\");", replace: "      parentIs(\"\");" },
   { name: "keys: they act while you type", file: "src/serve/keys.mjs", find: " || typing(e.target)) return;", replace: ") return;" },
@@ -1150,7 +1158,8 @@ const MUTANTS: Mutant[] = [
   { name: "agents: Claude Code's command carries no token", file: "src/mcp/connect.ts", find: " --header ${sh(\"Authorization: \" + bearer)} && claude mcp list`,", replace: " && claude mcp list`," },
   { name: "agents: Claude Code's command doesn't check the connection", file: "src/mcp/connect.ts", find: " && claude mcp list`,", replace: "`," },
   { name: "agents: Claude Code's command doesn't replace an older entry", file: "src/mcp/connect.ts", find: "code: `claude mcp remove ${name} -s user 2>/dev/null; claude mcp add", replace: "code: `claude mcp add" },
-  { name: "agents: Claude Code isn't first", file: "src/serve/integrations.ts", find: "  const chooser = (at: Where, t: string) => codeCard(at, t)\n    + ", replace: "  const chooser = (at: Where, t: string) => \"\"\n    + " },
+  { name: "agents: Claude Code isn't first", file: "src/serve/integrations.ts", find: "  const chooser = (at: Where, t: string, rows: readonly AgentToken[]) => codeCard(at, t) + wakeCard(rows, t)\n    + ", replace: "  const chooser = (at: Where, t: string, rows: readonly AgentToken[]) => wakeCard(rows, t)\n    + " },
+  { name: "agents: starting on @mention isn't in the main flow", file: "src/serve/integrations.ts", find: "  const chooser = (at: Where, t: string, rows: readonly AgentToken[]) => codeCard(at, t) + wakeCard(rows, t)\n    + ", replace: "  const chooser = (at: Where, t: string, rows: readonly AgentToken[]) => codeCard(at, t)\n    + " },
   { name: "agents: Claude Desktop's entry offered at a public address", file: "src/serve/integrations.ts", find: "    + (c.site ? \"\" : `<details class=\"agent-term\" data-agent-desktop>", replace: "    + (false ? \"\" : `<details class=\"agent-term\" data-agent-desktop>" },
   { name: "agents: Cursor's config carries no token", file: "src/mcp/connect.ts", find: "    const server = { url: at.url, headers };", replace: "    const server = { url: at.url };" },
   { name: "agents: VS Code's config starts a program", file: "src/mcp/connect.ts", find: "const entry = { type: \"http\", url: at.url, headers };", replace: "const entry = { type: \"stdio\", url: at.url, headers };" },
@@ -1190,7 +1199,7 @@ function scratchCopy(): string {
   return dir;
 }
 
-const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync", "accounts", "mcp", "hosted", "team"];
+const SUITES = ["store", "runner", "registry", "write-path", "fold", "stack", "cli", "tree", "machine", "render", "factory", "scenarios", "region-scan", "sweep", "serve", "docs", "eras", "fixture-b3", "divergence", "layout", "decision", "labels", "ideas", "sync", "accounts", "mcp", "hosted", "team", "wake"];
 // a planted bug can make a test loop forever: a test file that doesn't finish in a minute failed
 const SUITE_TIMEOUT = 60_000;
 const CATCHERS = join(ROOT, ".mutant-catchers.json");

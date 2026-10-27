@@ -38,10 +38,11 @@ import { compareCodeUnits, makeView } from "../fold/view.ts";
 import { linksOf, workspaceOf } from "../fold/workspace.ts";
 import { JIRA_PROJECT, REPO, TITLE, WORKSPACE, WORKSPACE_ID } from "../tables/links.ts";
 import { ASSIGNEE, COMMENT, MAX_COMMENT, NO_CONTROL, saysSame, TICKET, ticketPayload, ticketWordsProblem, type TicketWords } from "../tables/tickets.ts";
-import { commitsOf, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { commitsOf, mentionsIn, ticketKeys, ticketsOf, type Ticket } from "../fold/tickets.ts";
+import { fireRoutine, WakeGate, wakeText, type Asked as WakeAsked } from "./wake.ts";
 import { lookedSaid, lookForCommits, proofSaid, proveWith } from "../sync/commits.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, notesFor, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
+import { appKeys, atlassianAuth, displayName, emailOf, githubAuth, hasSeen, importAccountsFile, invitesNow, notesFor, saveWakeRun, wakeRunsOf, wakesOf, isBlocked, markSeen, postgresAccounts, refreshAccounts, same, saveProject, sessionLogin } from "../sync/credentials.ts";
 import { letterPop } from "./invites.ts";
 import { checklistHtml, provenIn, tourHtml } from "./onboarding.ts";
 import { projectName } from "../sync/jira.ts";
@@ -751,7 +752,7 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const { people, agents } = await assignees(ws.stream, me.actor);
     const onboarding = me.login ? welcomeFor(me.login, name ?? githubAuth(me.login, linkEnv)?.name ?? me.login, ws, r, events, { repo: !!link?.repo, agent: agents.length > 0, team: people.length > 1 }) : undefined;
     const inbox = me.login ? await inboxFor(me.login) : undefined;
-    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create };
+    const live = { ...(flash ? { flash } : {}), ...(ws.q === "" ? {} : { query: ws.q }), ...(me.actor ? { actor: me.actor } : {}), ...(me.login ? { user: me.login } : {}), ...(name ? { name } : {}), token, moves, people, agents, ...(onboarding ? { onboarding } : {}), ...(inbox ? { inbox } : {}), create, runs: wakeRunsOf(ws.stream, linkEnv) };
     send(res, 200, html, renderHtml(r, ws.stream, hash, events, { live, ...(divergence !== undefined ? { divergence } : {}) }));
   };
 
@@ -1081,7 +1082,31 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (saysSame(before, payload)) return said({ ok: true, text: "Nothing changed." });
     const w = (await dispatcher.submit({ stream: ws.stream, kind: "create", entity: { type: TICKET, id: task, version: (before?.version ?? 0) + 1 }, actor, payload })).result;
     if (w.status !== "appended") return said({ ok: false, text: `The ticket wasn't saved (${w.status === "rejected" || w.status === "refused" ? w.detail : w.status}).` });
-    said({ ok: true, text: "Saved." }, task);
+    // given to an agent that starts when it's asked: it starts on it
+    const given = asked.assignee !== "" && asked.assignee !== before?.assignee ? await wake(ws.stream, task, [asked.assignee], actor, "assigned") : "";
+    said({ ok: true, text: `Saved.${given}` }, task);
+  };
+
+  // Agents that start when they're @mentioned or given a task (wake.ts; Isha, 2026-10-26): each
+  // named agent with a routine (never the one writing), once per task within a few minutes. What
+  // came of it, in words for the page's result ("" when no one was to start).
+  const wakeGate = new WakeGate();
+  const wake = async (stream: string, task: string, names: readonly string[], by: string, why: WakeAsked["why"], words?: string): Promise<string> => {
+    const routines = wakesOf(stream, linkEnv).filter((w) => names.includes(w.agent) && w.agent !== by);
+    if (routines.length === 0) return "";
+    const { r } = await now(stream);
+    const key = ticketKeys(r, stream).get(task) ?? task;
+    const title = ticketsOf(r, stream).get(task)?.title ?? task;
+    const project = workspaceOf(r, stream)?.title ?? stream;
+    const fire = opts.links?.fireRoutine ?? fireRoutine;
+    const said: string[] = [];
+    for (const w of routines) {
+      if (!wakeGate.open(stream, task, w.agent)) continue; // already started on it moments ago
+      const got = await fire(w.url, w.token, wakeText({ agent: w.agent, by, key, title, project, why, ...(words ? { words } : {}) }));
+      if (got.ok) await saveWakeRun({ stream, task, agent: w.agent, session: got.session, by }, linkEnv);
+      said.push(got.ok ? ` ${w.agent} is starting on it.` : ` ${w.agent} didn't start: ${got.why}.`);
+    }
+    return said.join("");
   };
 
   // POST /comments: a comment on a ticket (feedback its agent reads), written as the person commenting.
@@ -1097,7 +1122,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     if (words === "" || words.length > MAX_COMMENT || !NO_CONTROL.test(words)) return said({ ok: false, text: `A comment is 1 to ${MAX_COMMENT} characters.` });
     const w = await writeComment(ws.stream, task, words, actor);
     if (w !== undefined) return said({ ok: false, text: `The comment wasn't added (${w}).` });
-    said({ ok: true, text: "Comment added." }, task);
+    const woke = await wake(ws.stream, task, mentionsIn(words), actor, "mentioned", words);
+    said({ ok: true, text: `Comment added.${woke}` }, task);
   };
   // a comment on a task, as `actor`: undefined when it was written, else why not
   const writeComment = async (stream: string, task: string, words: string, actor: string): Promise<string | undefined> => {
@@ -1128,7 +1154,8 @@ export function tiraServer(opts: ServeOptions): Server & { token: string } {
     const comment = (a.values?.comment ?? "").replaceAll("\r\n", "\n").trim();
     if (flash.ok && comment !== "" && ask.type !== IDEA) {
       const why = await writeComment(ws.stream, ask.id, comment, actor);
-      flash = { ...flash, text: why === undefined ? `${flash.text} Comment added.` : `${flash.text} The comment wasn't added (${why}).` };
+      const woke = why === undefined ? await wake(ws.stream, ask.id, mentionsIn(comment), actor, "mentioned", comment) : "";
+      flash = { ...flash, text: why === undefined ? `${flash.text} Comment added.${woke}` : `${flash.text} The comment wasn't added (${why}).` };
     }
     const key = flashKey();
     flashes.set(key, flash.ok ? { ...flash, changed: changedBy(ask, ticket) } : flash);

@@ -115,6 +115,22 @@ Project settings (the project's mark and name at the top), in this order:
   (`http://127.0.0.1:<port>/mcp`), each app by hand with `<your token>`, what agents can do, and
   whether Claude Desktop's agent would reach this tira's database (tira's own `.env`, compared,
   never shown). Only each token's fingerprint is kept; a revoked agent's next call is refused.
+  **Let it start when you @mention it** (Isha, 2026-10-26: "it shouldn't be like I go and inform
+  Claude Code"; "add it to the main flow, the animation if the user wants to do this, then steps"),
+  in the main flow right under Claude Code, marked Optional: one line on what it does, and **Set it
+  up**, which opens five steps played as Claude's are (open claude.ai/code/routines; pick the
+  repository and tira as its connector; paste the prompt, shown below to copy; add an API trigger and
+  generate its token; paste both here), starting from the first each time it opens, then which agent
+  (the connected one picked), the routine's address and its token. Which agents start this way shows
+  on the card, and on each one's row, with **Stop starting on @mention**, for whoever connected it or
+  the project's admins. With no agent connected yet, it says to connect Claude first; on this
+  computer, that the routine needs tira at a public address. From
+  then on, a person's comment that @mentions the agent, or giving it a task, starts the routine once
+  with what was asked (who, which task, their words, how to answer through tira); it runs in
+  Anthropic's cloud on the person's Claude plan, and the page says "claude is starting on it". The
+  same agent isn't started on the same task again within two minutes (the run going reads new
+  comments itself). Only Anthropic's routine address is accepted or called; the token is sealed with
+  tira's key and never shown again; **Stop starting on @mention** forgets it (`src/serve/wake.ts`, `test/wake.test.ts`).
 - **Danger zone**, last, as GitHub keeps it: type the project's name to confirm, then **Delete this project**. It leaves
   the project list and its board closes, for everyone; tira never erases, so its history stays in
   the log (a new version of its link, marked deleted). The project tira opens on (the one tira
@@ -132,6 +148,7 @@ most), so it can't sign anyone in.
 
 ## Devtool hook
 
+- `[data-agent-wake-card]` on Let it start when you @mention it, `[data-wake-setup]` on its Set it up (the steps, the prompt and the form inside).
 - `.set-group` on each group's label in the list, `.set-dot` on a linked one's dot, `.set-count` on Agents' count; `.grp-top` on each section's header, `.grp-icon` on its tile; `.team-row` on each collaborator, `.team-del` on Remove, `.live` (`on` while active) on an agent's status.
 - `[data-settings]` on both pages; `[data-int]` on each group (`profile`, `linked`, `appearance`, `setup`, `accounts` in Account settings; `general`, `team`, `github`, `jira`, `sync`, `agents`, `delete` in Project settings), each with that id for the nav's links; `[data-default]` on the section shown when the address names none; `aria-current="page"` on the nav link of the one shown (`sections.mjs`); `[data-profile-card]` on the profile; `[data-help]` on the Help centre (`details[data-remember]` remembers it open or folded; folded at first), `[data-help-log]` on its conversation, `[data-help-ask]` on the box to type in.
 - `[data-autosave]` on each form that saves as you type (display name, email, the project's name; `autosave.mjs`), `[data-save-state]` on where it says Saving…, Saved, or why not.

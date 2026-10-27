@@ -592,7 +592,7 @@ test("Project settings → Connect agents: Claude Code first (by its command on 
     assert.match(listed, /href="#agents"><svg[^]*?<\/svg>Agents<span class="set-count">1<\/span><\/a>/);
     assert.match(listed, /<div class="grp-row team-row" data-team-agent><span class="av av-agent" aria-hidden="true"><svg[^]*?<\/svg><\/span><span class="grp-k">cursor-agent<small class="grp-sub">Agent · last call just now<\/small><\/span><span class="live on">Active<\/span><\/div>/);
     // connected agents: its app, last used
-    assert.match(await settings(), /<div class="agent-row" data-agent="cursor-agent"><span class="agent-who"><b>cursor-agent<\/b><small>Cursor · tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · last used \d{4}-\d{2}-\d{2}<\/small><\/span><form method="post" action="\/integrations\/agents\/revoke" data-agent-go>/);
+    assert.match(await settings(), /<div class="agent-row" data-agent="cursor-agent"><span class="agent-who"><b>cursor-agent<\/b><small>Cursor · tira_[0-9a-f]{8}… · connected by isha on \d{4}-\d{2}-\d{2} · last used \d{4}-\d{2}-\d{2}<\/small><\/span><span class="agent-acts"><form method="post" action="\/integrations\/agents\/revoke" data-agent-go>/);
     // the name taken: the next one suggested; the same again is refused
     assert.match(await settings("/integrations?app=cursor&from=agents"), /name="name" value="cursor-agent-2"/);
     assert.match(await settings((await http("POST", "/integrations/agents/connect", "token=k&app=cursor&name=cursor-agent")).location ?? ""), /cursor-agent is already connected to this project: revoke it first/);
